@@ -71,8 +71,14 @@ function addDocument(tx: Transaction, source: string): string {
         byteLength: Buffer.byteLength(source),
         parserProfileVersion: 'markdown-tanstack-v1',
         createdAt: now,
+        documentLogicalPath: 'index.md',
+        assets: [],
+        assetScan: 'complete',
       },
     ],
+    assetsRoot: null,
+    extraAssets: [],
+    htmlMode: 'static',
   };
   tx.state.documents[documentId] = record;
   tx.state.openOrder.push(documentId);

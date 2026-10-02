@@ -29,7 +29,7 @@ export interface E2eHome {
   work: string;
   run: (args: string[]) => Promise<CliResult>;
   json: <T>(args: string[]) => Promise<T>;
-  write: (relativePath: string, content: string) => string;
+  write: (relativePath: string, content: string | Buffer) => string;
   // editorの保存と同じく、一時fileへ書いてからrenameで置き換える。
   atomicWrite: (relativePath: string, content: string) => void;
   // 一回限りのticketを含むURL。
@@ -38,7 +38,8 @@ export interface E2eHome {
   cleanup: () => Promise<void>;
 }
 
-export function createE2eHome(): E2eHome {
+// extraEnvは、daemonとCLIへ渡す追加の環境変数（開発用の設定が配布物で無効なことの確認などに使う）。
+export function createE2eHome(extraEnv: Record<string, string> = {}): E2eHome {
   if (!existsSync(cliEntry)) {
     throw new Error('apps/cli/dist/cli.js がありません。先に pnpm build を実行してください。');
   }
@@ -46,7 +47,7 @@ export function createE2eHome(): E2eHome {
   const home = join(base, 'home');
   const work = join(base, 'work');
   mkdirSync(work);
-  const env = { ...process.env, VDE_OPEN_HOME: home };
+  const env = { ...process.env, ...extraEnv, VDE_OPEN_HOME: home };
 
   const run = (args: string[]): Promise<CliResult> =>
     new Promise((resolve, reject) => {

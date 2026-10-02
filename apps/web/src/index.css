@@ -170,10 +170,19 @@
   list-style: none;
   margin-left: -1.3em;
 }
-.markdown-body a {
+.markdown-body a,
+.markdown-body button[data-local-link] {
   color: var(--primary);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+.markdown-body button[data-local-link] {
+  cursor: pointer;
+  text-align: left;
+}
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
 }
 .markdown-body blockquote {
   padding-left: 1em;

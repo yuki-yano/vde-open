@@ -49,7 +49,10 @@
 | lucide-react | 1.49.0 | apps/web | icon |
 | tw-animate-css | 1.4.0 | apps/web | shadcnのCSSが参照 |
 | @fontsource-variable/geist | 5.3.0 | apps/web | fontをbundleへ同梱。外部のCDNは使わない |
-| @playwright/test | 1.63.0 | root | Chromiumでe2e 9件 |
+| @playwright/test | 1.63.0 | root | Chromiumでe2e 17件 |
+| parse5 | 8.0.1 | packages/document | HTMLの静的な表示への変換と、参照の収集。配布物へbundle |
+| css-tree | 3.2.1 | packages/document | CSSの参照の検査。単体entryを使い、配布物へbundle（`source-map-js`を含む） |
+| happy-dom | 20.14.5 | root（devDependencies） | 画面部品のhookを、実際のReact DOMで動かすテストの環境。配布物には含まれない |
 
 shadcnのCLIが`package.json`へ書くrange指定（`^`）は、導入後に完全版番号へ直した。
 
@@ -61,10 +64,14 @@ shadcnのCLIが`package.json`へ書くrange指定（`^`）は、導入後に完�
 - `@tanstack/highlight/markdown`の`createTanStackMarkdownHighlighter`を使うと、`<pre>`と`<code>`が二重にならない。
 - `@tanstack/markdown`の`urlTransform`は解析時のoptionである。描画時に渡しても適用されない。`headingIds`の関数へ渡される番号は、見出しの連番ではない（一意ではある）。
 - `@tanstack/markdown`は、`allowHtml: false`でも`javascript:`などのURLを既定で取り除く。相対URLと画像は残すので、解析時の`urlTransform`で絞っている。
+- parse5は、既定（`scriptingEnabled: true`）では`noscript`の中身を文字として保持し、そのまま出力する。scriptを動かさない表示では、中身が要素として解釈されるので、`scriptingEnabled: false`で解析して中身を取り除く対象に含める（`packages/document/src/html-static.test.ts`）。
+- css-treeの本体のentryは、構文data（`mdn-data`）を`createRequire`でfilesystemから読むため、配布物へbundleできない。解析・走査・出力の単体entry（`css-tree/parser`・`css-tree/walker`・`css-tree/generator`）は読まないので、こちらを使う。単体entryには型宣言がないため、本体の型を当てている。
+- css-treeは、escapeで書いた`url`（`u\72l(...)`）を構文木にせず、解析できない値として残す。関数やescapeを含む「解析できない値」は、宣言ごと取り除く。custom propertyの値は、`parseCustomProperty: true`で構文木にする（`packages/document/src/css-transform.test.ts`）。
+- Playwright（Chromium）は、空のsandbox（scriptなし）のiframeの中の要素も、`frameLocator`で読める。
 - Chokidarは、監視を始めた直後の変更を通知しないことがある。macOSで、`ready`の直後に作ったfileの`add`が届かない例を約35回に1回観測した。後続の変更があれば検知できる。P2の監視は通知だけに頼らず、登録時と再走査時にstatを照合して回復する（仕様8.5）。
 
 ## 未検証のこと
 
 - Windows、Linuxでの導入とビルド。手元はmacOSのみ。
-- 実ブラウザでのsandbox、CSP（P3、P6）。
+- scriptを動かす表示（interactive）のsandboxとCSP（P6）。静的な表示は、Chromiumで確認した（`tests/e2e/html.spec.ts`）。
 - FirefoxとWebKitでのe2e。

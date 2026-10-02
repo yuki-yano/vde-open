@@ -18,6 +18,7 @@ export const ERROR_SPECS = {
   E_DOCUMENT_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   E_DOCUMENT_NOT_OPEN: { exit: ExitCode.notFound, retryable: false },
   E_WATCH_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
+  E_LINK_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   // 競合・版不整合
   E_KEY_CONFLICT: { exit: ExitCode.conflict, retryable: false },
   E_REVISION_UNAVAILABLE: { exit: ExitCode.conflict, retryable: false },
@@ -27,6 +28,7 @@ export const ERROR_SPECS = {
   // 認可・境界
   E_UNAUTHORIZED: { exit: ExitCode.forbidden, retryable: false },
   E_INSECURE_PATH: { exit: ExitCode.forbidden, retryable: false },
+  E_ASSET_REJECTED: { exit: ExitCode.forbidden, retryable: false },
   // 上限
   E_LIMIT_EXCEEDED: { exit: ExitCode.limit, retryable: false },
   E_MAX_BYTES_TOO_SMALL: { exit: ExitCode.limit, retryable: false },

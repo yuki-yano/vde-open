@@ -10,6 +10,7 @@ import {
   exitCodeForError,
   isVdeError,
   LIMITS,
+  linkOpenParamsSchema,
   successEnvelope,
   VdeError,
   type ErrorBody,
@@ -22,6 +23,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z, ZodError } from 'zod';
 
 import type { DocumentService, ServiceResult } from '../../documents/service.ts';
+import type { RenderService } from '../../render/render-service.ts';
 import type { EventHub } from '../event-hub.ts';
 import type { SessionService } from '../session-service.ts';
 
@@ -40,20 +42,24 @@ const MIME_TYPES: Record<string, string> = {
   '.map': 'application/json; charset=utf-8',
 };
 
-// 管理UIのpolicy（仕様10.5）。scriptは同梱のものだけ。他のoriginへは接続しない。
-const UI_CSP = [
-  "default-src 'none'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "worker-src 'self'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "form-action 'none'",
-  "frame-ancestors 'none'",
-].join('; ');
+// 管理UIのpolicy（仕様10.5）。scriptは同梱のものだけ。APIへの接続は自分のoriginだけ。
+// 文書の表示（iframe）と、文書中の登録済みの画像だけ、表示用のlistenerから読み込める。
+function uiCsp(previewOrigin: string): string {
+  return [
+    "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    `img-src 'self' data: ${previewOrigin}`,
+    "font-src 'self'",
+    "connect-src 'self'",
+    "worker-src 'self'",
+    `frame-src ${previewOrigin}`,
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+}
 
 export interface ManagementDeps {
   daemonId: string;
@@ -61,6 +67,9 @@ export interface ManagementDeps {
   documents: DocumentService;
   sessions: SessionService;
   events: EventHub;
+  render: RenderService;
+  // 文書を表示するlistenerのorigin。
+  previewOrigin: string;
   // ビルド済みUIのdirectory。無ければUIは配信しない。
   webRoot: string | null;
   // 開発時だけ許可するUIのorigin。配布物では常にnull。
@@ -290,6 +299,7 @@ export async function startManagementServer(
       catalogVersion: state.catalogVersion,
       activeDocumentId: state.activeDocumentId,
       openDocuments: state.openOrder.length,
+      previewOrigin: deps.previewOrigin,
     };
     return c.json(
       successEnvelope(status, { command: 'status', catalogVersion: state.catalogVersion }),
@@ -357,6 +367,54 @@ export async function startManagementServer(
   api.post('/documents/:id/refresh', async (c) =>
     ok(c, 'documents.refresh', await deps.documents.refresh({ documentId: c.req.param('id') })),
   );
+
+  // 文書の1つの版を表示するための、限定された権限を発行する。権限は発行したsessionに結び付く。
+  api.post('/documents/:id/render-grants', async (c) => {
+    const body = z
+      .strictObject({ revision: z.string().optional(), mode: z.string().optional() })
+      .parse(await c.req.json());
+    const result = await deps.render.createGrant(deps.sessions.idOf(c.get('token')), {
+      documentId: c.req.param('id'),
+      ...body,
+    });
+    return c.json(
+      successEnvelope(result, {
+        command: 'documents.render-grant',
+        catalogVersion: deps.documents.state.catalogVersion,
+      }),
+    );
+  });
+
+  // 表示をやめた権限を回収する。自分のsessionが発行したものだけを回収できる。
+  api.post('/render-grants/release', async (c) => {
+    const body = z
+      .strictObject({ grants: z.array(z.string().min(1).max(128)).max(256) })
+      .parse(await c.req.json());
+    const released = deps.render.release(deps.sessions.idOf(c.get('token')), body.grants);
+    return c.json(successEnvelope({ released }, { command: 'render-grants.release' }));
+  });
+
+  // 文書中のlinkが指すlocalの文書を開く。行き先は、解析で取り出したlinkのIDで指定する。
+  // pathをclientから直接受け取ることはしない（仕様12.2）。
+  api.post('/documents/:id/links/:linkId/open', async (c) => {
+    const params = linkOpenParamsSchema.parse({
+      ...((await c.req.json()) as Record<string, unknown>),
+      documentId: c.req.param('id'),
+      linkId: c.req.param('linkId'),
+    });
+    const link = await deps.render.linkOf(params.documentId, params.revision, params.linkId);
+    return ok(
+      c,
+      'documents.link-open',
+      await deps.documents.openLinked({
+        documentId: params.documentId,
+        revision: params.revision,
+        linkId: params.linkId,
+        href: link.href,
+        confirmation: params.confirmation,
+      }),
+    );
+  });
 
   // fetchで読むSSE（仕様6.5）。IDと版だけを流し、本文は流さない。
   api.get('/events', (c) =>
@@ -442,7 +500,9 @@ export async function startManagementServer(
     }
     const headers: Record<string, string> = { 'Content-Type': asset.type };
     if (asset.immutable) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
-    if (asset.type.startsWith('text/html')) headers['Content-Security-Policy'] = UI_CSP;
+    if (asset.type.startsWith('text/html')) {
+      headers['Content-Security-Policy'] = uiCsp(deps.previewOrigin);
+    }
     if (c.req.method === 'HEAD') return c.body(null, 200, headers);
     return c.body(new Uint8Array(asset.body), 200, headers);
   });

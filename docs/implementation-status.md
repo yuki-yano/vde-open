@@ -15,7 +15,7 @@
 | P0 | 完了報告済み | clean buildと両help/version。依存版記録。125 IDの担当フェーズ割当 |
 | P1 | 完了報告済み | restart復元、crash/disk error、同時起動テスト |
 | P2 | 完了報告済み | 文書追加とatomic saveが実UIへ反映。raw HTMLが動かない。未認証では管理APIを読めない |
-| P3 | 未着手 | security fixture、path traversal、他文書/API遮断 |
+| P3 | 完了報告済み | security fixture、path traversal、他文書/API遮断 |
 | P4 | 未着手 | Agent検索benchmark fixtureと閉じた文書除外 |
 | P5 | 未着手 | 保存前成功なし、タイムアウト・restart・二重送信テスト |
 | P6 | 未着手 | HTML回答案→本体確認→CLI取得、偽submit拒否 |
@@ -154,6 +154,64 @@ P2時点の制約:
 - daemon停止の通知（`daemon-stopping`）がUIへ届かなかった。通知の書き込みが終わる前にstreamを閉じていた。書き込みを順に待ってから閉じるようにした。
 - TanStack Markdownの`urlTransform`は解析時のoptionで、描画時に渡しても効かなかった。危険でないURLだけを残す処理を解析時へ移し、描画側でも画像を読み込まない部品に置き換えた。
 
+## P3の記録
+
+レビュー: 1往復目でmust-fix 5件とshould-fix 3件、2往復目でmust-fix 2件とshould-fix 2件、3〜5往復目でmust-fix各1件。すべて修正した。5往復目の指摘への対応は、レビューの往復の上限（5回）に達したため、再レビューを受けていない。P4のレビューで合わせて確認する。以下は1往復目から順に、各往復の内容。
+
+- 画像などの名前を付けたsymlinkで、assets-rootの中の秘密のfile（`.env`など）を登録できた → 登録できるかの検査を、symlinkを解決した後の実体にも適用した。
+- 表示用の変換を待つ間に文書が閉じられると、閉じた後から表示の権限が発行された → 権限を、発行時点の「文書を閉じた回数」に結び付け、変換の後に確かめ直すようにした。
+- linkから文書を開く確認が、確認した版と行き先に固定されていなかった → serverが発行する1回限りの識別子で、確認した文書・版・link・行き先に結び付けた。行き先が変わっていたら確認し直す。
+- 参照の走査の失敗を「参照なし」として公開し、assetと監視対象を失っていた → 走査の失敗を区別して記録し、調べ終えたassetを持つ文書は前の版を保つようにした。
+- 名前をescapeで書いた`@import`や、変数からURLを差し込む`image-set()`が、CSSの変換を通過した → 何を取得するか判定できない規則・宣言を無効化するようにした。
+- （should-fix）`--watch`で後から見つけた文書に`--assets-root`が引き継がれなかった → ruleにassets-rootを保持するようにした。
+- （should-fix）同じ内容の文書が別の位置にあるとき、変換結果のcacheが先の文書の位置を返した → cacheを版と文書の位置の組で引くようにした。
+- （should-fix）assets-rootのないstdinの文書への`--asset`が、黙って無視された → errorにした。
+- （2往復目）CSSの走査だけが失敗したとき、追うfileは空にしたのに、照合用の状態には捨てたCSSの状態が残り、変更がなくても読み直しが続いた → 追うfileと照合用の状態を、同じ採用結果から作るようにした。
+- （2往復目）同じkeyのstdinを並行して開くと、調べ終えたassetを、後から終わった「調べられなかった結果」が置き換えた → 同じkeyの更新は、走査から登録までを1件ずつ行うようにした。登録の時点の状態でも確かめる。
+- （2往復目、should-fix）linkの確認の識別子が、表示の切り替えで終わった場合に消費されず、後で再利用できた → どの結果になっても、渡された時点で使い終えるようにした。
+- （2往復目、should-fix）参照のない文書で、版が同じまま走査が成功へ変わっても、UIの注意書きが残った → 走査に失敗している間は、文書の状態が更新されるたびに、UIが表示の情報を取り直すようにした。
+- （3往復目）2往復目の修正は、取得した結果そのものを理由に取り直していた。初回の取得の直後にも取り直しが起き、表示中の権限を返していた → 取り直すかどうかを「取得した時点の更新時刻」と「いま届いている更新時刻」の比較で決めるようにした。権限を返すのは、表示を差し替えた後と、表示をやめたときだけにした。取り直しに失敗したときは、表示中の権限と内容を保つ。
+- （4往復目）3往復目の修正は、画面の差し替えを予約した直後に前の権限を返していて、前の表示が画面に残っている間に権限が失効しえた → 表示から外す権限をいったん退避し、画面の更新が反映された後で返すようにした（仕様10.2「古いiframeを外した後」）。
+- （5往復目）4往復目の修正は、どの描画のeffectでも、退避した権限をすべて返していた。新しい権限を受け取ってから、それを使う描画が反映されるまでの間に、前の描画のeffectが動くと、画面に出ている権限を返した → effectが属する描画で画面に出している権限は返さずに残し、次の描画のeffectで返すようにした。実際のReact DOMで、この順序を制御して確かめるテストを足した。
+
+実行環境: macOS（Darwin 25.6.0、arm64）、Node.js 24.21.0、pnpm 12.8.1、Chromium（Playwright 1.63.0同梱のChrome Headless Shell 153）。
+
+| command | 結果 |
+|---|---|
+| `pnpm format:check` | exit 0 |
+| `pnpm lint` | exit 0 |
+| `pnpm typecheck` | exit 0 |
+| `pnpm test` | exit 0（40 files、339 tests） |
+| `pnpm build` | exit 0 |
+| `pnpm test:pack` | exit 0（手順6に、導入先だけでHTMLの静的変換と表示用のlistenerが動くことの確認を追加） |
+| `pnpm test:e2e` | exit 0（Chromiumで17件） |
+
+実装したもの:
+
+- assetの登録（`apps/cli/src/assets/`）。文書を開くときに、HTML・CSS・Markdownが実際に参照するlocal fileだけを集め、内容を保存する。assets-rootの外、symlinkで外へ出るfile、`.`で始まる名前のfile、対応外の種類は登録しない。版は、本文とassetの内容から計算する（ADR-0009）。
+- 静的な表示への変換（`packages/document/src/html-static.ts`、`css-transform.ts`）。parse5とcss-treeの構文木を書き換える。script、event属性、埋め込み、自動の遷移、外部への要求につながる指定、文書に直接書かれたSVGとMathMLを取り除く。出力をもう一度解析して確かめる。
+- 表示用のlistener（`apps/cli/src/server/http/preview.ts`）と、表示の権限（`apps/cli/src/render/render-service.ts`）。管理UIとは別のportで、発行した権限のURL（`/r/<grant>/files/<path>`）に、その版に登録したfileだけを配信する（ADR-0008）。
+- 管理API。`POST /documents/:id/render-grants`（権限の発行）、`POST /render-grants/release`（返却）、`POST /documents/:id/links/:linkId/open`（文書中のlinkから文書を開く。未登録の文書は確認が必要）。`GET /status`に表示用のlistenerのoriginを追加。
+- 管理UI。HTMLは空のsandboxのiframeで表示する。枠の中が文書の内容であることと表示の種類を常に示す。取り除いたものの種類・対象・対処の一覧、文書中のlinkの一覧、未登録の文書を開く前の確認。Markdownは登録済みの画像を表示し、相対linkは確認してから開く。
+- CLI。`open`に`--html-mode static`、`--assets-root <dir>`、`--asset <path>`（複数回）。`serve --preview-port <n>`。
+- 監視。文書が参照しているfile（存在しない参照先を含む）の変更も追う。
+
+管理認証の異常系（仕様15章のP3の項）の検証箇所:
+
+- 期限: ticket 60秒とsession 12時間（`apps/cli/src/server/session-service.test.ts`）、期限切れでSSEを閉じる（`apps/cli/src/server/http/management.test.ts`）、表示の権限がsessionとともに失効（`tests/integration/preview.test.ts`）。
+- 再利用: ticketの2度目の交換を拒否（`tests/integration/http.test.ts`、`tests/e2e/viewer.spec.ts`）。
+- rebinding: 管理listenerと表示用のlistenerの両方で、実際のlisten先以外のHostを拒否（`tests/integration/http.test.ts`、`tests/integration/preview.test.ts`）。
+- logの秘匿: ticket、token、表示の権限、表示用URLのpathがlogに無い（`tests/integration/http.test.ts`、`tests/integration/preview.test.ts`）。
+
+P3時点の制約:
+
+- HTMLの表示は静的な表示だけ。scriptを動かす表示（interactive）はP6。`--html-mode interactive`はerrorになる。
+- 文書に直接書いたSVGとMathMLは表示しない。SVGはfileにして`<img>`で参照すれば表示できる。動画と音声は表示しない。
+- HTML文書の見出しの一覧から、表示の中の見出しへ移動する操作は未実装（P7のUI仕上げで扱う）。
+- 表示用の変換と参照の走査は解析worker（2秒で打ち切り）で行う。変換が打ち切られた文書は原文を表示する。走査が打ち切られた文書は、assetなしで登録して警告と表示で知らせる（調べ終えたassetを持つ文書の更新では、前の版を保つ）。大きい文書での所要時間はP7で測る。
+- stdinから開いた文書のassetは、開いた時点の内容で固定される（監視しない）。
+- e2eはChromiumだけ。FirefoxとWebKitでは実行していない（NOT RUN）。Windowsは未検証。
+
 ## 受け入れテストの対応
 
 状態は「未着手／PASS／FAIL／NOT RUN」。担当は、そのIDが最後に必要とする機能がそろうフェーズ。IDをPASSにするのは担当フェーズで全条件を検証したときだけで、先行フェーズで一部だけ検証したものは備考に部分検証として書く。
@@ -202,7 +260,7 @@ P2時点の制約:
 | DOC-008 | P2 | PASS | `tests/integration/http.test.ts`、`tests/e2e/workspace.spec.ts` |  |
 | DOC-009 | P2 | PASS | `tests/integration/watch.test.ts`、`tests/e2e/viewer.spec.ts` |  |
 | DOC-010 | P2 | PASS | `apps/cli/src/documents/service-analysis.test.ts` |  |
-| DOC-011 | P3 | 未着手 |  |  |
+| DOC-011 | P3 | PASS | `tests/integration/preview.test.ts` |  |
 | DOC-012 | P4 | 未着手 |  |  |
 | DOC-013 | P2 | PASS | `tests/e2e/workspace.spec.ts` |  |
 | DOC-014 | P2 | PASS | `tests/e2e/workspace.spec.ts`、`tests/e2e/viewer.spec.ts` |  |
@@ -233,23 +291,23 @@ P2時点の制約:
 | SEC-001 | P2 | PASS | `tests/integration/http.test.ts`、`apps/cli/src/server/session-service.test.ts`、`tests/e2e/viewer.spec.ts` |  |
 | SEC-002 | P2 | PASS | `tests/integration/http.test.ts` |  |
 | SEC-003 | P2 | PASS | `tests/integration/http.test.ts`、`tests/e2e/viewer.spec.ts` |  |
-| SEC-004 | P6 | 未着手 |  | iframe内でscriptを動かす検証が必要。P3でsandbox属性とCSPを部分検証 |
-| SEC-005 | P3 | 未着手 |  |  |
-| SEC-006 | P3 | 未着手 |  |  |
+| SEC-004 | P6 | 未着手 |  | iframe内でscriptを動かす検証が必要。P3で部分検証済み（`tests/e2e/html.spec.ts`: 空のsandbox、別origin、`allow-same-origin`なし、管理のtokenと表示の権限が互いに使えない） |
+| SEC-005 | P3 | PASS | `packages/document/src/html-static.test.ts`、`tests/e2e/html.spec.ts` |  |
+| SEC-006 | P3 | PASS | `packages/document/src/html-static.test.ts`、`tests/e2e/html.spec.ts` | 外部への要求は、browserのrequestと、記録用のserverの両方で0件を確認 |
 | SEC-007 | P6 | 未着手 |  | interactiveが必要なためP6 |
 | SEC-008 | P6 | 未着手 |  | interactiveが必要なためP6 |
-| SEC-009 | P3 | 未着手 |  |  |
-| SEC-010 | P3 | 未着手 |  |  |
-| SEC-011 | P3 | 未着手 |  |  |
-| SEC-012 | P3 | 未着手 |  |  |
-| SEC-013 | P6 | 未着手 |  | module importの実行にはinteractiveが必要。P3でmanifest外pathの404を部分検証 |
-| SEC-014 | P3 | 未着手 |  |  |
-| SEC-015 | P3 | 未着手 |  |  |
-| SEC-016 | P3 | 未着手 |  |  |
-| SEC-017 | P3 | 未着手 |  |  |
-| SEC-018 | P5 | 未着手 |  | P1で部分検証済み（`tests/integration/daemon.test.ts`: logに本文・title・path・keyがない）。回答とdraftを含む操作はP5 |
-| SEC-019 | P3 | 未着手 |  |  |
-| SEC-020 | P3 | 未着手 |  |  |
+| SEC-009 | P3 | PASS | `packages/document/src/references.test.ts`、`tests/integration/preview.test.ts` |  |
+| SEC-010 | P3 | PASS | `tests/integration/preview.test.ts` |  |
+| SEC-011 | P3 | PASS | `tests/integration/preview.test.ts` | 別のprocessが同時にpathを差し替える攻撃までは防いでいない |
+| SEC-012 | P3 | PASS | `packages/document/src/css-transform.test.ts`、`tests/integration/preview.test.ts` | 外部への通信は、応答のpolicy（CSP）でも止める。変換は、それに頼らずに取り除く |
+| SEC-013 | P6 | 未着手 |  | module importの実行にはinteractiveが必要。P3で部分検証済み（`tests/integration/preview.test.ts`: 登録していないpathは404で、同じdirectoryのfileも公開されない） |
+| SEC-014 | P3 | PASS | `tests/integration/preview.test.ts` |  |
+| SEC-015 | P3 | PASS | `tests/integration/preview.test.ts`、`apps/cli/src/render/render-service.test.ts`、`apps/web/src/lib/use-render-grant.dom.test.tsx`、`tests/e2e/html.spec.ts` | UIが権限を返す順序についての最後の修正は、再レビューを受けていない |
+| SEC-016 | P3 | PASS | `tests/integration/preview.test.ts` |  |
+| SEC-017 | P3 | PASS | `tests/integration/preview.test.ts` |  |
+| SEC-018 | P5 | 未着手 |  | P1〜P3で部分検証済み（`tests/integration/daemon.test.ts`: logに本文・title・path・keyがない。`tests/integration/preview.test.ts`: 表示の権限と表示用URLのpathがない）。回答とdraftを含む操作はP5 |
+| SEC-019 | P3 | PASS | `tests/integration/preview.test.ts`、`tests/e2e/html.spec.ts` |  |
+| SEC-020 | P3 | PASS | `tests/e2e/release.spec.ts` | 配布物（`apps/cli/dist`）を対象に確認 |
 | FB-001 | P5 | 未着手 |  |  |
 | FB-002 | P5 | 未着手 |  |  |
 | FB-003 | P6 | 未着手 |  | draft検証はP5、SDKの最大サイズはP6 |
@@ -288,7 +346,11 @@ P2時点の制約:
 
 ## 引継ぎ事項
 
-- 次はP3。管理HTTPは`apps/cli/src/server/http/management.ts`、UIは`apps/web/src/`、Markdownの描画は`packages/document/src/react.tsx`。
+- 次はP4（検索、section、read cursor、revision整合）。文書の構造の解析は`packages/document/src/analysis.ts`、解析workerは`apps/cli/src/workers/`、文書の操作は`apps/cli/src/documents/service.ts`。
+- 管理HTTPは`apps/cli/src/server/http/management.ts`、表示用のlistenerは`apps/cli/src/server/http/preview.ts`、UIは`apps/web/src/`、Markdownの描画は`packages/document/src/react.tsx`、HTMLの静的変換は`packages/document/src/html-static.ts`。
+- stateの形式に項目を足した（版ごとのassetと文書の位置、文書ごとのassets-root）。P2までの開発用state（`.dev-home`）は読めないので、消して作り直す。
+- P3のレビュー5往復目の指摘への対応（`apps/web/src/lib/use-render-grant.ts`、`apps/web/src/lib/use-render-grant.dom.test.tsx`）は、再レビューを受けていない。P4のレビュー依頼に含める。
+- 画面部品のhookは、happy-domの上で実際のReact DOMを動かしてテストできる（file先頭に`// @vitest-environment happy-dom`）。
 - 未解決の不具合: なし。
 - 未実行のtest: 上の表で「未着手」のもの。e2eのFirefox／WebKit。
 - 配布物はruntime依存を持たない方針（ADR-0001）。外部packageを足したら`apps/cli/tsdown.config.ts`の`deps.onlyBundle`へ追加する。

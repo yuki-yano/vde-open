@@ -1,7 +1,9 @@
 import type {
   DocumentSummary,
+  LinkOpenResult,
   ListResult,
   ReadResult,
+  RenderGrantResult,
   ServerEvent,
   SessionResult,
   UiStatus,
@@ -17,19 +19,21 @@ const RECONNECT_MAX_MS = 10_000;
 export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
+  readonly details: Record<string, unknown>;
 
-  constructor(code: string, message: string, status: number) {
+  constructor(code: string, message: string, status: number, details: Record<string, unknown>) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
     this.status = status;
+    this.details = details;
   }
 }
 
 interface EnvelopeBody<T> {
   ok: boolean;
   data: T;
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; details?: Record<string, unknown> };
   meta?: { catalogVersion?: number };
 }
 
@@ -40,6 +44,7 @@ async function parseEnvelope<T>(response: Response): Promise<EnvelopeBody<T>> {
       body.error?.code ?? 'E_INTERNAL',
       body.error?.message ?? '操作に失敗しました。',
       response.status,
+      body.error?.details ?? {},
     );
   }
   return body;
@@ -84,6 +89,18 @@ export interface Api {
   reorder(order: string[], expectedCatalogVersion: number): Promise<void>;
   focus(documentId: string): Promise<void>;
   refresh(documentId: string): Promise<void>;
+  // 文書の1つの版を表示するための権限を取得する。
+  renderGrant(documentId: string, revision: string): Promise<RenderGrantResult>;
+  // 表示をやめた権限を返す。
+  releaseGrants(grants: string[]): Promise<void>;
+  // 文書中のlinkが指すlocalの文書を開く。未登録の文書は、確認を求めるerrorになる。
+  // そのerrorが返す確認の識別子を付けて、もう一度呼ぶと開く。
+  openLink(
+    documentId: string,
+    revision: string,
+    linkId: string,
+    confirmation?: string,
+  ): Promise<LinkOpenResult>;
   // 更新通知を購読する。切断時は間隔を伸ばしながら再接続し、接続のたびにonConnectを呼ぶ。
   events(handlers: { onEvent: (event: ServerEvent) => void; onConnect: () => void }): EventStream;
 }
@@ -156,6 +173,23 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
     },
     async refresh(documentId) {
       await request(`/documents/${documentId}/refresh`, { method: 'POST' });
+    },
+    async renderGrant(documentId, revision) {
+      const { data } = await request<RenderGrantResult>(`/documents/${documentId}/render-grants`, {
+        method: 'POST',
+        body: JSON.stringify({ revision }),
+      });
+      return data;
+    },
+    async releaseGrants(grants) {
+      await request('/render-grants/release', { method: 'POST', body: JSON.stringify({ grants }) });
+    },
+    async openLink(documentId, revision, linkId, confirmation) {
+      const { data } = await request<LinkOpenResult>(
+        `/documents/${documentId}/links/${linkId}/open`,
+        { method: 'POST', body: JSON.stringify({ revision, confirmation }) },
+      );
+      return data;
     },
     events({ onEvent, onConnect }) {
       const controller = new AbortController();

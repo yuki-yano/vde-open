@@ -70,13 +70,17 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     );
   };
 
-  const signatureOf = async (path: string): Promise<string> => {
+  const statOf = async (path: string): Promise<string> => {
     try {
       return statSignature(await stat(path));
     } catch {
       return 'missing';
     }
   };
+
+  // 文書と、文書が参照しているfileの、現在の状態。DocumentServiceが覚えている形と同じ並び。
+  const signatureOf = async (documentId: string, path: string): Promise<string> =>
+    (await Promise.all([path, ...documents.trackedFiles(documentId)].map(statOf))).join('|');
 
   // 同時に読み直す数を抑える。空きがなければ、空くまで待つ。
   const acquireRefresh = (): Promise<void> => {
@@ -99,12 +103,14 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     await acquireRefresh();
     try {
       if (closed) return;
-      const observed = await signatureOf(path);
+      const observed = await signatureOf(documentId, path);
       const outcome = await documents.refreshFromDisk(documentId);
       // 照合に使うのは、実際に読み取った内容に対応する状態。読み直した後のstatは使わない。
       // 読んだ後に変わっていれば、次の照合で食い違い、もう一度読み直す。
       if (outcome.signature === null) unreadable.set(documentId, observed);
       else unreadable.delete(documentId);
+      // 参照しているfileが増減したら、監視するdirectoryも合わせる。
+      sync();
     } finally {
       releaseRefresh();
     }
@@ -115,10 +121,18 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
       (record) => record.isOpen && record.sourceKind === 'file' && record.canonicalPath !== null,
     );
 
+  const scheduleRefresh = (documentId: string, path: string) => {
+    schedule(`doc:${documentId}`, () => refreshDocument(documentId, path));
+  };
+
   const handlePath = (path: string) => {
     for (const record of openFileDocuments()) {
-      if (record.canonicalPath === path) {
-        schedule(`doc:${record.documentId}`, () => refreshDocument(record.documentId, path));
+      // 文書そのものか、文書が参照しているfileが変わった。
+      if (
+        record.canonicalPath === path ||
+        documents.trackedFiles(record.documentId).includes(path)
+      ) {
+        scheduleRefresh(record.documentId, record.canonicalPath as string);
       }
     }
     for (const rule of documents.state.watchRules) {
@@ -135,18 +149,16 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     }
   };
 
-  // 通知に頼らず、開いている文書とruleの現状を確かめる。監視開始の直後や、通知が欠けた場合に効く。
-  const checkDirectory = (directory: string, recursive: boolean) => {
+  // 通知に頼らず、開いている文書の現状を確かめる。監視開始の直後や、通知が欠けた場合に効く。
+  const checkDocuments = () => {
     for (const record of openFileDocuments()) {
       const path = record.canonicalPath as string;
-      const inScope = recursive ? isUnder(directory, path) : dirname(path) === directory;
-      if (!inScope) continue;
-      void signatureOf(path).then((signature) => {
+      void signatureOf(record.documentId, path).then((signature) => {
         // daemonの起動後にまだ読んでいない文書は、保存済みの内容と合っているか分からない。
         // 停止中の変更を取りこぼさないよう、読み直して確かめる。
         const known =
           documents.readSignature(record.documentId) ?? unreadable.get(record.documentId);
-        if (known !== signature) handlePath(path);
+        if (known !== signature) scheduleRefresh(record.documentId, path);
       });
     }
   };
@@ -168,7 +180,13 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
       if (basename(path).startsWith('.')) return;
       handlePath(path);
     });
-    watcher.on('ready', () => checkDirectory(directory, recursive));
+    // 監視するdirectoryが多いと、ほぼ同時に何度も呼ばれる。まとめて1回だけ確かめる。
+    watcher.on('ready', () => {
+      schedule('check', () => {
+        checkDocuments();
+        return Promise.resolve();
+      });
+    });
     watcher.on('error', report);
     watchers.set(directory, { watcher, recursive });
   };
@@ -177,8 +195,14 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     if (closed) return;
     const desired = new Map<string, boolean>();
     for (const record of openFileDocuments()) {
-      const directory = dirname(record.canonicalPath as string);
-      desired.set(directory, desired.get(directory) ?? false);
+      // 文書の親directoryと、文書が参照しているfileの親directory。
+      for (const path of [
+        record.canonicalPath as string,
+        ...documents.trackedFiles(record.documentId),
+      ]) {
+        const directory = dirname(path);
+        desired.set(directory, desired.get(directory) ?? false);
+      }
     }
     for (const rule of documents.state.watchRules) {
       const base = watchBaseOf(rule);
@@ -198,9 +222,10 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     }
   }
 
-  const fileCheck = setInterval(() => {
-    for (const [directory, entry] of watchers) checkDirectory(directory, entry.recursive);
-  }, options.fileCheckIntervalMs ?? FILE_CHECK_INTERVAL_MS);
+  const fileCheck = setInterval(
+    checkDocuments,
+    options.fileCheckIntervalMs ?? FILE_CHECK_INTERVAL_MS,
+  );
   fileCheck.unref();
 
   const ruleScan = setInterval(() => {

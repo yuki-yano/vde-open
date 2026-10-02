@@ -1,16 +1,21 @@
-import { randomUUID } from 'node:crypto';
-import { basename, relative, resolve, sep } from 'node:path';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { realpath, stat } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import {
   buildLineIndex,
   byteRangeOfLines,
+  classifyLink,
+  classifyReference,
   extractTitle,
   HTML_STATIC_PARSER_PROFILE,
   lineOfByte,
   MARKDOWN_PARSER_PROFILE,
+  ParseLimitError,
   truncateAtCodePoint,
   type DocumentAnalysis,
 } from '@vde-open/document';
+import { scanReferences, type ScanKind, type ScannedReference } from '@vde-open/document/render';
 import {
   closeParamsSchema,
   documentIdSchema,
@@ -23,6 +28,7 @@ import {
   type CloseResult,
   type DocumentFormat,
   type DocumentSummary,
+  type LinkOpenResult,
   type ListResult,
   type OpenResult,
   type ReadResult,
@@ -33,6 +39,7 @@ import {
   type WatchRule,
 } from '@vde-open/shared';
 
+import { buildManifest, type LoadedAsset } from '../assets/manifest.ts';
 import type { DocumentRecord, RevisionRecord, StatePayload } from '../persistence/state-schema.ts';
 import type { StateStore, Transaction } from '../persistence/state-store.ts';
 import type { CursorCodec } from './cursor.ts';
@@ -75,6 +82,8 @@ export interface DocumentServiceOptions {
   analyze?: (format: DocumentFormat, text: string) => Promise<DocumentAnalysis>;
   // fileを読む処理を差し替える（testで、読み込みの完了順を制御するために使う）。
   readSource?: (path: string) => Promise<LoadedSource>;
+  // 文書やCSSが参照するlocal fileの候補を集める。daemonではworkerへ出す。
+  scan?: (kind: ScanKind, text: string) => Promise<ScannedReference[]>;
 }
 
 // fileを読み直した結果。signatureは、読み取った内容に対応するfileの状態。読めなかったらnull。
@@ -92,9 +101,51 @@ interface Incoming {
   bytes: Buffer;
   text: string;
   fallbackTitle: string;
-  // 読み取った時点のfileの状態。stdinはnull。
+  // 読み取った時点の、文書と参照先のfileの状態。stdinはnull。
   signature: string | null;
+  assetsRoot: string | null;
+  extraAssets: string[];
+  // 文書の位置（assets-rootからの相対path）。
+  documentLogicalPath: string;
+  assets: LoadedAsset[];
+  // 文書のほかに変更を追うfile（参照しているasset、参照されているが存在しないfile）。
+  trackedFiles: string[];
+  // 参照の走査が、時間切れや構造の上限で終わらなかった。assetは集められていない。
+  assetScanFailed: boolean;
 }
+
+// 読み込んだ文書の、assetを集める前の内容。
+type IncomingSource = Omit<
+  Incoming,
+  | 'assetsRoot'
+  | 'extraAssets'
+  | 'documentLogicalPath'
+  | 'assets'
+  | 'trackedFiles'
+  | 'assetScanFailed'
+>;
+
+// 未登録の文書を開く確認。確認した文書・版・link・行き先に結び付ける。
+interface LinkConfirmation {
+  documentId: string;
+  revision: string;
+  linkId: string;
+  canonicalPath: string;
+  expiresAt: number;
+}
+
+const LINK_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
+const MAX_LINK_CONFIRMATIONS = 256;
+
+// assetの集め方。rootとexplicitは、利用者の指定がなければundefined（登録済みの値、または既定を使う）。
+interface AssetSettings {
+  root: string | undefined;
+  explicit: string[] | undefined;
+  // 個別に指定したassetを読めないときに、errorにするか。
+  strict: boolean;
+}
+
+const INHERITED_ASSETS: AssetSettings = { root: undefined, explicit: undefined, strict: false };
 
 interface ResolvedCandidates {
   // canonical pathごとの候補。symlink経由や重複指定は1件にまとめてある。
@@ -180,6 +231,22 @@ function ruleCovers(rule: WatchRule, canonicalPath: string): boolean {
   return base.recursive || resolve(canonicalPath, '..') === base.directory;
 }
 
+function assetScanWarning(path: string): Warning {
+  return {
+    code: 'W_ASSET_SCAN_FAILED',
+    message: `${path} が参照するfileを調べられませんでした。画像やCSSは登録していません。refreshで調べ直せます。`,
+    details: { path },
+  };
+}
+
+function assetScanError(): VdeError {
+  return new VdeError(
+    'E_PARSE_FAILED',
+    '文書が参照するfileを調べられなかったため、更新していません。',
+    { reason: 'asset-scan-failed' },
+  );
+}
+
 function assertOpenLimits(state: StatePayload): void {
   if (state.openOrder.length > LIMITS.openDocuments) {
     throw new VdeError('E_LIMIT_EXCEEDED', '開ける文書数の上限を超えます。', {
@@ -207,10 +274,15 @@ export class DocumentService {
   readonly #readSource: (path: string) => Promise<LoadedSource>;
   // revisionごとの解析結果。古い版の遅い結果を、新しい版の結果として使わないためにrevisionで引く。
   readonly #analysisCache = new Map<string, DocumentAnalysis>();
-  // canonical pathごとの、公開済みの内容に対応するfileの状態。読めなかったときはnull。
-  readonly #signatures = new Map<string, string | null>();
+  readonly #scan: (kind: ScanKind, text: string) => Promise<ScannedReference[]>;
+  // canonical pathごとの、公開済みの内容に対応するfileの状態と、文書のほかに変更を追うfile。
+  // 読めなかったときのsignatureはnull。
+  readonly #signatures = new Map<string, { signature: string | null; files: string[] }>();
   // canonical pathごとの待ち行列。同じfileの「読む→公開する」を1件ずつ行う。
   readonly #pathQueues = new Map<string, Promise<void>>();
+  // 文書を閉じた回数。閉じる前に始めた処理の結果を、開き直した後の文書へ結び付けないために使う。
+  readonly #openEpochs = new Map<string, number>();
+  readonly #linkConfirmations = new Map<string, LinkConfirmation>();
 
   constructor(options: DocumentServiceOptions) {
     this.#store = options.store;
@@ -219,6 +291,7 @@ export class DocumentService {
     this.#emit = options.emit ?? (() => undefined);
     this.#analyze = options.analyze ?? null;
     this.#readSource = options.readSource ?? readSourceFile;
+    this.#scan = options.scan ?? ((kind, text) => Promise.resolve(scanReferences(kind, text)));
   }
 
   // fileを読んでから公開するまでを、同じfileについては1件ずつ行う。
@@ -254,7 +327,142 @@ export class DocumentService {
   // stateの内容に対応するfileの状態。daemonの起動後にまだ読んでいなければnull。
   readSignature(documentId: string): string | null {
     const path = this.#store.payload.documents[documentId]?.canonicalPath;
-    return path ? (this.#signatures.get(path) ?? null) : null;
+    return path ? (this.#signatures.get(path)?.signature ?? null) : null;
+  }
+
+  // 文書のほかに変更を追うfile。監視は、文書とこれらの状態を並べて、readSignatureと比べる。
+  trackedFiles(documentId: string): string[] {
+    const path = this.#store.payload.documents[documentId]?.canonicalPath;
+    return path ? (this.#signatures.get(path)?.files ?? []) : [];
+  }
+
+  // 読み込んだ文書が参照するlocal fileを集める。
+  async #withAssets(
+    source: IncomingSource,
+    existing: DocumentRecord | undefined,
+    settings: AssetSettings,
+  ): Promise<Incoming> {
+    const { canonicalPath } = source;
+    const assetsRoot =
+      settings.root ??
+      (existing ? existing.assetsRoot : canonicalPath === null ? null : dirname(canonicalPath));
+    const extraAssets = settings.explicit ?? existing?.extraAssets ?? [];
+    // local assetを使えない文書に、個別の指定があっても登録できない。黙って無視しない。
+    if (assetsRoot === null && settings.explicit !== undefined) {
+      throw new VdeError('E_INVALID_ARGUMENT', '--assetには、--assets-rootの指定が必要です。', {
+        assets: settings.explicit,
+      });
+    }
+    let documentLogicalPath = source.format === 'html' ? 'index.html' : 'index.md';
+    if (canonicalPath !== null && assetsRoot !== null) {
+      const fromRoot = relative(assetsRoot, canonicalPath);
+      if (fromRoot === '' || fromRoot.startsWith('..') || isAbsolute(fromRoot)) {
+        throw new VdeError('E_INVALID_ARGUMENT', '文書がassets-rootの中にありません。', {
+          path: source.displayPath ?? canonicalPath,
+          assetsRoot,
+        });
+      }
+      documentLogicalPath = fromRoot.split(sep).join('/');
+    }
+    // 走査が終わらなかったことを、参照がなかったことと区別する。
+    let assetScanFailed = false;
+    const manifest = await buildManifest({
+      format: source.format,
+      text: source.text,
+      documentLogicalPath,
+      assetsRoot,
+      explicit: extraAssets,
+      strictExplicit: settings.strict,
+      scan: async (kind, text) => {
+        try {
+          return await this.#scan(kind, text);
+        } catch (error) {
+          const unparsable =
+            error instanceof ParseLimitError ||
+            (error instanceof VdeError && error.code === 'E_PARSE_FAILED');
+          if (!unparsable) throw error;
+          assetScanFailed = true;
+          return [];
+        }
+      },
+    });
+    // 一部だけ集めたassetは使わない。集められなかった文書として扱う。
+    // 追うfileと、照合に使う状態は、同じ結果から作る。食い違うと、変更がなくても読み直しが続く。
+    const tracked = assetScanFailed ? [] : manifest.tracked;
+    return {
+      ...source,
+      signature:
+        source.signature === null
+          ? null
+          : [source.signature, ...tracked.map((entry) => entry.signature)].join('|'),
+      assetsRoot,
+      extraAssets,
+      documentLogicalPath,
+      assets: assetScanFailed ? [] : manifest.assets,
+      trackedFiles: tracked.map((entry) => entry.path),
+      assetScanFailed,
+    };
+  }
+
+  // 開いている文書の現在の版が、参照を調べ終えたassetを持っているか。
+  // 持っているなら、走査に失敗した結果で置き換えない（assetと、変更を追うfileを失うため）。
+  #hasCompleteAssets(existing: DocumentRecord | undefined): boolean {
+    if (!existing?.isOpen) return false;
+    const current = existing.revisions.find((entry) => entry.revision === existing.currentRevision);
+    return current?.assetScan === 'complete';
+  }
+
+  // 文書を閉じた回数。閉じる前に始めた処理が、開き直した後の文書に対して成立しないようにする。
+  openEpoch(documentId: string): number {
+    return this.#openEpochs.get(documentId) ?? 0;
+  }
+
+  #record(item: Incoming): void {
+    if (item.canonicalPath === null) return;
+    this.#signatures.set(item.canonicalPath, {
+      signature: item.signature,
+      files: item.trackedFiles,
+    });
+  }
+
+  #existingFile(canonicalPath: string): DocumentRecord | undefined {
+    return Object.values(this.#store.payload.documents).find(
+      (record) => record.sourceKind === 'file' && record.canonicalPath === canonicalPath,
+    );
+  }
+
+  // 利用者の指定から、assetの集め方を決める。
+  async #assetSettings(params: ReturnType<typeof openParamsSchema.parse>): Promise<AssetSettings> {
+    let root: string | undefined;
+    if (params.assetsRoot !== undefined) {
+      const requested = resolve(params.cwd, params.assetsRoot);
+      try {
+        root = await realpath(requested);
+        if (!(await stat(root)).isDirectory()) throw new Error('not a directory');
+      } catch {
+        throw new VdeError('E_INVALID_ARGUMENT', '--assets-rootはdirectoryを指定してください。', {
+          assetsRoot: params.assetsRoot,
+        });
+      }
+    }
+    const explicit =
+      params.assets.length === 0
+        ? undefined
+        : params.assets.map((asset) => {
+            const reference = classifyReference(asset, '');
+            if (reference.kind !== 'local') {
+              throw new VdeError(
+                'E_ASSET_REJECTED',
+                `${asset} はassetとして登録できません。assets-rootからの相対pathで指定してください。`,
+                {
+                  asset,
+                  reason: reference.kind === 'rejected' ? reference.reason : reference.kind,
+                },
+              );
+            }
+            return reference.logicalPath;
+          });
+    return { root, explicit, strict: true };
   }
 
   get state(): StatePayload {
@@ -276,25 +484,45 @@ export class DocumentService {
       if (params.watch) {
         throw new VdeError('E_INVALID_ARGUMENT', '--watchはdirectoryかglobに対して指定します。');
       }
+      if (params.htmlMode !== undefined && params.format !== 'html') {
+        throw new VdeError('E_INVALID_ARGUMENT', '--html-modeはHTMLの文書に指定します。');
+      }
+      const { format, key } = params;
       const bytes = Buffer.from(params.stdin.content, 'utf8');
-      return this.#commitOpen(
-        params,
-        [
+      const text = decodeSource(bytes, 'stdin');
+      const settings = await this.#assetSettings(params);
+      const openStdin = async (): Promise<ServiceResult<OpenResult>> => {
+        // 同じkeyの文書を更新するときは、指定がなければ、登録済みのassetの設定を使う。
+        const existing =
+          key === undefined
+            ? undefined
+            : Object.values(this.#store.payload.documents).find(
+                (record) => record.sourceKind !== 'file' && record.key === key,
+              );
+        const item = await this.#withAssets(
           {
             sourceKind: 'stdin',
             canonicalPath: null,
             displayPath: null,
             pathSegments: [],
-            format: params.format,
+            format,
             bytes,
-            text: decodeSource(bytes, 'stdin'),
-            fallbackTitle: params.key ?? 'stdin',
+            text,
+            fallbackTitle: key ?? 'stdin',
             signature: null,
           },
-        ],
-        [],
-        warnings,
-      );
+          existing,
+          settings,
+        );
+        if (item.assetScanFailed) {
+          if (this.#hasCompleteAssets(existing)) throw assetScanError();
+          warnings.push(assetScanWarning('stdin'));
+        }
+        return this.#commitOpen(params, [item], [], settings, warnings);
+      };
+      // 同じkeyの更新は、走査から登録までを1件ずつ行う。fileの文書と同じ理由。
+      // keyのない文書は、毎回新しい文書になるので、順番を待つ相手がいない。
+      return key === undefined ? openStdin() : this.#withPathLocks([`stdin-key:${key}`], openStdin);
     }
 
     if (params.paths.length === 0) {
@@ -316,15 +544,27 @@ export class DocumentService {
       expansion.candidates,
       params.format === 'auto' ? null : params.format,
     );
+    const settings = await this.#assetSettings(params);
+    if (settings.explicit !== undefined && resolved.unique.size !== 1) {
+      throw new VdeError('E_INVALID_ARGUMENT', '--assetは、文書を1件だけ開くときに指定できます。', {
+        documents: resolved.unique.size,
+      });
+    }
+    if (
+      params.htmlMode !== undefined &&
+      ![...resolved.unique.values()].some((entry) => entry.format === 'html')
+    ) {
+      throw new VdeError('E_INVALID_ARGUMENT', '--html-modeはHTMLの文書に指定します。');
+    }
     return this.#withPathLocks(resolved.unique.keys(), async () => {
-      const incoming = await this.#readCandidates(resolved);
+      const incoming = await this.#readCandidates(resolved, settings, warnings);
       // --watchなら、いま対象がなくても、ruleだけを登録できる。
       if (incoming.length === 0 && watchTargets.length === 0) {
         throw new VdeError('E_PATH_NOT_FOUND', '対象の文書がありません。', {
           paths: params.paths,
         });
       }
-      return this.#commitOpen(params, incoming, watchTargets, warnings);
+      return this.#commitOpen(params, incoming, watchTargets, settings, warnings);
     });
   }
 
@@ -332,6 +572,7 @@ export class DocumentService {
     params: ReturnType<typeof openParamsSchema.parse>,
     incoming: Incoming[],
     watchTargets: Awaited<ReturnType<typeof expandTargets>>['watchTargets'],
+    settings: AssetSettings,
     warnings: Warning[],
   ): Promise<ServiceResult<OpenResult>> {
     if ((params.title !== undefined || params.key !== undefined) && incoming.length !== 1) {
@@ -396,8 +637,12 @@ export class DocumentService {
             ...target,
             suppressedPaths: [],
             createdAt: timestamp,
+            assetsRoot: settings.root ?? null,
           };
           state.watchRules.push(rule);
+        } else if (settings.root !== undefined) {
+          // 同じ対象を、assets-rootを指定して登録し直した。後から見つける文書にも、新しい指定を使う。
+          rule.assetsRoot = settings.root;
         }
         rules.push(rule);
       }
@@ -424,9 +669,7 @@ export class DocumentService {
         warnings,
       };
     });
-    for (const item of incoming) {
-      if (item.canonicalPath !== null) this.#signatures.set(item.canonicalPath, item.signature);
-    }
+    for (const item of incoming) this.#record(item);
     for (const event of events) this.#emit(event);
     return result;
   }
@@ -469,7 +712,11 @@ export class DocumentService {
   }
 
   // 候補の本文を読む。呼び出し側が、対象のfileの待ち行列を取得してから呼ぶ。
-  async #readCandidates(resolved: ResolvedCandidates): Promise<Incoming[]> {
+  async #readCandidates(
+    resolved: ResolvedCandidates,
+    settings: AssetSettings,
+    warnings: Warning[],
+  ): Promise<Incoming[]> {
     const problems = [...resolved.problems];
     // 合計の大きさは読み込みながら確かめる。上限を超える量をmemoryへ載せない。
     const incoming: Incoming[] = [];
@@ -499,17 +746,46 @@ export class DocumentService {
           max: LIMITS.openSourceBytes,
         });
       }
-      incoming.push({
-        sourceKind: 'file',
-        canonicalPath: loaded.canonicalPath,
-        displayPath: candidate.displayPath,
-        pathSegments: loaded.canonicalPath.split(sep).filter((segment) => segment !== ''),
-        format,
-        bytes: loaded.bytes,
-        text: loaded.text,
-        fallbackTitle: basename(loaded.canonicalPath),
-        signature: loaded.signature,
-      });
+      try {
+        const existing = this.#existingFile(loaded.canonicalPath);
+        const item = await this.#withAssets(
+          {
+            sourceKind: 'file',
+            canonicalPath: loaded.canonicalPath,
+            displayPath: candidate.displayPath,
+            pathSegments: loaded.canonicalPath.split(sep).filter((segment) => segment !== ''),
+            format,
+            bytes: loaded.bytes,
+            text: loaded.text,
+            fallbackTitle: basename(loaded.canonicalPath),
+            signature: loaded.signature,
+          },
+          existing,
+          settings,
+        );
+        if (item.assetScanFailed) {
+          // 調べ終えたassetを持つ文書を、調べられなかった結果で置き換えない。
+          if (this.#hasCompleteAssets(existing)) {
+            problems.push({
+              path: candidate.displayPath,
+              code: 'E_PARSE_FAILED',
+              reason: 'asset-scan-failed',
+            });
+            continue;
+          }
+          warnings.push(assetScanWarning(candidate.displayPath));
+        }
+        incoming.push(item);
+      } catch (error) {
+        if (!(error instanceof VdeError)) throw error;
+        problems.push({
+          path: candidate.displayPath,
+          code: error.code,
+          reason: String(
+            error.details['reason'] ?? error.details['limit'] ?? error.details['asset'] ?? 'asset',
+          ),
+        });
+      }
     }
     if (problems.length > 0) {
       const first = problems[0] as Problem;
@@ -545,13 +821,28 @@ export class DocumentService {
         revisionChanged: false,
       };
     }
+    // 登録の時点の状態で確かめる。調べ終えたassetを持つ文書を、調べられなかった結果で置き換えない。
+    if (item.assetScanFailed && this.#hasCompleteAssets(existing)) throw assetScanError();
 
     const sourceSha256 = tx.putBlob(item.bytes);
+    const assets = item.assets.map((asset) => ({
+      logicalPath: asset.logicalPath,
+      mime: asset.mime,
+      role: asset.role,
+      sha256: tx.putBlob(asset.bytes),
+      byteLength: asset.bytes.byteLength,
+    }));
+    // 参照しているfileの内容が変われば、本文が同じでも別の版になる（仕様4.1）。
     const revision = computeRevision({
       format: item.format,
       sourceSha256,
       parserProfileVersion: profileOf(item.format),
-      assets: [],
+      assets: assets.map(({ logicalPath, mime, role, sha256 }) => ({
+        logicalPath,
+        mime,
+        role,
+        sha256,
+      })),
     });
     const title = options.title ?? extractTitle(item.text, item.format) ?? item.fallbackTitle;
     const revisionRecord: RevisionRecord = {
@@ -561,6 +852,9 @@ export class DocumentService {
       byteLength: item.bytes.byteLength,
       parserProfileVersion: profileOf(item.format),
       createdAt: timestamp,
+      documentLogicalPath: item.documentLogicalPath,
+      assets,
+      assetScan: item.assetScanFailed ? 'failed' : 'complete',
     };
 
     if (!existing) {
@@ -581,6 +875,9 @@ export class DocumentService {
         sourceState: 'ready',
         currentRevision: revision,
         revisions: [revisionRecord],
+        assetsRoot: item.assetsRoot,
+        extraAssets: item.extraAssets,
+        htmlMode: 'static',
       };
       state.openOrder.push(documentId);
       return { documentId, outcome: 'created', openSetChanged: true, revisionChanged: true };
@@ -604,9 +901,24 @@ export class DocumentService {
       existing.format = item.format;
       changed = true;
       revisionChanged = true;
+    } else {
+      // 版が同じでも、参照を調べ終えたかどうかは変わりうる（参照のない文書）。
+      const current = existing.revisions.find((entry) => entry.revision === revision);
+      if (current && current.assetScan !== revisionRecord.assetScan) {
+        current.assetScan = revisionRecord.assetScan;
+        changed = true;
+      }
     }
     if (existing.sourceState !== 'ready') {
       existing.sourceState = 'ready';
+      changed = true;
+    }
+    if (
+      existing.assetsRoot !== item.assetsRoot ||
+      existing.extraAssets.join('\n') !== item.extraAssets.join('\n')
+    ) {
+      existing.assetsRoot = item.assetsRoot;
+      existing.extraAssets = item.extraAssets;
       changed = true;
     }
     if (options.title !== undefined) {
@@ -834,6 +1146,97 @@ export class DocumentService {
     return analysis;
   }
 
+  // 開いている文書の、表示する版の記録。指定がなければ現在の版。
+  describeRevision(
+    documentId: string,
+    revision: string | undefined,
+  ): { record: DocumentRecord; entry: RevisionRecord } {
+    const record = this.#requireOpen(documentId);
+    return { record, entry: this.#requireRevision(record, revision ?? record.currentRevision) };
+  }
+
+  // 文書中のlinkが指すlocalの文書を開く（仕様10.4）。hrefは、解析で取り出したものだけを受け取る。
+  // すでに開いている文書なら、表示を切り替えるだけ。未登録の文書は、利用者の確認があるときだけ開く。
+  async openLinked(link: {
+    documentId: string;
+    revision: string;
+    linkId: string;
+    href: string;
+    confirmation: string | undefined;
+  }): Promise<ServiceResult<LinkOpenResult>> {
+    const { documentId, href } = link;
+    const record = this.#requireOpen(documentId);
+    const target = classifyLink(href);
+    const base =
+      target.kind !== 'document'
+        ? null
+        : target.fromRoot || record.canonicalPath === null
+          ? record.assetsRoot
+          : dirname(record.canonicalPath);
+    if (target.kind !== 'document' || base === null) {
+      throw new VdeError('E_INVALID_ARGUMENT', 'このlinkは、開ける文書を指していません。');
+    }
+    const absolute = resolve(base, ...target.segments);
+    const canonical = await canonicalizePath(absolute);
+    // 確認は1回だけ使える。渡された確認は、どの結果になっても、ここで使い終える。
+    const now = this.#now().getTime();
+    const offered =
+      link.confirmation === undefined ? undefined : this.#linkConfirmations.get(link.confirmation);
+    if (link.confirmation !== undefined) this.#linkConfirmations.delete(link.confirmation);
+    const existing = this.#existingFile(canonical);
+    if (existing?.isOpen) {
+      await this.focus({ documentId: existing.documentId });
+      return {
+        data: { status: 'focused', documentId: existing.documentId },
+        catalogVersion: this.#store.payload.catalogVersion,
+        warnings: [],
+      };
+    }
+    // 確認した文書・版・link・行き先のすべてが、いまの解決結果と同じときだけ有効。
+    // 確認の後で文書が更新されたり、assets-rootが変わったりして行き先が変わっていたら、確認し直す。
+    const confirmed =
+      offered !== undefined &&
+      offered.expiresAt > now &&
+      offered.documentId === documentId &&
+      offered.revision === link.revision &&
+      offered.linkId === link.linkId &&
+      offered.canonicalPath === canonical;
+    if (!confirmed) {
+      // 文書に書かれたlinkだけを根拠に、一覧へ文書を増やさない。開く対象を示して、確認を求める。
+      for (const [key, entry] of this.#linkConfirmations) {
+        if (entry.expiresAt <= now) this.#linkConfirmations.delete(key);
+      }
+      while (this.#linkConfirmations.size >= MAX_LINK_CONFIRMATIONS) {
+        const oldest = this.#linkConfirmations.keys().next().value;
+        if (oldest === undefined) break;
+        this.#linkConfirmations.delete(oldest);
+      }
+      const confirmation = randomBytes(16).toString('base64url');
+      this.#linkConfirmations.set(confirmation, {
+        documentId,
+        revision: link.revision,
+        linkId: link.linkId,
+        canonicalPath: canonical,
+        expiresAt: now + LINK_CONFIRMATION_TTL_MS,
+      });
+      throw new VdeError(
+        'E_CONFIRMATION_REQUIRED',
+        'この文書はまだ開かれていません。開くには確認が必要です。',
+        // changedは、渡された確認が成立しなかったこと（行き先が変わった、期限が切れた、使用済み）を示す。
+        { path: canonical, confirmation, changed: link.confirmation !== undefined },
+      );
+    }
+    // 開くのは、確認した行き先そのもの。
+    const opened = await this.open({ cwd: dirname(canonical), paths: [canonical] });
+    const openedId = opened.data.documents[0]?.documentId as string;
+    await this.focus({ documentId: openedId });
+    return {
+      data: { status: 'opened', documentId: openedId },
+      catalogVersion: this.#store.payload.catalogVersion,
+      warnings: opened.warnings,
+    };
+  }
+
   // 一覧から外すだけで、原本は削除しない。全対象を先に検査する（仕様5.5）。
   async close(rawParams: unknown): Promise<ServiceResult<CloseResult>> {
     const params = closeParamsSchema.parse(rawParams);
@@ -894,6 +1297,10 @@ export class DocumentService {
         warnings: [],
       };
     });
+    // 閉じる前に始まっていた処理（表示の権限の発行など）が、閉じた後の文書に対して成立しないようにする。
+    for (const documentId of result.data.closed) {
+      this.#openEpochs.set(documentId, this.openEpoch(documentId) + 1);
+    }
     if (changed) this.#emit({ type: 'catalog-changed' });
     return result;
   }
@@ -1022,13 +1429,47 @@ export class DocumentService {
       }
     }
 
+    // 参照しているfileも読み直す。本文が同じでも、assetが変われば新しい版になる。
+    let item: Incoming | null = null;
+    const current = this.#store.payload.documents[documentId];
+    if (loaded && current && loaded.canonicalPath === canonicalPath) {
+      try {
+        item = await this.#withAssets(
+          {
+            sourceKind: 'file',
+            canonicalPath: loaded.canonicalPath,
+            displayPath: current.displayPath,
+            pathSegments: current.pathSegments,
+            format: current.format,
+            bytes: loaded.bytes,
+            text: loaded.text,
+            fallbackTitle: basename(loaded.canonicalPath),
+            signature: loaded.signature,
+          },
+          current,
+          INHERITED_ASSETS,
+        );
+      } catch (error) {
+        // assetが上限を超えたなど。切り捨てた内容を、新しい版として公開しない。
+        if (!(error instanceof VdeError)) throw error;
+        failure = 'error';
+      }
+      // 参照を調べられなかった。調べ終えたassetを持つ版があるなら、その版・asset・追っているfileを保ち、
+      // 状態だけをerrorにする。fileが変わるか、手動で読み直すと、もう一度調べる。
+      if (item?.assetScanFailed && this.#hasCompleteAssets(current)) {
+        item = null;
+        failure = 'error';
+      }
+    }
+    const read = item;
+
     const events: DocumentEvent[] = [];
     const applied = await this.#store.transaction((tx) => {
       const state = tx.state;
       const record = state.documents[documentId];
       // 読んでいる間に閉じられていたら、何もしない。
       if (!record?.isOpen) return false;
-      if (!loaded || loaded.canonicalPath !== record.canonicalPath) {
+      if (!read || read.canonicalPath !== record.canonicalPath) {
         if (record.sourceState !== failure) {
           record.sourceState = failure;
           record.updatedAt = this.#now().toISOString();
@@ -1037,21 +1478,7 @@ export class DocumentService {
         }
         return true;
       }
-      const outcome = this.#upsert(
-        tx,
-        {
-          sourceKind: 'file',
-          canonicalPath: loaded.canonicalPath,
-          displayPath: record.displayPath,
-          pathSegments: record.pathSegments,
-          format: record.format,
-          bytes: loaded.bytes,
-          text: loaded.text,
-          fallbackTitle: basename(loaded.canonicalPath),
-          signature: loaded.signature,
-        },
-        { reopen: false },
-      );
+      const outcome = this.#upsert(tx, read, { reopen: false });
       if (outcome.outcome !== 'updated') return true;
       assertOpenLimits(state);
       state.catalogVersion += 1;
@@ -1064,10 +1491,14 @@ export class DocumentService {
     });
     if (!applied) return { changed: false, signature: null };
     // 読み取った内容を公開した（または、読めないことを記録した）。対応するfileの状態を覚える。
-    const signature = loaded?.canonicalPath === canonicalPath ? loaded.signature : null;
-    this.#signatures.set(canonicalPath, signature);
+    // 読めなかったときは、それまで追っていたfileを引き続き追う。
+    if (read) this.#record(read);
+    else {
+      const files = this.#signatures.get(canonicalPath)?.files ?? [];
+      this.#signatures.set(canonicalPath, { signature: null, files });
+    }
     for (const event of events) this.#emit(event);
-    return { changed: events.length > 0, signature };
+    return { changed: events.length > 0, signature: read?.signature ?? null };
   }
 
   // 監視ruleの対象を走査し、新しく現れた文書を登録する。
@@ -1139,18 +1570,32 @@ export class DocumentService {
           max: LIMITS.openSourceBytes,
         });
       }
-      discovered.push({
-        sourceKind: 'file',
-        canonicalPath: loaded.canonicalPath,
-        // 監視で見つけた文書は、ruleの起点からの相対pathで表示する。
-        displayPath: displayPathOf(rule.root, loaded.canonicalPath),
-        pathSegments: loaded.canonicalPath.split(sep).filter((segment) => segment !== ''),
-        format,
-        bytes: loaded.bytes,
-        text: loaded.text,
-        fallbackTitle: basename(loaded.canonicalPath),
-        signature: loaded.signature,
-      });
+      try {
+        discovered.push(
+          await this.#withAssets(
+            {
+              sourceKind: 'file',
+              canonicalPath: loaded.canonicalPath,
+              // 監視で見つけた文書は、ruleの起点からの相対pathで表示する。
+              displayPath: displayPathOf(rule.root, loaded.canonicalPath),
+              pathSegments: loaded.canonicalPath.split(sep).filter((segment) => segment !== ''),
+              format,
+              bytes: loaded.bytes,
+              text: loaded.text,
+              fallbackTitle: basename(loaded.canonicalPath),
+              signature: loaded.signature,
+            },
+            this.#existingFile(loaded.canonicalPath),
+            // ruleの登録時に指定されたassets-rootを、後から見つけた文書にも使う。
+            rule.assetsRoot === null
+              ? INHERITED_ASSETS
+              : { ...INHERITED_ASSETS, root: rule.assetsRoot },
+          ),
+        );
+      } catch (error) {
+        if (error instanceof VdeError) continue;
+        throw error;
+      }
     }
     if (discovered.length === 0) return [];
 
@@ -1176,9 +1621,7 @@ export class DocumentService {
       if (state.activeDocumentId === null) state.activeDocumentId = state.openOrder[0] ?? null;
       return added;
     });
-    for (const item of appliedItems) {
-      if (item.canonicalPath !== null) this.#signatures.set(item.canonicalPath, item.signature);
-    }
+    for (const item of appliedItems) this.#record(item);
     if (registered.length > 0) this.#emit({ type: 'catalog-changed' });
     return registered;
   }

@@ -34,7 +34,7 @@ function tooLarge(path: string, actual: number): VdeError {
 }
 
 // 上限まで読む。上限を超える内容があればnull。
-async function readBounded(handle: FileHandle, limit: number): Promise<Buffer | null> {
+export async function readBounded(handle: FileHandle, limit: number): Promise<Buffer | null> {
   const chunks: Buffer[] = [];
   let total = 0;
   for (;;) {

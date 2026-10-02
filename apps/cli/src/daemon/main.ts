@@ -15,8 +15,10 @@ import {
 } from '../persistence/paths.ts';
 import { StateStore } from '../persistence/state-store.ts';
 import { nodeStoreFs, type StoreFs } from '../persistence/store-fs.ts';
+import { createRenderService } from '../render/render-service.ts';
 import { createEventHub } from '../server/event-hub.ts';
 import { startManagementServer, type ManagementServer } from '../server/http/management.ts';
+import { startPreviewServer, type PreviewServer } from '../server/http/preview.ts';
 import { startIpcServer, type IpcServer } from '../server/ipc-server.ts';
 import { createSessionService } from '../server/session-service.ts';
 import { createWatchService, type WatchService } from '../watch/watch-service.ts';
@@ -41,6 +43,8 @@ export interface DaemonOptions {
   probe?: ProcessProbe;
   // 管理UIのport。指定がなければOSに割り当ててもらう。
   managementPort?: number;
+  // 文書を表示するlistenerのport。指定がなければOSに割り当ててもらう。
+  previewPort?: number;
   // 文書の解析を差し替える（testで、遅い解析を再現するために使う）。
   parse?: ParseService;
 }
@@ -94,6 +98,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   let store: StateStore | null = null;
   let ipc: IpcServer | null = null;
   let management: ManagementServer | null = null;
+  let preview: PreviewServer | null = null;
   let watcher: WatchService | null = null;
   let parse: ParseService | null = null;
   let announceStopping: () => void = () => undefined;
@@ -114,6 +119,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     await ipc?.drain();
     announceStopping();
     await management?.close();
+    await preview?.close();
     await store?.close();
     await parse?.close();
     await ipc?.close();
@@ -160,18 +166,49 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     announceStopping = () => {
       events.publish({ type: 'daemon-stopping' });
     };
+    // 文書を閉じたら、その文書の表示の権限をすぐに失効させる。
+    let pruneGrants: () => void = () => undefined;
     const documents = new DocumentService({
       store: openedStore,
       cursors: createCursorCodec(randomBytes(32)),
       analyze: (format, text) => parser.analyze(format, text),
+      scan: (kind, text) => parser.scan(kind, text),
       emit: (event) => {
         events.publish(event);
-        // 開いている文書が変わったら、監視するdirectoryも合わせる。
-        if (event.type === 'catalog-changed') watcher?.sync();
+        // 開いている文書が変わったら、監視するdirectoryと、表示の権限も合わせる。
+        if (event.type === 'catalog-changed') {
+          watcher?.sync();
+          pruneGrants();
+        }
       },
     });
     const sessions = createSessionService();
     const startedAt = new Date().toISOString();
+    // 開発用のoriginは、sourceから実行しているときだけ受け付ける。配布物では常に無効。
+    const devOrigin = isSourceRun ? (environment.env['VDE_OPEN_DEV_UI_ORIGIN'] ?? null) : null;
+
+    // 文書の表示は、管理UIとは別のportで行う。管理の権限とoriginを共有しない（仕様10.1）。
+    let managementOrigin: string | null = null;
+    let previewOrigin = '';
+    const render = createRenderService({
+      store: openedStore,
+      documents,
+      sessions,
+      parse: parser,
+      previewOrigin: () => previewOrigin,
+    });
+    pruneGrants = () => render.pruneClosed();
+    preview = await startPreviewServer(
+      {
+        render,
+        // 表示を埋め込めるのは管理UIだけ。
+        frameAncestors: () =>
+          [managementOrigin, devOrigin].filter((origin): origin is string => origin !== null),
+        onEvent: (event, fields) => logger.log(event, fields),
+      },
+      options.previewPort === undefined ? {} : { port: options.previewPort },
+    );
+    previewOrigin = preview.origin;
 
     management = await startManagementServer(
       {
@@ -180,14 +217,16 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         documents,
         sessions,
         events,
+        render,
+        previewOrigin,
         webRoot: webRootPath(),
-        // 開発用のoriginは、sourceから実行しているときだけ受け付ける。配布物では常に無効。
-        devOrigin: isSourceRun ? (environment.env['VDE_OPEN_DEV_UI_ORIGIN'] ?? null) : null,
+        devOrigin,
         isStopping: () => stopping !== null,
         onEvent: (event, fields) => logger.log(event, fields),
       },
       options.managementPort === undefined ? {} : { port: options.managementPort },
     );
+    managementOrigin = management.origin;
     const uiUrl = `${management.origin}/`;
     watcher = createWatchService({
       documents,

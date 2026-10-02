@@ -1,6 +1,8 @@
 import {
+  assetRecordSchema,
   documentFormatSchema,
   documentIdSchema,
+  htmlModeSchema,
   revisionSchema,
   sha256Schema,
   sourceKindSchema,
@@ -18,6 +20,11 @@ export const revisionRecordSchema = z.strictObject({
   byteLength: z.number().int().nonnegative(),
   parserProfileVersion: z.string().min(1),
   createdAt: z.string(),
+  // この版の文書の位置（assets-rootからの相対path）と、参照しているlocal file。
+  documentLogicalPath: z.string().min(1),
+  assets: z.array(assetRecordSchema),
+  // 文書が参照するfileを調べ終えたか。failedなら、assetは集められていない（参照がないのとは違う）。
+  assetScan: z.enum(['complete', 'failed']),
 });
 export type RevisionRecord = z.infer<typeof revisionRecordSchema>;
 
@@ -38,6 +45,11 @@ export const documentRecordSchema = z.strictObject({
   sourceState: sourceStateSchema,
   currentRevision: revisionSchema.nullable(),
   revisions: z.array(revisionRecordSchema),
+  // local assetを解決できる範囲の上限（symlinkを解決済みのdirectory）。nullなら、local assetは使えない。
+  assetsRoot: z.string().nullable(),
+  // 利用者が個別に指定したasset（assets-rootからの相対path）。
+  extraAssets: z.array(z.string()),
+  htmlMode: htmlModeSchema,
 });
 export type DocumentRecord = z.infer<typeof documentRecordSchema>;
 
@@ -98,7 +110,10 @@ export function findIntegrityProblem(payload: StatePayload): string | null {
 export function referencedBlobs(payload: StatePayload): Set<string> {
   const blobs = new Set<string>();
   for (const record of Object.values(payload.documents)) {
-    for (const entry of record.revisions) blobs.add(entry.sourceSha256);
+    for (const entry of record.revisions) {
+      blobs.add(entry.sourceSha256);
+      for (const asset of entry.assets) blobs.add(asset.sha256);
+    }
   }
   return blobs;
 }

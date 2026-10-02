@@ -26,4 +26,9 @@ export const LIMITS = {
   bootstrapTicketTtlMs: 60 * 1000,
   sessionIdleMs: 12 * 60 * 60 * 1000,
   sseHeartbeatMs: 15 * 1000,
+  assetBytes: 20 * MiB,
+  documentAssetBytes: 100 * MiB,
+  documentAssets: 500,
+  cssReferenceDepth: 8,
+  renderGrantsPerSession: 64,
 } as const;

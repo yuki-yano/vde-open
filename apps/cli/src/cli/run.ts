@@ -123,6 +123,16 @@ function parseFormat(value: string): 'auto' | 'markdown' | 'html' {
   throw new InvalidArgumentError('--formatはauto、markdown、htmlのいずれかです。');
 }
 
+function parseHtmlMode(value: string): 'static' {
+  if (value === 'static') return value;
+  if (value === 'interactive') {
+    throw new InvalidArgumentError(
+      'interactive（scriptを動かす表示）は、この版ではまだ使えません。staticを指定してください。',
+    );
+  }
+  throw new InvalidArgumentError('--html-modeはstaticを指定してください。');
+}
+
 function describeDocument(document: DocumentSummary): string {
   const path = document.displayPath ?? `(${document.sourceKind})`;
   return `${document.documentId}  ${escapeForTerminal(document.title)}  ${escapeForTerminal(path)}`;
@@ -158,6 +168,9 @@ interface OpenOptions {
   key?: string;
   recursive: boolean;
   watch: boolean;
+  htmlMode?: 'static';
+  assetsRoot?: string;
+  asset: string[];
   open?: boolean;
   focus: boolean;
   json: boolean;
@@ -294,6 +307,17 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     .option('--key <key>', 'stdinの文書を同じ1件として更新するためのkey。1文書のときだけ')
     .option('-R, --recursive', 'directoryを再帰的に列挙する', false)
     .option('-w, --watch', 'directory／globに新しく現れた文書も開く', false)
+    .option('--html-mode <mode>', 'HTMLの表示方法。static（scriptを動かさない）', parseHtmlMode)
+    .option(
+      '--assets-root <dir>',
+      '画像やCSSなどのlocal fileを読める範囲。指定がなければ、文書のあるdirectory',
+    )
+    .option(
+      '--asset <path>',
+      '文書の解析では見つからないlocal fileを個別に登録する（assets-rootからの相対path）。複数回指定できる',
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
     .option('--open', 'browserで管理UIを開く')
     .option('--no-open', 'browserを開かない')
     .option('--focus', '最初に指定した文書を表示中の文書にする', false)
@@ -326,6 +350,9 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
             watch: options.watch,
             ...(options.title === undefined ? {} : { title: options.title }),
             ...(options.key === undefined ? {} : { key: options.key }),
+            ...(options.htmlMode === undefined ? {} : { htmlMode: options.htmlMode }),
+            ...(options.assetsRoot === undefined ? {} : { assetsRoot: options.assetsRoot }),
+            assets: options.asset,
           };
           let params: Record<string, unknown>;
           if (fromStdin) {
@@ -636,12 +663,18 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
       '管理UIのport。指定がなければ空きportを使う',
       parseInteger('--port', 1, 65535),
     )
-    .action(async (options: { port?: number }) => {
+    .option(
+      '--preview-port <n>',
+      '文書を表示するlistenerのport。指定がなければ空きportを使う',
+      parseInteger('--preview-port', 1, 65535),
+    )
+    .action(async (options: { port?: number; previewPort?: number }) => {
       try {
         const handle = await startDaemon({
           environment: context.environment,
           version: CLI_VERSION,
           ...(options.port === undefined ? {} : { managementPort: options.port }),
+          ...(options.previewPort === undefined ? {} : { previewPort: options.previewPort }),
         });
         context.stderr(
           `daemonを前景で起動しました（pid=${String(process.pid)}、${handle.uiUrl}）。Ctrl+Cで停止します。\n`,

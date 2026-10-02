@@ -8,6 +8,8 @@ import type {
 } from '@tanstack/markdown';
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
 
+import { classifyLink, isRelativeReference } from './references.ts';
+
 // 解析結果の上限（仕様7.4）。超えた文書は解析errorとし、原文の表示へ切り替える。
 export const PARSER_LIMITS = { maxNodes: 100_000, maxDepth: 64 } as const;
 
@@ -47,11 +49,12 @@ export function isSafeLink(url: string): boolean {
   return url.startsWith('#') || SAFE_LINK.test(url);
 }
 
-// URLは解析の時点で絞る。linkは外部のhttp(s)・mailtoと、文書内の見出しだけを残す。
-// 画像は読み込まない。localの画像は、P3の限定asset経由で表示する。
-const urlTransform: UrlTransform = (url, kind) => {
-  if (kind === 'image') return null;
-  return isSafeLink(url) ? url : null;
+// URLは解析の時点で絞る。
+// 画像は、文書からの相対参照だけを残す。表示できるのは、登録済みのlocal fileだけ（描画側で確かめる）。
+// linkは、外部のhttp(s)・mailto、文書内の見出し、localの文書への相対linkを残す。
+export const markdownUrlTransform: UrlTransform = (url, kind) => {
+  if (kind === 'image') return isRelativeReference(url) ? url : null;
+  return isSafeLink(url) || classifyLink(url).kind === 'document' ? url : null;
 };
 
 // serverとUIで同じ解析条件を使う。生HTMLは常に無効。
@@ -59,7 +62,7 @@ export const MARKDOWN_PARSE_OPTIONS: ParseOptions = {
   allowHtml: false,
   frontmatter: true,
   headingIds: headingAnchor,
-  urlTransform,
+  urlTransform: markdownUrlTransform,
 };
 
 export function parseMarkdownDocument(source: string): MarkdownDocument {

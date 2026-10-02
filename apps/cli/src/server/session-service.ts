@@ -21,6 +21,12 @@ export interface SessionService {
   revoke(token: string): void;
   // sessionが破棄されたときに呼ばれる。開いたままの接続を閉じるために使う。戻り値で解除する。
   onRevoke(token: string, listener: () => void): () => void;
+  // sessionを指す、秘密でない識別子。tokenを保持せずに、sessionへ権限を結び付けるために使う。
+  idOf(token: string): string;
+  // 識別子が指すsessionが有効か。利用した時刻は更新しない。
+  isActiveId(sessionId: string): boolean;
+  // いずれかのsessionが破棄されたときに、その識別子とともに呼ばれる。
+  onAnyRevoke(listener: (sessionId: string) => void): void;
 }
 
 // browserの管理sessionを扱う（仕様6.4）。秘密そのものは保持せず、digestで照合する。
@@ -29,12 +35,24 @@ export function createSessionService(now: () => number = Date.now): SessionServi
   const tickets = new Map<string, number>();
   const sessions = new Map<string, number>();
   const revokeListeners = new Map<string, Set<() => void>>();
+  const anyRevokeListeners = new Set<(sessionId: string) => void>();
 
   const drop = (key: string) => {
-    sessions.delete(key);
+    if (!sessions.delete(key)) return;
     const listeners = revokeListeners.get(key);
     revokeListeners.delete(key);
     if (listeners) for (const listener of listeners) listener();
+    for (const listener of anyRevokeListeners) listener(key);
+  };
+
+  const isActiveKey = (key: string): boolean => {
+    const lastUsedAt = sessions.get(key);
+    if (lastUsedAt === undefined) return false;
+    if (lastUsedAt + LIMITS.sessionIdleMs < now()) {
+      drop(key);
+      return false;
+    }
+    return true;
   };
 
   const sweep = () => {
@@ -74,15 +92,11 @@ export function createSessionService(now: () => number = Date.now): SessionServi
       sessions.set(key, now());
       return true;
     },
-    isActive(token) {
-      const key = digest(token);
-      const lastUsedAt = sessions.get(key);
-      if (lastUsedAt === undefined) return false;
-      if (lastUsedAt + LIMITS.sessionIdleMs < now()) {
-        drop(key);
-        return false;
-      }
-      return true;
+    isActive: (token) => isActiveKey(digest(token)),
+    idOf: digest,
+    isActiveId: isActiveKey,
+    onAnyRevoke(listener) {
+      anyRevokeListeners.add(listener);
     },
     revoke(token) {
       drop(digest(token));

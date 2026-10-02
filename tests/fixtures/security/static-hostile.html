@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>敵対的な文書（静的表示の確認用）</title>
+    <base href="__BEACON__/base/" />
+    <meta http-equiv="refresh" content="1;url=__BEACON__/meta-refresh" />
+    <link rel="prefetch" href="__BEACON__/prefetch" />
+    <link rel="dns-prefetch" href="__BEACON__" />
+    <link rel="preconnect" href="__BEACON__" />
+    <link rel="preload" href="__BEACON__/preload.js" as="script" />
+    <link rel="stylesheet" href="__BEACON__/remote.css" />
+    <link rel="stylesheet" href="css/site.css" />
+    <style>
+      @import url("__BEACON__/import.css");
+      .inline-remote {
+        background: url("__BEACON__/style-bg.png");
+      }
+      #styled {
+        color: rgb(0, 128, 0);
+      }
+    </style>
+    <script>
+      document.getElementById;
+      window.pwned = true;
+      fetch('__BEACON__/script-fetch');
+      new Image().src = '__BEACON__/script-image';
+    </script>
+    <script src="__BEACON__/remote-script.js"></script>
+    <script src="app.js"></script>
+  </head>
+  <body onload="fetch('__BEACON__/body-onload')">
+    <h1 id="marker">元の文字</h1>
+    <p id="styled" class="from-file">登録済みのCSSで装飾される段落</p>
+    <img id="ok" src="img/a.png" alt="登録済みの画像" />
+    <img src="missing.png" onerror="fetch('__BEACON__/img-onerror')" alt="存在しない画像" />
+    <img src="__BEACON__/remote-image.png" alt="外部の画像" />
+    <svg width="10" height="10">
+      <script>
+        fetch('__BEACON__/svg-script');
+      </script>
+      <image href="__BEACON__/svg-image.png" />
+    </svg>
+    <iframe src="__BEACON__/iframe"></iframe>
+    <iframe srcdoc="&lt;script&gt;fetch('__BEACON__/srcdoc')&lt;/script&gt;"></iframe>
+    <object data="__BEACON__/object"></object>
+    <embed src="__BEACON__/embed" />
+    <noscript><img src="__BEACON__/noscript-image.png" alt="noscriptの中" /><p id="fallback">scriptが動かないときの文</p></noscript>
+    <a id="external" href="__BEACON__/clicked" ping="__BEACON__/ping" target="_blank">外部へのlink</a>
+    <a id="neighbor" href="neighbor.md">隣の文書</a>
+    <a id="inner" href="#marker">文書内の移動</a>
+    <form action="__BEACON__/form" method="post">
+      <input name="q" value="表示だけの部品" />
+      <button formaction="__BEACON__/formaction">送信</button>
+    </form>
+    <div style="background: url(__BEACON__/attr-bg.png)" class="inline-remote">style属性と外部の背景</div>
+    <video src="__BEACON__/video.mp4" poster="__BEACON__/poster.png" autoplay></video>
+  </body>
+</html>

@@ -133,6 +133,50 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     if ((await fetch(new URL('a.md', uiUrl))).status !== 404)
       fail('cwdのfileがUIのoriginから配信されています');
 
+    // 手順6の続き: 導入先だけで、HTMLの静的変換（同梱のparse5とcss-tree）と表示用のlistenerが動く。
+    mkdirSync(join(installDir, 'site'));
+    writeFileSync(
+      join(installDir, 'site', 'site.css'),
+      '.a{color:red}.b{background:url(//e/x.png)}',
+    );
+    writeFileSync(
+      join(installDir, 'site', 'index.html'),
+      '<link rel="stylesheet" href="site.css"><script>x()</script><p id="p">pack</p>',
+    );
+    const htmlId = runJson<Documents>('vo', ['open', 'site/index.html']).documents[0]?.documentId;
+    const origin = uiUrl.replace(/\/$/, '');
+    const ticket = runBin('vo', ['ui', '--print-url']).trim().split('#bootstrap=')[1] ?? '';
+    const post = async <T>(path: string, body: unknown, token?: string): Promise<T> => {
+      const response = await fetch(`${origin}/_/api/v1${path}`, {
+        method: 'POST',
+        headers: {
+          Origin: origin,
+          'Content-Type': 'application/json',
+          ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }),
+        },
+        body: JSON.stringify(body),
+      });
+      const envelope = (await response.json()) as Envelope<T>;
+      if (!envelope.ok) fail(`${path} が失敗しました（${String(response.status)}）`);
+      return envelope.data;
+    };
+    const { token } = await post<{ token: string }>('/sessions/bootstrap', { ticket });
+    const grant = await post<{ documentUrl: string; filesBaseUrl: string }>(
+      `/documents/${htmlId ?? ''}/render-grants`,
+      {},
+      token,
+    );
+    const rendered = await (await fetch(grant.documentUrl)).text();
+    if (!rendered.includes('<p id="p">pack</p>') || rendered.includes('<script')) {
+      fail('HTMLの静的変換が、導入先で動いていません');
+    }
+    const css = await (await fetch(`${grant.filesBaseUrl}site.css`)).text();
+    if (css !== '.a{color:red}.b{}') fail(`CSSの変換が、導入先で動いていません: ${css}`);
+    if ((await fetch(`${grant.filesBaseUrl}a.md`)).status !== 404) {
+      fail('登録していないfileが、表示用のlistenerから配信されています');
+    }
+    if (htmlId) runJson('vo', ['close', htmlId]);
+
     runJson('vo', ['close', openedId]);
     if (runJson<Documents>('vde-open', ['list']).documents.length !== 0) {
       fail('voのcloseがvde-openの一覧に反映されていません');

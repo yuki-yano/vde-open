@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./react": "./src/react.tsx"
+    "./react": "./src/react.tsx",
+    "./render": "./src/render.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

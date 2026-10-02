@@ -10,6 +10,8 @@ import { createCursorCodec } from '../../documents/cursor.ts';
 import { DocumentService } from '../../documents/service.ts';
 import { StateStore } from '../../persistence/state-store.ts';
 import { nodeStoreFs } from '../../persistence/store-fs.ts';
+import { createRenderService } from '../../render/render-service.ts';
+import { createParseService } from '../../workers/parse-service.ts';
 import { createEventHub } from '../event-hub.ts';
 import { createSessionService } from '../session-service.ts';
 import { startManagementServer, type ManagementServer } from './management.ts';
@@ -49,6 +51,14 @@ async function connect(heartbeatMs: number): Promise<Fixture> {
     documents,
     sessions,
     events,
+    render: createRenderService({
+      store,
+      documents,
+      sessions,
+      parse: createParseService(),
+      previewOrigin: () => 'http://127.0.0.1:1',
+    }),
+    previewOrigin: 'http://127.0.0.1:1',
     webRoot: null,
     devOrigin: null,
     isStopping: () => false,

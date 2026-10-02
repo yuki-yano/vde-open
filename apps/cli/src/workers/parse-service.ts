@@ -1,22 +1,40 @@
 import { Worker } from 'node:worker_threads';
 
 import type { DocumentAnalysis } from '@vde-open/document';
+import type {
+  RenderInput,
+  RenderOutput,
+  ScanKind,
+  ScannedReference,
+} from '@vde-open/document/render';
 import { LIMITS, VdeError, type DocumentFormat } from '@vde-open/shared';
 
 import { parseWorkerPath } from '../entry-paths.ts';
+import type { ParseRequest } from './parse-worker.ts';
 
 interface Pending {
-  resolve: (analysis: DocumentAnalysis) => void;
+  resolve: (result: unknown) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 }
 
 type WorkerReply =
-  | { id: number; ok: true; analysis: DocumentAnalysis }
+  | { id: number; ok: true; result: unknown }
   | { id: number; ok: false; reason: string };
+
+// idは送るときに付ける。
+type ParseWork = ParseRequest extends infer Request
+  ? Request extends { id: number }
+    ? Omit<Request, 'id'>
+    : never
+  : never;
 
 export interface ParseService {
   analyze(format: DocumentFormat, text: string): Promise<DocumentAnalysis>;
+  // 文書やCSSが参照するlocal fileの候補を集める。
+  scan(kind: ScanKind, text: string): Promise<ScannedReference[]>;
+  // 表示するための変換（HTMLの静的変換、CSSの参照の検査、linkの抽出）。
+  render(input: RenderInput): Promise<RenderOutput>;
   close(): Promise<void>;
 }
 
@@ -58,7 +76,7 @@ export function createParseService(options: ParseServiceOptions = {}): ParseServ
       if (!waiter) return;
       pending.delete(reply.id);
       clearTimeout(waiter.timer);
-      if (reply.ok) waiter.resolve(reply.analysis);
+      if (reply.ok) waiter.resolve(reply.result);
       else {
         waiter.reject(
           new VdeError('E_PARSE_FAILED', '文書を解析できませんでした。', { reason: reply.reason }),
@@ -73,28 +91,32 @@ export function createParseService(options: ParseServiceOptions = {}): ParseServ
     return created;
   };
 
+  const request = <T>(work: ParseWork): Promise<T> => {
+    if (closed) {
+      return Promise.reject(new VdeError('E_DAEMON_STOPPING', 'daemonは停止処理中です。'));
+    }
+    return new Promise<T>((resolve, reject) => {
+      const id = nextId;
+      nextId += 1;
+      const timer = setTimeout(() => {
+        // 時間切れの解析は、workerを止めて回収する。待っている他の解析もやり直しになる。
+        discardWorker();
+        failAll(
+          new VdeError('E_PARSE_FAILED', '文書の解析が時間内に終わりませんでした。', {
+            reason: 'timeout',
+            timeoutMs,
+          }),
+        );
+      }, timeoutMs);
+      pending.set(id, { resolve: resolve as (result: unknown) => void, reject, timer });
+      ensureWorker().postMessage({ id, ...work });
+    });
+  };
+
   return {
-    analyze(format, text) {
-      if (closed) {
-        return Promise.reject(new VdeError('E_DAEMON_STOPPING', 'daemonは停止処理中です。'));
-      }
-      return new Promise<DocumentAnalysis>((resolve, reject) => {
-        const id = nextId;
-        nextId += 1;
-        const timer = setTimeout(() => {
-          // 時間切れの解析は、workerを止めて回収する。待っている他の解析もやり直しになる。
-          discardWorker();
-          failAll(
-            new VdeError('E_PARSE_FAILED', '文書の解析が時間内に終わりませんでした。', {
-              reason: 'timeout',
-              timeoutMs,
-            }),
-          );
-        }, timeoutMs);
-        pending.set(id, { resolve, reject, timer });
-        ensureWorker().postMessage({ id, format, text });
-      });
-    },
+    analyze: (format, text) => request({ op: 'analyze', format, text }),
+    scan: (kind, text) => request({ op: 'scan', kind, text }),
+    render: (input) => request({ op: 'render', input }),
     async close() {
       closed = true;
       failAll(new VdeError('E_DAEMON_STOPPING', 'daemonは停止処理中です。'));
