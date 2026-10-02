@@ -1,0 +1,2 @@
+# fixtureはbyte単位でrevisionを計算するので、改行を変換しない。
+tests/fixtures/** -text

@@ -1,0 +1,22 @@
+{
+  "name": "@vde-open/document",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@tanstack/highlight": "1.0.0",
+    "@tanstack/markdown": "1.0.0",
+    "css-tree": "3.2.1",
+    "parse5": "8.0.1"
+  },
+  "devDependencies": {
+    "@types/css-tree": "3.2.0"
+  }
+}

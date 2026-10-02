@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "singleQuote": true,
+  "ignorePatterns": [
+    "tmp/**",
+    "**/dist/**",
+    "artifacts/**",
+    "tests/fixtures/**",
+    "**/*.md",
+    "pnpm-lock.yaml"
+  ]
+}

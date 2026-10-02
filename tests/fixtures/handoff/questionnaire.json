@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "title": "ログイン画面の確認",
+  "instructions": "採用案と表示密度を選び、必要な修正点を入力してください。回答案を確認してから、vde-open本体の送信ボタンで確定します。",
+  "fieldOrder": [
+    "layout",
+    "density",
+    "comment"
+  ],
+  "answerSchema": {
+    "type": "object",
+    "properties": {
+      "layout": {
+        "type": "string",
+        "title": "採用案",
+        "enum": [
+          "A",
+          "B"
+        ]
+      },
+      "density": {
+        "type": "string",
+        "title": "表示密度",
+        "enum": [
+          "comfortable",
+          "compact"
+        ]
+      },
+      "comment": {
+        "type": "string",
+        "title": "修正したい点",
+        "maxLength": 4000
+      }
+    },
+    "required": [
+      "layout",
+      "density"
+    ],
+    "additionalProperties": false
+  }
+}

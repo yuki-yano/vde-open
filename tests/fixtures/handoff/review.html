@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ログイン画面の選択サンプル</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #18202b; background: #f5f7fa; }
+    body { margin: 0; padding: 24px; }
+    main { max-width: 860px; margin: auto; }
+    .options { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+    .card { display: block; padding: 20px; background: white; border: 1px solid #b7c2d0; border-radius: 10px; }
+    .mock { padding: 18px; border: 1px dashed #93a3b5; border-radius: 8px; margin-top: 12px; }
+    .mock-line { height: 14px; margin: 12px 0; background: #dbe3ed; border-radius: 4px; }
+    .mock-title { font-weight: 600; }
+    fieldset { border: 0; padding: 0; margin: 24px 0; }
+    legend { font-weight: 600; margin-bottom: 12px; }
+    .field { display: block; margin: 16px 0; }
+    textarea { display: block; box-sizing: border-box; width: 100%; min-height: 100px; margin-top: 8px; }
+    button { padding: 10px 18px; }
+    .notice { font-size: 14px; line-height: 1.7; }
+    #status { min-height: 3em; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>ログイン画面の選択</h1>
+  <p class="notice">このHTMLは連携SDK用のサンプルです。ここで更新できるのは回答案だけです。最終送信はvde-open本体の画面で行います。</p>
+  <fieldset id="fields" disabled>
+    <legend>採用案</legend>
+    <div class="options">
+      <label class="card"><input type="radio" name="layout" value="A"> A：中央寄せ
+        <div class="mock" aria-hidden="true"><div class="mock-title">ログイン</div><div class="mock-line"></div><div class="mock-line"></div></div>
+      </label>
+      <label class="card"><input type="radio" name="layout" value="B"> B：説明を併記
+        <div class="mock" aria-hidden="true"><div class="mock-title">サービスの説明 / ログイン</div><div class="mock-line"></div><div class="mock-line"></div></div>
+      </label>
+    </div>
+    <label class="field">表示密度
+      <select id="density"><option value="">選択してください</option><option value="comfortable">余白を広く</option><option value="compact">コンパクト</option></select>
+    </label>
+    <label class="field">修正したい点<textarea id="comment" maxlength="4000"></textarea></label>
+    <button id="apply" type="button">回答案を本体へ反映</button>
+    <button id="reload" type="button" hidden>最新の回答案を読み込む</button>
+  </fieldset>
+  <p id="status" role="status" aria-live="polite">vde-openのSDK接続を待っています。</p>
+</main>
+<script>
+// これは実装済みSDKではなく、仕様のwindow.vde APIを利用するfixtureです。
+(async () => {
+  const status = document.getElementById('status');
+  const fields = document.getElementById('fields');
+  const apply = document.getElementById('apply');
+  const reload = document.getElementById('reload');
+  const density = document.getElementById('density');
+  const comment = document.getElementById('comment');
+  const sdk = window.vde;
+  if (!sdk) {
+    status.textContent = 'このサンプルはvde-openのinteractiveな質問ビューで開いてください。SDKがないため回答は送信しません。';
+    return;
+  }
+  // 編集の元にした版。画面へ反映した回答案の版だけを入れる。
+  let baseDraftVersion = 0;
+  // 本体側で更新され、まだ画面へ反映していない回答案。
+  let pending = null;
+  let dirty = false;
+  fields.addEventListener('input', () => { dirty = true; });
+  const display = (answers) => {
+    for (const radio of document.querySelectorAll('input[name="layout"]')) {
+      radio.checked = radio.value === answers.layout;
+    }
+    density.value = typeof answers.density === 'string' ? answers.density : '';
+    comment.value = typeof answers.comment === 'string' ? answers.comment : '';
+  };
+  const adopt = (draft) => {
+    display(draft.answers);
+    baseDraftVersion = draft.draftVersion;
+    pending = null;
+    dirty = false;
+    reload.hidden = true;
+  };
+  try {
+    const context = await sdk.ready();
+    adopt(context);
+    fields.disabled = false;
+    status.textContent = '選択後に「回答案を本体へ反映」を押してください。まだ最終送信はされません。';
+    const unsubscribe = sdk.feedback.onDraftChanged((draft) => {
+      if (!dirty) {
+        adopt(draft);
+        return;
+      }
+      // 入力中は画面もbaseDraftVersionも進めない。このまま反映すると競合として拒否される。
+      pending = draft;
+      reload.hidden = false;
+      status.textContent = '本体側の回答案が更新されました。「最新の回答案を読み込む」を押してから入力し直してください。';
+    });
+    window.addEventListener('pagehide', unsubscribe, { once: true });
+    reload.addEventListener('click', () => {
+      if (!pending) return;
+      adopt(pending);
+      status.textContent = '最新の回答案を読み込みました。必要な変更を入力し直してください。';
+    });
+    apply.addEventListener('click', async () => {
+      const selected = document.querySelector('input[name="layout"]:checked');
+      const answers = {};
+      if (selected) answers.layout = selected.value;
+      if (density.value) answers.density = density.value;
+      if (comment.value) answers.comment = comment.value;
+      fields.disabled = true;
+      try {
+        const result = await sdk.feedback.updateDraft(answers, { baseDraftVersion });
+        baseDraftVersion = result.draftVersion;
+        dirty = false;
+        status.textContent = '回答案を更新しました。iframe外の本体画面で内容を確認し、「Agentへ回答を送信」で確定してください。';
+      } catch (error) {
+        status.textContent = '回答案を更新できませんでした。本体の状態や競合を確認してください。' + (error instanceof Error ? ' ' + error.message : '');
+      } finally {
+        fields.disabled = false;
+      }
+    });
+  } catch (error) {
+    status.textContent = 'SDKに接続できませんでした。質問が有効か本体で確認してください。';
+  }
+})();
+</script>
+</body>
+</html>

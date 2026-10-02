@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "data": {
+    "query": "セッション",
+    "mode": "text",
+    "catalogVersion": 12,
+    "registeredDocuments": 2,
+    "searchedDocuments": 2,
+    "indexedAt": "2026-10-02T12:00:00.000Z",
+    "incomplete": false,
+    "failedDocuments": [],
+    "indexingDocuments": [],
+    "hits": [
+      {
+        "documentId": "doc_41f728de-3459-4a98-b523-6f0a69ecbe72",
+        "revision": "rev_ba60a05a13c9a496987ab2d8a61c028763e81e8e6c68a41e120936e03b00864d",
+        "title": "認証仕様",
+        "displayPath": "examples/auth.md",
+        "sectionId": "sec_0002",
+        "headingPath": [
+          "認証仕様",
+          "セッションの有効期限"
+        ],
+        "excerpt": "セッションは最終操作から30分で失効する。",
+        "matchKind": "phrase",
+        "score": 12.5,
+        "sourceRange": null,
+        "extraction": "markdown"
+      }
+    ],
+    "truncated": false,
+    "nextCursor": null
+  },
+  "warnings": [],
+  "meta": {
+    "command": "search",
+    "catalogVersion": 12
+  }
+}

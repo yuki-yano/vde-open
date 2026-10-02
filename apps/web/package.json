@@ -1,0 +1,25 @@
+{
+  "name": "@vde-open/web",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@tanstack/highlight": "1.0.0",
+    "@tanstack/markdown": "1.0.0",
+    "@vde-open/document": "workspace:*",
+    "@vde-open/shared": "workspace:*",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "vite": "8.3.2"
+  }
+}
