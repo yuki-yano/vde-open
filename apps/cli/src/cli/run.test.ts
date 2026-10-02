@@ -13,6 +13,16 @@ async function run(argv: string[]) {
     stderr: (text) => {
       stderr += text;
     },
+    cwd: process.cwd(),
+    // daemonへ接続しないcommandだけを試す。state rootには触れない。
+    environment: {
+      env: { VDE_OPEN_HOME: '/nonexistent/vde-open-unit-test' },
+      platform: process.platform,
+      homeDir: '/nonexistent',
+      uid: null,
+    },
+    stdoutIsTty: false,
+    stdin: { isPiped: false, read: () => Promise.resolve(Buffer.alloc(0)) },
   });
   return { exitCode, stdout, stderr };
 }

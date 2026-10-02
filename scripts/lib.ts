@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -154,4 +154,32 @@ export function captureInstalledBin(
   options: RunOptions,
 ): CaptureResult {
   return captureInvocation(installedBinInvocation(binDir, name, args), options);
+}
+
+// 導入したbinを並行に起動するための非同期版。
+export function captureInstalledBinAsync(
+  binDir: string,
+  name: string,
+  args: string[],
+  options: RunOptions,
+): Promise<CaptureResult> {
+  const invocation = installedBinInvocation(binDir, name, args);
+  return new Promise((resolve, reject) => {
+    const child = spawn(invocation.command, invocation.args, {
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
 }

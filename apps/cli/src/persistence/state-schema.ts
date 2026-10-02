@@ -1,0 +1,94 @@
+import {
+  documentFormatSchema,
+  documentIdSchema,
+  revisionSchema,
+  sha256Schema,
+  sourceKindSchema,
+  sourceStateSchema,
+  STATE_FORMAT_VERSION,
+} from '@vde-open/shared';
+import { z } from 'zod';
+
+export const revisionRecordSchema = z.strictObject({
+  revision: revisionSchema,
+  sourceSha256: sha256Schema,
+  byteLength: z.number().int().nonnegative(),
+  parserProfileVersion: z.string().min(1),
+  createdAt: z.string(),
+});
+export type RevisionRecord = z.infer<typeof revisionRecordSchema>;
+
+// 文書のidentity。閉じた後も残し、同じpath／keyで開き直したときにIDを再利用する。
+export const documentRecordSchema = z.strictObject({
+  documentId: documentIdSchema,
+  sourceKind: sourceKindSchema,
+  canonicalPath: z.string().nullable(),
+  key: z.string().nullable(),
+  format: documentFormatSchema,
+  title: z.string(),
+  titleExplicit: z.boolean(),
+  displayPath: z.string().nullable(),
+  pathSegments: z.array(z.string()),
+  isOpen: z.boolean(),
+  openedAt: z.string(),
+  updatedAt: z.string(),
+  sourceState: sourceStateSchema,
+  currentRevision: revisionSchema.nullable(),
+  revisions: z.array(revisionRecordSchema),
+});
+export type DocumentRecord = z.infer<typeof documentRecordSchema>;
+
+export const statePayloadSchema = z.strictObject({
+  catalogVersion: z.number().int().nonnegative(),
+  documents: z.record(documentIdSchema, documentRecordSchema),
+  openOrder: z.array(documentIdSchema),
+  activeDocumentId: documentIdSchema.nullable(),
+});
+export type StatePayload = z.infer<typeof statePayloadSchema>;
+
+export const stateFileSchema = z.strictObject({
+  formatVersion: z.literal(STATE_FORMAT_VERSION),
+  storeVersion: z.number().int().nonnegative(),
+  checksum: sha256Schema,
+  payload: statePayloadSchema,
+});
+
+export function emptyStatePayload(): StatePayload {
+  return { catalogVersion: 0, documents: {}, openOrder: [], activeDocumentId: null };
+}
+
+// schemaでは表せない参照の整合性。違反はstate破損として扱う。
+export function findIntegrityProblem(payload: StatePayload): string | null {
+  const seen = new Set<string>();
+  for (const documentId of payload.openOrder) {
+    if (seen.has(documentId)) return `openOrderに重複があります: ${documentId}`;
+    seen.add(documentId);
+    const record = payload.documents[documentId];
+    if (!record) return `openOrderが未知の文書を指しています: ${documentId}`;
+    if (!record.isOpen) return `openOrderに閉じた文書があります: ${documentId}`;
+  }
+  for (const [documentId, record] of Object.entries(payload.documents)) {
+    if (record.documentId !== documentId) return `文書IDがkeyと一致しません: ${documentId}`;
+    if (record.isOpen && !seen.has(documentId)) {
+      return `open中の文書がopenOrderにありません: ${documentId}`;
+    }
+    if (
+      record.currentRevision !== null &&
+      !record.revisions.some((entry) => entry.revision === record.currentRevision)
+    ) {
+      return `currentRevisionが保持中の版にありません: ${documentId}`;
+    }
+  }
+  if (payload.activeDocumentId !== null && !seen.has(payload.activeDocumentId)) {
+    return `activeDocumentIdがopen中の文書を指していません: ${payload.activeDocumentId}`;
+  }
+  return null;
+}
+
+export function referencedBlobs(payload: StatePayload): Set<string> {
+  const blobs = new Set<string>();
+  for (const record of Object.values(payload.documents)) {
+    for (const entry of record.revisions) blobs.add(entry.sourceSha256);
+  }
+  return blobs;
+}

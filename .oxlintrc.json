@@ -17,7 +17,17 @@
   },
   "rules": {
     "no-console": "off",
-    "react/react-in-jsx-scope": "off"
+    "react/react-in-jsx-scope": "off",
+    "no-control-regex": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "vitest/require-to-throw-message": "off",
+    "vitest/valid-expect": [
+      "error",
+      {
+        "maxArgs": 2
+      }
+    ],
+    "promise/always-return": "off"
   },
   "env": {
     "builtin": true

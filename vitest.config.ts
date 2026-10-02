@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
+    // 結合テストは実際のCLI processとdaemonを起動する。
+    testTimeout: 30_000,
     include: [
       'packages/*/src/**/*.test.ts',
       'packages/*/tests/**/*.test.ts',

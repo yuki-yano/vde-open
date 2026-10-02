@@ -1,10 +1,26 @@
 // 配布tarballを空のdirectoryへ導入し、両binを検証する（仕様14.4）。
 // 実装済みの手順までを実行する。手順を足すときはここへ追加する。
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 
-import { captureCommand, captureInstalledBin, cliDir, repoRoot, runNpm, runPnpm } from './lib.ts';
+import {
+  captureCommand,
+  captureInstalledBin,
+  captureInstalledBinAsync,
+  cliDir,
+  repoRoot,
+  runNpm,
+  runPnpm,
+} from './lib.ts';
 
 class SmokeFailure extends Error {}
 
@@ -31,6 +47,7 @@ function packTarball(): string {
   for (const entry of [
     'package/package.json',
     'package/dist/cli.js',
+    'package/dist/daemon.js',
     'package/dist/web/index.html',
   ]) {
     if (!entries.has(entry)) fail(`tarballに ${entry} がありません`);
@@ -43,7 +60,7 @@ function packTarball(): string {
   return tarball;
 }
 
-function verifyInstalled(tarball: string, installDir: string): void {
+async function verifyInstalled(tarball: string, installDir: string): Promise<void> {
   // 手順2: 空のdirectoryへtarballだけを導入する。registryへは問い合わせない。
   writeFileSync(join(installDir, 'package.json'), '{"private":true}\n');
   runNpm(['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', tarball], {
@@ -51,9 +68,12 @@ function verifyInstalled(tarball: string, installDir: string): void {
   });
 
   // binのshebangが、いま検証に使っているNodeを起動するようにする。
+  // stateは導入先の中の試験用homeに置き、通常のdaemonとstateに触れない。
+  const stateHome = join(installDir, 'state home');
   const env = {
     ...process.env,
     PATH: `${dirname(process.execPath)}${delimiter}${process.env['PATH'] ?? ''}`,
+    VDE_OPEN_HOME: stateHome,
   };
   const binDir = join(installDir, 'node_modules', '.bin');
   const runBin = (name: string, args: string[]): string => {
@@ -71,22 +91,94 @@ function verifyInstalled(tarball: string, installDir: string): void {
     if (long.trim() === '') fail(`vde-open ${args.join(' ')} の出力が空です`);
     if (long !== short) fail(`vde-open と vo の ${args.join(' ')} が一致しません`);
   }
+
+  interface Envelope<T> {
+    ok: boolean;
+    data: T;
+  }
+  const runJson = <T>(name: string, args: string[]): T => {
+    const envelope = JSON.parse(runBin(name, [...args, '--json'])) as Envelope<T>;
+    if (!envelope.ok) fail(`${name} ${args.join(' ')} が失敗しました`);
+    return envelope.data;
+  };
+  type Documents = { documents: Array<{ documentId: string }> };
+  type Status = { state: string; daemonId: string | null };
+
+  try {
+    // 手順4（CLI-003）: 長名で開いた文書を、短名で一覧・closeできる。
+    writeFileSync(join(installDir, 'a.md'), '# pack検証\n');
+    const opened = runJson<Documents>('vde-open', ['open', 'a.md']);
+    const listed = runJson<Documents>('vo', ['list']);
+    const openedId = opened.documents[0]?.documentId;
+    if (!openedId || listed.documents.map((document) => document.documentId).join() !== openedId) {
+      fail('vde-openで開いた文書が、voの一覧と一致しません');
+    }
+    const daemonId = runJson<Status>('vo', ['daemon', 'status']).daemonId;
+    if (runJson<Status>('vde-open', ['daemon', 'status']).daemonId !== daemonId) {
+      fail('vde-openとvoが別のdaemonを使っています');
+    }
+    runJson('vo', ['close', openedId]);
+    if (runJson<Documents>('vde-open', ['list']).documents.length !== 0) {
+      fail('voのcloseがvde-openの一覧に反映されていません');
+    }
+
+    // 手順7の前半: どちらの名前で起動したdaemonも、もう一方の名前で停止できる。
+    runJson('vo', ['daemon', 'stop']);
+    if (runJson<Status>('vde-open', ['daemon', 'status']).state !== 'stopped') {
+      fail('voのdaemon stopでdaemonが停止していません');
+    }
+
+    // 手順5（CLI-004）: 両名から同時に20回開いても、daemonは1つ。
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, index) =>
+        captureInstalledBinAsync(
+          binDir,
+          index % 2 === 0 ? 'vde-open' : 'vo',
+          ['open', 'a.md', '--json'],
+          {
+            cwd: installDir,
+            env,
+          },
+        ),
+      ),
+    );
+    const ids = new Set<string>();
+    for (const result of results) {
+      if (result.status !== 0) fail(`同時openが exit ${String(result.status)}: ${result.stderr}`);
+      const id = (JSON.parse(result.stdout) as Envelope<Documents>).data.documents[0]?.documentId;
+      if (id) ids.add(id);
+    }
+    if (ids.size !== 1) fail(`同時openで文書が${String(ids.size)}件になりました`);
+    if (runJson<Documents>('vo', ['list']).documents.length !== 1)
+      fail('同じfileが重複して登録されています');
+    const started = readFileSync(join(stateHome, 'logs', 'daemon.jsonl'), 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"event":"daemon.started"'));
+    // 手順4で1回、同時openで1回。同時openの中で複数のdaemonが起動していないこと。
+    if (started.length !== 2) fail(`daemonの起動回数が想定と違います: ${String(started.length)}`);
+  } finally {
+    // 手順7: 検証で起動したdaemonを必ず止める。
+    captureInstalledBin(binDir, 'vde-open', ['daemon', 'stop'], { cwd: installDir, env });
+  }
+  if (runJson<Status>('vo', ['daemon', 'status']).state !== 'stopped') {
+    fail('検証後にdaemonが残っています');
+  }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const tarball = packTarball();
   // 空白と日本語を含むpathでも導入・起動できることを同時に確かめる。
   const installDir = mkdtempSync(join(tmpdir(), 'vde-open pack 検証-'));
   try {
-    verifyInstalled(tarball, installDir);
+    await verifyInstalled(tarball, installDir);
   } finally {
     rmSync(installDir, { recursive: true, force: true });
   }
-  console.log(`pack-smoke: PASS CLI-002 (${tarball})`);
+  console.log(`pack-smoke: PASS CLI-002 CLI-003 CLI-004 (${tarball})`);
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   // 後始末を終えてから終了させるため、process.exitは呼ばない。
   process.exitCode = 1;
