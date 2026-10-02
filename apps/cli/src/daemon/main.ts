@@ -7,6 +7,7 @@ import { ZodError } from 'zod';
 
 import { createCursorCodec } from '../documents/cursor.ts';
 import { DocumentService } from '../documents/service.ts';
+import { isSourceRun, webRootPath } from '../entry-paths.ts';
 import {
   resolveRuntimeLocation,
   resolveStateRoot,
@@ -14,7 +15,12 @@ import {
 } from '../persistence/paths.ts';
 import { StateStore } from '../persistence/state-store.ts';
 import { nodeStoreFs, type StoreFs } from '../persistence/store-fs.ts';
+import { createEventHub } from '../server/event-hub.ts';
+import { startManagementServer, type ManagementServer } from '../server/http/management.ts';
 import { startIpcServer, type IpcServer } from '../server/ipc-server.ts';
+import { createSessionService } from '../server/session-service.ts';
+import { createWatchService, type WatchService } from '../watch/watch-service.ts';
+import { createParseService, type ParseService } from '../workers/parse-service.ts';
 import {
   acquireLock,
   holdsLock,
@@ -33,11 +39,17 @@ export interface DaemonOptions {
   version: string;
   fs?: StoreFs;
   probe?: ProcessProbe;
+  // 管理UIのport。指定がなければOSに割り当ててもらう。
+  managementPort?: number;
+  // 文書の解析を差し替える（testで、遅い解析を再現するために使う）。
+  parse?: ParseService;
 }
 
 export interface DaemonHandle {
   readonly daemonId: string;
   readonly stateRoot: string;
+  // 管理UIのURL。認証の秘密は含まない。
+  readonly uiUrl: string;
   // daemonが停止し終えたら解決する。
   readonly stopped: Promise<void>;
   stop(reason: string): Promise<void>;
@@ -81,6 +93,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const location = resolveRuntimeLocation(stateRoot, environment);
   let store: StateStore | null = null;
   let ipc: IpcServer | null = null;
+  let management: ManagementServer | null = null;
+  let watcher: WatchService | null = null;
+  let parse: ParseService | null = null;
+  let announceStopping: () => void = () => undefined;
   let lockTimer: NodeJS.Timeout | null = null;
   let stopping: Promise<void> | null = null;
   // 自分が検査・作成したものだけを後始末する。
@@ -94,8 +110,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     if (lockTimer) clearInterval(lockTimer);
     // 受付済みの処理とcommitが終わるまで、lockを持ち続ける。
     // 途中で解放すると、次のdaemonの書込みと重なる。
+    await watcher?.close();
     await ipc?.drain();
+    announceStopping();
+    await management?.close();
     await store?.close();
+    await parse?.close();
     await ipc?.close();
     // lockを失っているときは、後継のdaemonのものかもしれないruntime fileに触れない。
     if (await holdsLock(stateRoot, DAEMON_LOCK_NAME, daemonId)) {
@@ -134,8 +154,47 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     const key = await createIpcKey(location.keyPath);
     owned.key = true;
 
-    const documents = new DocumentService(openedStore, createCursorCodec(randomBytes(32)));
+    parse = options.parse ?? createParseService();
+    const parser = parse;
+    const events = createEventHub(daemonId, () => openedStore.payload.catalogVersion);
+    announceStopping = () => {
+      events.publish({ type: 'daemon-stopping' });
+    };
+    const documents = new DocumentService({
+      store: openedStore,
+      cursors: createCursorCodec(randomBytes(32)),
+      analyze: (format, text) => parser.analyze(format, text),
+      emit: (event) => {
+        events.publish(event);
+        // 開いている文書が変わったら、監視するdirectoryも合わせる。
+        if (event.type === 'catalog-changed') watcher?.sync();
+      },
+    });
+    const sessions = createSessionService();
     const startedAt = new Date().toISOString();
+
+    management = await startManagementServer(
+      {
+        daemonId,
+        version,
+        documents,
+        sessions,
+        events,
+        webRoot: webRootPath(),
+        // 開発用のoriginは、sourceから実行しているときだけ受け付ける。配布物では常に無効。
+        devOrigin: isSourceRun ? (environment.env['VDE_OPEN_DEV_UI_ORIGIN'] ?? null) : null,
+        isStopping: () => stopping !== null,
+        onEvent: (event, fields) => logger.log(event, fields),
+      },
+      options.managementPort === undefined ? {} : { port: options.managementPort },
+    );
+    const uiUrl = `${management.origin}/`;
+    watcher = createWatchService({
+      documents,
+      onEvent: (event, fields) => logger.log(event, fields),
+    });
+    const watching = watcher;
+    watching.sync();
 
     const methods: Record<string, (params: unknown) => Promise<MethodResult> | MethodResult> = {
       'daemon.status': (): MethodResult => {
@@ -149,6 +208,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           stateRoot,
           openDocuments: openedStore.payload.openOrder.length,
           catalogVersion: openedStore.payload.catalogVersion,
+          uiUrl,
         };
         return { data: status, catalogVersion: openedStore.payload.catalogVersion };
       },
@@ -157,10 +217,30 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         setImmediate(() => void stop('requested'));
         return { data: { stopping: true } };
       },
-      'documents.open': (params) => documents.open(params),
+      'documents.open': async (params) => {
+        const result = await documents.open(params);
+        watching.sync();
+        return result;
+      },
       'documents.list': (params) => documents.list(params),
       'documents.read': (params) => documents.read(params),
-      'documents.close': (params) => documents.close(params),
+      'documents.close': async (params) => {
+        const result = await documents.close(params);
+        watching.sync();
+        return result;
+      },
+      'documents.focus': (params) => documents.focus(params),
+      'documents.refresh': (params) => documents.refresh(params),
+      'watch.list': () => documents.listWatchRules(),
+      'watch.remove': async (params) => {
+        const result = await documents.removeWatchRule(params);
+        watching.sync();
+        return result;
+      },
+      // browserを開くための一回限りのURLを作る。URLは秘密を含むので、logには残さない。
+      'ui.bootstrap': (): MethodResult => ({
+        data: { bootstrapUrl: `${uiUrl}#bootstrap=${sessions.createBootstrapTicket()}`, uiUrl },
+      }),
     };
 
     ipc = await startIpcServer({
@@ -215,5 +295,5 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     throw error;
   }
 
-  return { daemonId, stateRoot, stopped, stop };
+  return { daemonId, stateRoot, uiUrl: management ? `${management.origin}/` : '', stopped, stop };
 }

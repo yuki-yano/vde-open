@@ -1,4 +1,5 @@
 import { constants } from 'node:fs';
+import type { Stats } from 'node:fs';
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
@@ -9,9 +10,15 @@ export interface LoadedSource {
   canonicalPath: string;
   bytes: Buffer;
   text: string;
+  // 読み取った時点のfileの状態。監視が「この内容を読んだ後に変わったか」を判定するのに使う。
+  signature: string;
 }
 
 const READ_ATTEMPTS = 3;
+
+export function statSignature(stats: Stats): string {
+  return `${String(stats.ino)}:${String(stats.size)}:${String(stats.mtimeMs)}`;
+}
 
 function invalid(path: string, reason: string): VdeError {
   return new VdeError('E_INVALID_SOURCE', `${path} は開けません（${reason}）。`, { path, reason });
@@ -124,7 +131,12 @@ export async function readSourceFile(path: string): Promise<LoadedSource> {
         opened.mtimeMs === after.mtimeMs &&
         bytes.byteLength === after.size;
       if (!stable) continue;
-      return { canonicalPath, bytes, text: decodeSource(bytes, path) };
+      return {
+        canonicalPath,
+        bytes,
+        text: decodeSource(bytes, path),
+        signature: statSignature(after),
+      };
     } finally {
       await handle.close();
     }

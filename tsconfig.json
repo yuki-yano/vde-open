@@ -1,7 +1,8 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node"],
+    "lib": ["es2024", "dom"]
   },
-  "include": ["scripts/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+  "include": ["scripts/**/*.ts", "tests/**/*.ts", "vitest.config.ts", "playwright.config.ts"]
 }

@@ -37,22 +37,34 @@
 | vite | 8.3.2 | apps/web | Node ^20.19 \|\| >=22.12 | `vite build`が成功 |
 | @vitejs/plugin-react | 6.1.1 | apps/web | vite ^8 | 同上 |
 
+## P2で追加した依存
+
+| package | 版 | 使う場所 | 実施した検証 |
+|---|---|---|---|
+| tailwindcss / @tailwindcss/vite | 4.3.3 | apps/web | `vite build`でCSSを生成。`@tailwindcss/vite`のpeerはvite ^8 |
+| shadcn（CLIと`shadcn/tailwind.css`） | 4.21.1 | apps/web（devDependencies） | `shadcn init -y -b base -t vite --no-monorepo -p nova`でBase UI版（style `base-nova`）を初期化。`add badge separator toggle-group`で部品を追加 |
+| @base-ui/react | 1.8.0 | apps/web | shadcnの部品（button、toggle、toggle-group、separator）が使用。e2eで操作を確認 |
+| class-variance-authority | 0.7.1 | apps/web | 同上 |
+| cn | 0.4.0 | apps/web | shadcnが提供するclass結合。`src/lib/utils.ts`から再export |
+| lucide-react | 1.49.0 | apps/web | icon |
+| tw-animate-css | 1.4.0 | apps/web | shadcnのCSSが参照 |
+| @fontsource-variable/geist | 5.3.0 | apps/web | fontをbundleへ同梱。外部のCDNは使わない |
+| @playwright/test | 1.63.0 | root | Chromiumでe2e 9件 |
+
+shadcnのCLIが`package.json`へ書くrange指定（`^`）は、導入後に完全版番号へ直した。
+
 ## 契約テストで確かめたこと
 
 - `@tanstack/markdown`のASTはserializableで、nodeに原文位置を持たない。原文行の取得はsourceから直接切り出す（仕様8.3）。
 - `allowHtml: false`では生HTMLがescapeされた文字として出力される。`javascript:`のURLはリンクにならない。
 - `@tanstack/highlight`は、仕様8.2の基準言語（JS/JSX/TS/TSX/JSON/YAML/HTML/CSS/Bash/Markdown）を明示登録できる。Bashは独立したexportではなく、`shell`のaliasとして解決される。
 - `@tanstack/highlight/markdown`の`createTanStackMarkdownHighlighter`を使うと、`<pre>`と`<code>`が二重にならない。
+- `@tanstack/markdown`の`urlTransform`は解析時のoptionである。描画時に渡しても適用されない。`headingIds`の関数へ渡される番号は、見出しの連番ではない（一意ではある）。
+- `@tanstack/markdown`は、`allowHtml: false`でも`javascript:`などのURLを既定で取り除く。相対URLと画像は残すので、解析時の`urlTransform`で絞っている。
 - Chokidarは、監視を始めた直後の変更を通知しないことがある。macOSで、`ready`の直後に作ったfileの`add`が届かない例を約35回に1回観測した。後続の変更があれば検知できる。P2の監視は通知だけに頼らず、登録時と再走査時にstatを照合して回復する（仕様8.5）。
-
-## これから導入するもの
-
-| package | 予定の版 | 導入するフェーズ | 備考 |
-|---|---|---|---|
-| @playwright/test | 1.63.0 | P2 | browserのdownloadを伴う。実ブラウザでの検証はP2以降 |
 
 ## 未検証のこと
 
-- TanStack Markdown／HighlightのReact描画と、実文書に対する描画・抽出（P2）。
 - Windows、Linuxでの導入とビルド。手元はmacOSのみ。
 - 実ブラウザでのsandbox、CSP（P3、P6）。
+- FirefoxとWebKitでのe2e。

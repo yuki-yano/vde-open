@@ -21,4 +21,9 @@ export const LIMITS = {
   cursorTtlMs: 5 * 60 * 1000,
   retainedRevisions: 2,
   revisionGraceMs: 5 * 60 * 1000,
+  parseTimeoutMs: 2000,
+  watchDebounceMs: 200,
+  bootstrapTicketTtlMs: 60 * 1000,
+  sessionIdleMs: 12 * 60 * 60 * 1000,
+  sseHeartbeatMs: 15 * 1000,
 } as const;

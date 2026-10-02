@@ -11,22 +11,27 @@ export const ERROR_SPECS = {
   E_INVALID_ARGUMENT: { exit: ExitCode.usage, retryable: false },
   E_UNSUPPORTED_FORMAT: { exit: ExitCode.usage, retryable: false },
   E_INVALID_SOURCE: { exit: ExitCode.usage, retryable: false },
+  E_PARSE_FAILED: { exit: ExitCode.usage, retryable: false },
   E_CONFIRMATION_REQUIRED: { exit: ExitCode.usage, retryable: false },
   // 未発見・openでない
   E_PATH_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   E_DOCUMENT_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   E_DOCUMENT_NOT_OPEN: { exit: ExitCode.notFound, retryable: false },
+  E_WATCH_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   // 競合・版不整合
   E_KEY_CONFLICT: { exit: ExitCode.conflict, retryable: false },
   E_REVISION_UNAVAILABLE: { exit: ExitCode.conflict, retryable: false },
   E_INVALID_CURSOR: { exit: ExitCode.conflict, retryable: false },
   E_CURSOR_STALE: { exit: ExitCode.conflict, retryable: false },
+  E_CATALOG_CONFLICT: { exit: ExitCode.conflict, retryable: true },
   // 認可・境界
   E_UNAUTHORIZED: { exit: ExitCode.forbidden, retryable: false },
   E_INSECURE_PATH: { exit: ExitCode.forbidden, retryable: false },
   // 上限
   E_LIMIT_EXCEEDED: { exit: ExitCode.limit, retryable: false },
   E_MAX_BYTES_TOO_SMALL: { exit: ExitCode.limit, retryable: false },
+  // 待機timeout
+  E_TIMEOUT: { exit: ExitCode.timeout, retryable: true },
   // daemon起動・接続・互換性
   E_DAEMON_UNAVAILABLE: { exit: ExitCode.daemon, retryable: true },
   E_DAEMON_START_FAILED: { exit: ExitCode.daemon, retryable: false },

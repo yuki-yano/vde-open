@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { runCli } from '../../apps/cli/src/cli/run.ts';
 import { resolveRuntimeLocation } from '../../apps/cli/src/persistence/paths.ts';
 
 export const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -42,12 +43,21 @@ export interface RunOptions {
   env?: Record<string, string>;
 }
 
+export interface TerminalResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
 export interface TestHome {
   // 試験専用のstate root。本物のstateには触れない。
   home: string;
   // fixtureを置く作業directory。CLIのcwdにもなる。
   work: string;
   run: (args: string[], options?: RunOptions) => Promise<RunResult>;
+  // stdoutが端末である条件でCLIを実行する。子processでは端末を再現できないので、同じprocessで動かす。
+  // 本物のbrowserを開かないよう、browserとして実行するfileの指定を必須にする。
+  runAsTerminal: (args: string[], browser: string) => Promise<TerminalResult>;
   write: (relativePath: string, content: string | Buffer) => string;
   cleanup: () => Promise<void>;
 }
@@ -117,10 +127,34 @@ export function createTestHome(): TestHome {
     }
   };
 
+  const runAsTerminal = async (args: string[], browser: string): Promise<TerminalResult> => {
+    let stdout = '';
+    let stderr = '';
+    const exitCode = await runCli(args, {
+      stdout: (text) => {
+        stdout += text;
+      },
+      stderr: (text) => {
+        stderr += text;
+      },
+      cwd: work,
+      environment: {
+        env: env({ BROWSER: browser }),
+        platform: process.platform,
+        homeDir: process.env['HOME'] ?? '',
+        uid: typeof process.getuid === 'function' ? process.getuid() : null,
+      },
+      stdoutIsTty: true,
+      stdin: { isPiped: false, read: () => Promise.resolve(Buffer.alloc(0)) },
+    });
+    return { exitCode, stdout, stderr };
+  };
+
   return {
     home,
     work,
     run,
+    runAsTerminal,
     write(relativePath, content) {
       const path = join(work, relativePath);
       mkdirSync(join(path, '..'), { recursive: true });

@@ -25,10 +25,20 @@ export interface Candidate {
   explicit: boolean;
 }
 
+// directory／globの指定。--watchのとき、新しく現れた文書を登録するruleになる。
+export interface WatchTarget {
+  kind: 'directory' | 'glob';
+  // directoryならそのdirectory、globなら展開の起点（cwd）。
+  root: string;
+  pattern: string | null;
+  recursive: boolean;
+}
+
 export interface Expansion {
   candidates: Candidate[];
   // 対象文書が1件もなかった指定。
   emptyTargets: string[];
+  watchTargets: WatchTarget[];
 }
 
 function compareText(a: string, b: string): number {
@@ -90,6 +100,7 @@ export async function expandTargets(
 ): Promise<Expansion> {
   const candidates: Candidate[] = [];
   const emptyTargets: string[] = [];
+  const watchTargets: WatchTarget[] = [];
   for (const target of targets) {
     const absolutePath = resolve(cwd, target);
     let kind: 'file' | 'directory' | 'missing';
@@ -117,8 +128,10 @@ export async function expandTargets(
     let expanded: string[];
     if (kind === 'directory') {
       expanded = await listDirectory(absolutePath, recursive);
+      watchTargets.push({ kind: 'directory', root: absolutePath, pattern: null, recursive });
     } else if (isDynamicPattern(target)) {
       expanded = await expandGlob(cwd, target);
+      watchTargets.push({ kind: 'glob', root: cwd, pattern: target, recursive: false });
     } else {
       throw new VdeError('E_PATH_NOT_FOUND', `${target} が見つかりません。`, { path: target });
     }
@@ -131,5 +144,40 @@ export async function expandTargets(
       });
     }
   }
-  return { candidates, emptyTargets };
+  return { candidates, emptyTargets, watchTargets };
+}
+
+// ruleが現在対象にするfile（絶対path）。登録時の列挙と同じ規則を使う。
+export async function scanWatchTarget(target: WatchTarget): Promise<string[]> {
+  try {
+    return target.kind === 'directory'
+      ? await listDirectory(target.root, target.recursive)
+      : await expandGlob(target.root, target.pattern ?? '');
+  } catch (error) {
+    // 監視対象のdirectoryが消えている間は、対象なしとして扱う。
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+// ruleの監視を始めるdirectory。globは、wildcardを含まない先頭部分までに絞る。
+export function watchBaseOf(target: WatchTarget): { directory: string; recursive: boolean } {
+  if (target.kind === 'directory') return { directory: target.root, recursive: target.recursive };
+  const segments = (target.pattern ?? '').split('/');
+  const fixed: string[] = [];
+  for (const segment of segments.slice(0, -1)) {
+    if (isDynamicPattern(segment)) break;
+    fixed.push(segment);
+  }
+  const rest = segments.slice(fixed.length);
+  return {
+    directory: resolve(target.root, ...fixed),
+    // 残りがfile名のpatternだけなら、直下だけを監視すれば足りる。
+    recursive: rest.length > 1,
+  };
+}
+
+// 走査で除外するdirectory名か（隠しdirectoryを含む）。監視の対象からも外す。
+export function isExcludedDirectoryName(name: string): boolean {
+  return isHidden(name) || EXCLUDED_DIRECTORIES.has(name);
 }

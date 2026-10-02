@@ -66,6 +66,7 @@ function addDocument(tx: Transaction, source: string): string {
     revisions: [
       {
         revision: `rev_${sha256(`rev:${source}`)}`,
+        format: 'markdown',
         sourceSha256: blob,
         byteLength: Buffer.byteLength(source),
         parserProfileVersion: 'markdown-tanstack-v1',

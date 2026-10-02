@@ -27,7 +27,15 @@
         "maxArgs": 2
       }
     ],
-    "promise/always-return": "off"
+    "promise/always-return": "off",
+    "import/no-unassigned-import": [
+      "error",
+      {
+        "allow": ["**/*.css"]
+      }
+    ],
+    "unicorn/require-post-message-target-origin": "off",
+    "jsx-a11y/prefer-tag-over-role": "off"
   },
   "env": {
     "builtin": true

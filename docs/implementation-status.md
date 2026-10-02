@@ -14,7 +14,7 @@
 |---|---|---|
 | P0 | 完了報告済み | clean buildと両help/version。依存版記録。125 IDの担当フェーズ割当 |
 | P1 | 完了報告済み | restart復元、crash/disk error、同時起動テスト |
-| P2 | 未着手 | 文書追加とatomic saveが実UIへ反映。raw HTMLが動かない。未認証では管理APIを読めない |
+| P2 | 完了報告済み | 文書追加とatomic saveが実UIへ反映。raw HTMLが動かない。未認証では管理APIを読めない |
 | P3 | 未着手 | security fixture、path traversal、他文書/API遮断 |
 | P4 | 未着手 | Agent検索benchmark fixtureと閉じた文書除外 |
 | P5 | 未着手 | 保存前成功なし、タイムアウト・restart・二重送信テスト |
@@ -98,6 +98,62 @@ P1時点の制約:
 - blobのGCは実装済みだが、定期実行はしていない。P5でpinと合わせて組み込む。
 - Windowsは未検証。named pipeとDACLの確認は実装上の分岐だけで、実機で動かしていない。
 
+## P2の記録
+
+レビュー: 1往復目でmust-fix 8件とshould-fix 2件、2往復目でmust-fix 2件とshould-fix 1件。すべて修正し、3往復目で指摘なし。以下は1往復目、その後に2往復目の内容。
+
+- 遅れて終わった古い読み直しが、新しい内容を上書きしていた → 同じfileの「読む→公開する」を1件ずつ行うようにした（2往復目で方式を変更。下記）。
+- 監視ruleの走査が、走査の間に明示的に開かれた文書を、通知なしで走査時の内容へ戻していた → commitの時点の状態で、すでに開いている文書を対象から外すようにした。
+- daemonが止まっている間のfileの変更を、再起動後に取り込んでいなかった → 起動後にまだ読んでいない文書は、読み直して保存済みの内容と照合するようにした。照合に使うfileの状態は、実際に読み取った内容に対応するものだけにした（読み直した後のstatを使わない）。
+- 監視ruleの走査が、件数と合計の大きさを確かめる前に全候補を読み込んでいた → 件数は読み込む前に、合計の大きさは読み込みながら確かめ、上限に達したら残りを読まないようにした。
+- sessionを破棄しても、接続済みのSSEへ通知が流れ続けていた → 破棄と期限切れで、そのsessionのSSEを閉じるようにした。接続を保つだけでは期限を延ばさない。
+- UIの一覧の再取得が並行し、遅れて届いた古い一覧が新しい一覧を上書きできた → 再取得を1つずつ行うようにした。
+- titleだけの変更や、同じ内容のままの状態回復で、通知が出ていなかった → 本文以外の変更も通知するようにした。
+- 前の版の見出しを、文書の現在の形式で解析していた → 版ごとに形式を記録し、その形式で解析するようにした。
+- （should-fix）`--open`と`--no-open`の競合の検査が、`--`より後のfile名やoptionの値も数えていた → parserがoptionとして認識した指定だけを数えるようにした。
+- （should-fix）SYS-002のテストが、既定のbrowser起動の条件（端末からの実行で、daemonを新しく起動したとき）を通っていなかった → stdoutが端末である条件で、指定なしの初回と2回目を検証するテストを足した。
+- （2往復目）1往復目の修正は、読み込みを始めた順番で新旧を決めていた。先に始めた読み込みが後から新しい内容を読むことがあり、巻き戻りが残っていた → 順番での判定をやめ、canonical pathごとの待ち行列で、読み込みから公開までを1件ずつ行うようにした。明示的なopen、読み直し、監視の走査のすべてが同じ待ち行列を通る。複数のfileを扱うときは決まった順に取得する。
+- （2往復目）UIの一覧の再取得で、取得が終わってから次の取得が始まるまでの間に依頼が入ると、取得が並行していた → 単一の実行loopで依頼を処理する形に直した。
+- （2往復目、should-fix）sessionの期限が切れた後も、次の定期確認までは通知を送っていた → 通知を書き込む直前にも、期限を延ばさない確認を行うようにした。
+
+実行環境: macOS（Darwin 25.6.0、arm64）、Node.js 24.21.0、pnpm 12.8.1、Chromium（Playwright 1.63.0同梱のChrome Headless Shell 153）。
+
+| command | 結果 |
+|---|---|
+| `pnpm format:check` | exit 0 |
+| `pnpm lint` | exit 0 |
+| `pnpm typecheck` | exit 0 |
+| `pnpm test` | exit 0（32 files、259 tests） |
+| `pnpm build` | exit 0（`dist/cli.js`、`dist/daemon.js`、`dist/workers/parse-worker.js`、`dist/web/`） |
+| `pnpm test:pack` | exit 0（仕様14.4の手順1〜7。手順6は同梱UIの配信と解析workerまで） |
+| `pnpm test:e2e` | exit 0（Chromiumで9件。`pnpm build`の出力を使う） |
+
+実装したもの:
+
+- 管理listener（`apps/cli/src/server/http/management.ts`）。`127.0.0.1`のOS割当port。Hostは実際のlisten先だけ、Originは管理UIのoriginだけを受け付ける。状態を変えるrequestはOrigin必須でbodyはJSON。CORSは許可しない。
+- 認証（`session-service.ts`）。CLIが一回限りのticket（60秒）をURLのfragmentで渡し、UIがsession tokenへ交換する。fragmentは読んだ直後に履歴から消す。tokenはtabのmemoryとsessionStorageだけ。sessionはidle 12時間で、daemonの再起動で失効する。
+- 更新通知（`event-hub.ts`、`GET /_/api/v1/events`）。Bearer付きのfetchで読むSSE。IDと版だけを流す。UIは接続のたびと通知のたびに一覧を取り直す。
+- file監視（`apps/cli/src/watch/watch-service.ts`）。開いている文書の親directoryと、監視ruleの起点だけを監視する。通知は200msまとめ、通知が欠けた場合に備えて定期的にstatで照合する。`--watch`のruleは、通知を契機に登録時と同じ規則で再走査する。
+- 解析worker（`apps/cli/src/workers/`）。見出しの構造を別threadで解析する。2秒で終わらなければworkerを止めて作り直す。結果は解析した版にだけ結び付ける。
+- Markdownの描画（`packages/document`）。生HTMLは無効。linkはhttp(s)・mailto・文書内の見出しだけ。画像は読み込まない（localの画像はP3）。highlightは明示登録した言語だけで、256KiBを超えるblockと未知の言語は色付けしない。
+- 管理UI（`apps/web`）。Tailwind CSS、shadcn/ui（Base UI版）で構成。文書の一覧（順番／階層、並べ替え、一覧から外す）、プレビュー／原文、更新を止める／再開、見出しの一覧、配色（ライト／ダーク／OS追従）、一覧の幅変更。
+- CLI。`ui`（`--print-url`）、`focus`、`refresh`、`watch list|remove`、`read --outline`、`open`の`--watch`・`--open`・`--no-open`・`--focus`、`serve --port`。引数なしは`ui`。
+- `pnpm dev`（`scripts/dev.ts`）。専用のstate home（`.dev-home`）でdaemonを前景起動し、ViteのHMRで開発用UIを配信する。開発用originの許可は、sourceから実行したdaemonだけが受け付ける。
+
+P2時点の制約:
+
+- HTML文書は原文の表示だけ。sandboxでのプレビューはP3。
+- Markdown中の画像は表示しない（代替textを表示）。localの画像はP3の限定asset経由で表示する。相対linkは無効（localの文書linkの確認はP3）。
+- 検索（`Cmd/Ctrl+K`）はP4。質問と回答はP5。
+- e2eはChromiumだけ。FirefoxとWebKitでは実行していない（NOT RUN）。
+- Setext見出し、indent code、裸URLは変換しない（TanStack Markdownの対応範囲。`packages/document/tests/react.test.tsx`で挙動を固定）。
+- Windowsは未検証。browserの起動は`rundll32`を使う分岐だけで、実機で動かしていない。
+
+テスト中に見つけて直した不具合:
+
+- daemon停止の通知（`daemon-stopping`）がUIへ届かなかった。通知の書き込みが終わる前にstreamを閉じていた。書き込みを順に待ってから閉じるようにした。
+- TanStack Markdownの`urlTransform`は解析時のoptionで、描画時に渡しても効かなかった。危険でないURLだけを残す処理を解析時へ移し、描画側でも画像を読み込まない部品に置き換えた。
+
 ## 受け入れテストの対応
 
 状態は「未着手／PASS／FAIL／NOT RUN」。担当は、そのIDが最後に必要とする機能がそろうフェーズ。IDをPASSにするのは担当フェーズで全条件を検証したときだけで、先行フェーズで一部だけ検証したものは備考に部分検証として書く。
@@ -112,17 +168,17 @@ P1時点の制約:
 | CLI-006 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | CLI-007 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | CLI-008 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| CLI-009 | P2 | 未着手 |  |  |
+| CLI-009 | P2 | PASS | `tests/integration/browser.test.ts` |  |
 | CLI-010 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | CLI-011 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | CLI-012 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| CLI-013 | P7 | 未着手 |  |  |
+| CLI-013 | P7 | 未着手 |  | P2で部分検証済み（`scripts/pack-smoke.ts`手順6: repo外のcwdから同梱UIを配信し、cwdのfileは配信しない） |
 | CLI-014 | P7 | 未着手 |  |  |
 | CLI-015 | P7 | 未着手 |  |  |
 | CLI-016 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | SYS-001 | P1 | PASS | `tests/integration/daemon.test.ts` |  |
-| SYS-002 | P2 | 未着手 |  |  |
-| SYS-003 | P5 | 未着手 |  | P1で部分検証済み（`tests/integration/daemon.test.ts`: 再起動後に文書IDと順序を復元）。watch suppressionはP2、質問・回答はP5で追加 |
+| SYS-002 | P2 | PASS | `tests/integration/browser.test.ts` | 既定のbrowser起動は、stdoutが端末である条件をCLIへ直接渡して検証（子processでは端末を再現できないため） |
+| SYS-003 | P5 | 未着手 |  | P1・P2で部分検証済み（再起動後に文書ID・順序、監視ruleと「閉じた文書を復帰させない」扱いを復元）。質問・回答はP5で追加 |
 | SYS-004 | P1 | PASS | `apps/cli/src/server/ipc.test.ts` |  |
 | SYS-005 | P1 | PASS | `apps/cli/src/server/ipc.test.ts` |  |
 | SYS-006 | P1 | PASS | `tests/integration/daemon.test.ts`、`apps/cli/src/daemon/lock.test.ts` |  |
@@ -132,26 +188,26 @@ P1時点の制約:
 | SYS-010 | P1 | PASS | `apps/cli/src/persistence/state-store.test.ts`、`apps/cli/src/daemon/main.test.ts` |  |
 | SYS-011 | P1 | PASS | `tests/integration/daemon.test.ts`、`apps/cli/src/persistence/state-store.test.ts` |  |
 | SYS-012 | P1 | PASS | `tests/integration/daemon.test.ts` |  |
-| SYS-013 | P5 | 未着手 |  | SSEはP2、waitはP5 |
+| SYS-013 | P5 | 未着手 |  | P2で部分検証済み（`tests/integration/http.test.ts`: SSEのhello・変更通知・停止通知、本文を含まない）。waitはP5 |
 | SYS-014 | P5 | 未着手 |  |  |
 | SYS-015 | P5 | 未着手 |  |  |
 | SYS-016 | P1 | PASS | `tests/integration/daemon.test.ts` |  |
 | DOC-001 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | DOC-002 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | DOC-003 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| DOC-004 | P2 | 未着手 |  |  |
-| DOC-005 | P2 | 未着手 |  |  |
-| DOC-006 | P2 | 未着手 |  |  |
-| DOC-007 | P2 | 未着手 |  |  |
-| DOC-008 | P2 | 未着手 |  |  |
-| DOC-009 | P2 | 未着手 |  |  |
-| DOC-010 | P2 | 未着手 |  |  |
+| DOC-004 | P2 | PASS | `tests/integration/watch.test.ts` |  |
+| DOC-005 | P2 | PASS | `tests/integration/watch.test.ts` |  |
+| DOC-006 | P2 | PASS | `tests/integration/watch.test.ts` |  |
+| DOC-007 | P2 | PASS | `apps/web/src/lib/tree.test.ts`、`tests/e2e/workspace.spec.ts` |  |
+| DOC-008 | P2 | PASS | `tests/integration/http.test.ts`、`tests/e2e/workspace.spec.ts` |  |
+| DOC-009 | P2 | PASS | `tests/integration/watch.test.ts`、`tests/e2e/viewer.spec.ts` |  |
+| DOC-010 | P2 | PASS | `apps/cli/src/documents/service-analysis.test.ts` |  |
 | DOC-011 | P3 | 未着手 |  |  |
 | DOC-012 | P4 | 未着手 |  |  |
-| DOC-013 | P2 | 未着手 |  |  |
-| DOC-014 | P2 | 未着手 |  |  |
+| DOC-013 | P2 | PASS | `tests/e2e/workspace.spec.ts` |  |
+| DOC-014 | P2 | PASS | `tests/e2e/workspace.spec.ts`、`tests/e2e/viewer.spec.ts` |  |
 | DOC-015 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| DOC-016 | P5 | 未着手 |  | P1で部分検証済み（`tests/integration/documents.test.ts`: close --all）。watch ruleはP2、回答履歴はP5 |
+| DOC-016 | P5 | 未着手 |  | P1・P2で部分検証済み（close --allで文書と監視ruleをすべて外す）。回答履歴はP5 |
 | SRCH-001 | P4 | 未着手 |  |  |
 | SRCH-002 | P4 | 未着手 |  |  |
 | SRCH-003 | P4 | 未着手 |  |  |
@@ -168,15 +224,15 @@ P1時点の制約:
 | SRCH-014 | P4 | 未着手 |  |  |
 | SRCH-015 | P4 | 未着手 |  |  |
 | SRCH-016 | P4 | 未着手 |  |  |
-| MD-001 | P2 | 未着手 |  |  |
-| MD-002 | P2 | 未着手 |  |  |
-| MD-003 | P2 | 未着手 |  |  |
-| MD-004 | P2 | 未着手 |  |  |
-| MD-005 | P2 | 未着手 |  |  |
-| MD-006 | P2 | 未着手 |  |  |
-| SEC-001 | P2 | 未着手 |  |  |
-| SEC-002 | P2 | 未着手 |  |  |
-| SEC-003 | P2 | 未着手 |  |  |
+| MD-001 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
+| MD-002 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
+| MD-003 | P2 | PASS | `packages/document/tests/react.test.tsx`、`tests/e2e/viewer.spec.ts` |  |
+| MD-004 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
+| MD-005 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
+| MD-006 | P2 | PASS | `packages/document/src/analysis.test.ts`、`apps/cli/src/workers/parse-service.test.ts`、`tests/e2e/workspace.spec.ts` |  |
+| SEC-001 | P2 | PASS | `tests/integration/http.test.ts`、`apps/cli/src/server/session-service.test.ts`、`tests/e2e/viewer.spec.ts` |  |
+| SEC-002 | P2 | PASS | `tests/integration/http.test.ts` |  |
+| SEC-003 | P2 | PASS | `tests/integration/http.test.ts`、`tests/e2e/viewer.spec.ts` |  |
 | SEC-004 | P6 | 未着手 |  | iframe内でscriptを動かす検証が必要。P3でsandbox属性とCSPを部分検証 |
 | SEC-005 | P3 | 未着手 |  |  |
 | SEC-006 | P3 | 未着手 |  |  |
@@ -232,11 +288,11 @@ P1時点の制約:
 
 ## 引継ぎ事項
 
-- P2のUIは、利用者の指定でTailwind CSS、shadcn/ui、Base UIを使う。仕様2.1のUIの行も同じ内容へ書き換え済み。
-
-- 次はP2。daemonのmethod表は`apps/cli/src/daemon/main.ts`、文書の操作は`apps/cli/src/documents/service.ts`、CLIのcommandは`apps/cli/src/cli/run.ts`。
+- 次はP3。管理HTTPは`apps/cli/src/server/http/management.ts`、UIは`apps/web/src/`、Markdownの描画は`packages/document/src/react.tsx`。
 - 未解決の不具合: なし。
-- 未実行のtest: 上の表で「未着手」のもの。
+- 未実行のtest: 上の表で「未着手」のもの。e2eのFirefox／WebKit。
 - 配布物はruntime依存を持たない方針（ADR-0001）。外部packageを足したら`apps/cli/tsdown.config.ts`の`deps.onlyBundle`へ追加する。
 - stdinを入力として扱うのは、shellのpipeかredirectのときだけ（ADR-0004）。
-- 結合テストは`tests/integration/harness.ts`の`createTestHome()`で、試験専用のstate rootとruntimeを使う。
+- UIはTailwind CSS、shadcn/ui、Base UIで作る（利用者の指定、ADR-0006）。部品は`pnpm dlx shadcn@4.21.1 add <name>`で`apps/web/src/components/ui/`へ追加する。
+- 結合テストは`tests/integration/harness.ts`の`createTestHome()`、e2eは`tests/e2e/harness.ts`の`createE2eHome()`で、試験専用のstate rootとruntimeを使う。browserは`BROWSER`環境変数で差し替えられる。
+- e2eは配布物（`apps/cli/dist`）を試す。先に`pnpm build`が必要。

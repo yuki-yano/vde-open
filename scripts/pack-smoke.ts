@@ -48,6 +48,7 @@ function packTarball(): string {
     'package/package.json',
     'package/dist/cli.js',
     'package/dist/daemon.js',
+    'package/dist/workers/parse-worker.js',
     'package/dist/web/index.html',
   ]) {
     if (!entries.has(entry)) fail(`tarballに ${entry} がありません`);
@@ -117,6 +118,21 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     if (runJson<Status>('vde-open', ['daemon', 'status']).daemonId !== daemonId) {
       fail('vde-openとvoが別のdaemonを使っています');
     }
+    // 手順6: repoの外のcwdから、同梱のUIと解析workerが動く。cwdのfileは配信しない。
+    const outline = runJson<{ outline: unknown[] }>('vo', ['read', openedId, '--outline']);
+    if (outline.outline.length !== 1) fail('同梱の解析workerで見出しを取得できません');
+    const uiUrl = runJson<{ uiUrl: string }>('vde-open', ['daemon', 'status']).uiUrl;
+    const page = await fetch(uiUrl);
+    const html = await page.text();
+    const script = /<script[^>]+src="([^"]+)"/.exec(html)?.[1];
+    if (page.status !== 200 || !html.includes('id="root"') || !script) {
+      fail('同梱のUIを配信できていません');
+    }
+    if ((await fetch(new URL(script, uiUrl))).status !== 200)
+      fail('UIのscriptを配信できていません');
+    if ((await fetch(new URL('a.md', uiUrl))).status !== 404)
+      fail('cwdのfileがUIのoriginから配信されています');
+
     runJson('vo', ['close', openedId]);
     if (runJson<Documents>('vde-open', ['list']).documents.length !== 0) {
       fail('voのcloseがvde-openの一覧に反映されていません');

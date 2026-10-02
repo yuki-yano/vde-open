@@ -33,6 +33,8 @@ export interface DaemonControl {
   connectExisting(): Promise<IpcConnection | null>;
   // 接続し、なければ起動してから接続する。
   ensure(): Promise<IpcConnection>;
+  // ensureと同じ。この呼び出しでdaemonを新しく起動したかも返す。
+  ensureDetailed(): Promise<{ connection: IpcConnection; started: boolean }>;
   stop(): Promise<{ wasRunning: boolean }>;
   stoppedStatus(): DaemonStatus;
 }
@@ -119,9 +121,9 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
       });
     });
 
-  const ensure = async (): Promise<IpcConnection> => {
+  const ensureDetailed = async (): Promise<{ connection: IpcConnection; started: boolean }> => {
     const existing = await connectExisting();
-    if (existing) return existing;
+    if (existing) return { connection: existing, started: false };
 
     await ensurePrivateDirectory(stateRoot, secure);
     const ownerId = `start_${randomUUID()}`;
@@ -137,7 +139,7 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
       );
       if (outcome.acquired) break;
       const connection = await connectExisting();
-      if (connection) return connection;
+      if (connection) return { connection, started: false };
       if (Date.now() > deadline) {
         throw new VdeError(
           'E_DAEMON_UNAVAILABLE',
@@ -150,8 +152,8 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
 
     try {
       // lockを取るまでの間に、別のprocessが起動を終えているかもしれない。
-      const started = await connectExisting();
-      if (started) return started;
+      const already = await connectExisting();
+      if (already) return { connection: already, started: false };
       try {
         await spawnDaemon();
       } catch (error) {
@@ -160,7 +162,7 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
         const waitUntil = Date.now() + LOCKED_RETRY_MS;
         for (;;) {
           const other = await connectExisting();
-          if (other) return other;
+          if (other) return { connection: other, started: false };
           if (Date.now() > waitUntil) throw error;
           await delay(POLL_INTERVAL_MS);
         }
@@ -171,11 +173,13 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
           log: join(stateRoot, 'logs', 'daemon.jsonl'),
         });
       }
-      return connection;
+      return { connection, started: true };
     } finally {
       await releaseLock(stateRoot, START_LOCK_NAME, ownerId);
     }
   };
+
+  const ensure = async (): Promise<IpcConnection> => (await ensureDetailed()).connection;
 
   const stop = async (): Promise<{ wasRunning: boolean }> => {
     const connection = await connectExisting();
@@ -214,7 +218,8 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
     stateRoot,
     openDocuments: null,
     catalogVersion: null,
+    uiUrl: null,
   });
 
-  return { stateRoot, connectExisting, ensure, stop, stoppedStatus };
+  return { stateRoot, connectExisting, ensure, ensureDetailed, stop, stoppedStatus };
 }

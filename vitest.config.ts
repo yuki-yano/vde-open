@@ -6,8 +6,8 @@ export default defineConfig({
     // 結合テストは実際のCLI processとdaemonを起動する。
     testTimeout: 30_000,
     include: [
-      'packages/*/src/**/*.test.ts',
-      'packages/*/tests/**/*.test.ts',
+      'packages/*/src/**/*.test.{ts,tsx}',
+      'packages/*/tests/**/*.test.{ts,tsx}',
       'apps/*/src/**/*.test.{ts,tsx}',
       'apps/*/tests/**/*.test.ts',
       'tests/**/*.test.ts',

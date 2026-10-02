@@ -55,11 +55,27 @@ export const openParamsSchema = z.strictObject({
   title: titleSchema.optional(),
   key: keySchema.optional(),
   recursive: z.boolean().default(false),
+  // directory／globに新しく現れた文書も登録する。
+  watch: z.boolean().default(false),
 });
 export type OpenParams = z.input<typeof openParamsSchema>;
 
+export const watchRuleSchema = z.strictObject({
+  watchId: z.string().regex(/^watch_[0-9a-f-]{36}$/),
+  kind: z.enum(['directory', 'glob']),
+  // 監視の起点になるdirectory（絶対path）。
+  root: z.string(),
+  // globのときの指定。directoryのときはnull。
+  pattern: z.string().nullable(),
+  recursive: z.boolean(),
+  suppressedPaths: z.array(z.string()),
+  createdAt: z.string(),
+});
+export type WatchRule = z.infer<typeof watchRuleSchema>;
+
 export const openResultSchema = z.strictObject({
   documents: z.array(documentSummarySchema),
+  watchRules: z.array(watchRuleSchema),
   created: z.number().int().nonnegative(),
   updated: z.number().int().nonnegative(),
   unchanged: z.number().int().nonnegative(),
@@ -92,17 +108,28 @@ export const readParamsSchema = z.strictObject({
     .max(LIMITS.readMaxBytesMax)
     .default(LIMITS.readMaxBytesDefault),
   cursor: z.string().min(1).optional(),
+  outline: z.boolean().default(false),
 });
 export type ReadParams = z.input<typeof readParamsSchema>;
 
-// 仕様9.5。P1はsourceの取得だけを返す。
+export const outlineItemSchema = z.strictObject({
+  sectionId: z.string().regex(/^sec_\d{4,}$/),
+  level: z.number().int().min(1).max(6),
+  title: z.string(),
+  headingPath: z.array(z.string()),
+  anchor: z.string(),
+});
+export type OutlineItem = z.infer<typeof outlineItemSchema>;
+
+// 仕様9.5。sectionの取得はP4で足す。
 export const readResultSchema = z.strictObject({
   documentId: documentIdSchema,
   revision: revisionSchema,
-  mode: z.literal('source'),
-  content: z.string(),
+  mode: z.enum(['source', 'outline']),
+  content: z.string().optional(),
+  outline: z.array(outlineItemSchema).optional(),
   sourceRange: sourceRangeSchema.nullable(),
-  extraction: z.literal('source'),
+  extraction: z.enum(['source', 'markdown', 'static-html']),
   truncated: z.boolean(),
   nextCursor: z.string().nullable(),
 });
@@ -131,5 +158,64 @@ export const daemonStatusSchema = z.strictObject({
   stateRoot: z.string(),
   openDocuments: z.number().int().nonnegative().nullable(),
   catalogVersion: z.number().int().nonnegative().nullable(),
+  // 管理UIのURL。認証の秘密は含まない。
+  uiUrl: z.string().nullable(),
 });
 export type DaemonStatus = z.infer<typeof daemonStatusSchema>;
+
+export const reorderParamsSchema = z.strictObject({
+  // 開いている全文書のID。重複なし。
+  order: z.array(documentIdSchema),
+  expectedCatalogVersion: z.number().int().nonnegative(),
+});
+export type ReorderParams = z.infer<typeof reorderParamsSchema>;
+
+export const refreshResultSchema = z.strictObject({
+  documents: z.array(documentSummarySchema),
+  changed: z.array(documentIdSchema),
+});
+export type RefreshResult = z.infer<typeof refreshResultSchema>;
+
+export const watchListResultSchema = z.strictObject({ watchRules: z.array(watchRuleSchema) });
+export type WatchListResult = z.infer<typeof watchListResultSchema>;
+
+// 更新通知（仕様6.5）。IDと版だけを運び、本文は含めない。
+export const serverEventSchema = z.strictObject({
+  type: z.enum([
+    'hello',
+    'catalog-changed',
+    'document-changed',
+    'document-status',
+    'focus-requested',
+    'daemon-stopping',
+    'resync-required',
+  ]),
+  daemonId: z.string(),
+  sequence: z.number().int().nonnegative(),
+  catalogVersion: z.number().int().nonnegative(),
+  documentId: documentIdSchema.optional(),
+  revision: revisionSchema.nullable().optional(),
+});
+export type ServerEvent = z.infer<typeof serverEventSchema>;
+
+export const uiStatusSchema = z.strictObject({
+  version: z.string(),
+  daemonId: z.string(),
+  catalogVersion: z.number().int().nonnegative(),
+  activeDocumentId: documentIdSchema.nullable(),
+  openDocuments: z.number().int().nonnegative(),
+});
+export type UiStatus = z.infer<typeof uiStatusSchema>;
+
+export const bootstrapResultSchema = z.strictObject({
+  // 一回限りのticketをfragmentに含むURL。秘密として扱う。
+  bootstrapUrl: z.string(),
+  uiUrl: z.string(),
+});
+export type BootstrapResult = z.infer<typeof bootstrapResultSchema>;
+
+export const sessionResultSchema = z.strictObject({
+  token: z.string(),
+  idleTimeoutSeconds: z.number().int().positive(),
+});
+export type SessionResult = z.infer<typeof sessionResultSchema>;

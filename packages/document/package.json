@@ -5,7 +5,8 @@
   "license": "UNLICENSED",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./react": "./src/react.tsx"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -17,6 +18,13 @@
     "parse5": "8.0.1"
   },
   "devDependencies": {
-    "@types/css-tree": "3.2.0"
+    "@types/css-tree": "3.2.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "peerDependencies": {
+    "react": "19.3.0"
   }
 }

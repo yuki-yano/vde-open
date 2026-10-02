@@ -5,16 +5,19 @@
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
+    "dev": "node scripts/dev.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && pnpm -r run typecheck",
     "lint": "oxlint",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "build": "node scripts/build.ts",
     "test:pack": "node scripts/pack-smoke.ts",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "24.19.0",
     "oxfmt": "0.71.0",
     "oxlint": "1.86.0",

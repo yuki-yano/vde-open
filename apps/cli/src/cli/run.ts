@@ -7,6 +7,7 @@ import {
   LIMITS,
   successEnvelope,
   VdeError,
+  type BootstrapResult,
   type CloseResult,
   type DaemonStatus,
   type DocumentSummary,
@@ -15,7 +16,9 @@ import {
   type ListResult,
   type OpenResult,
   type ReadResult,
+  type RefreshResult,
   type Warning,
+  type WatchListResult,
 } from '@vde-open/shared';
 import { Command, CommanderError, InvalidArgumentError } from 'commander';
 
@@ -23,7 +26,9 @@ import packageJson from '../../package.json' with { type: 'json' };
 import { startDaemon } from '../daemon/main.ts';
 import { runDoctor, type DoctorReport } from '../doctor/doctor.ts';
 import type { PathEnvironment } from '../persistence/paths.ts';
+import type { IpcConnection } from '../server/ipc-client.ts';
 import { normalizeArgv } from './argv.ts';
+import { createBrowserLauncher } from './browser.ts';
 import { createDaemonControl, type DaemonControl } from './daemon-control.ts';
 import { escapeContentForTerminal, escapeForTerminal, safeJson } from './output.ts';
 
@@ -55,6 +60,11 @@ interface CommandOutcome<T> {
   warnings?: Warning[];
 }
 
+interface UiResult {
+  uiUrl: string;
+  opened: boolean;
+}
+
 function toErrorBody(error: unknown): ErrorBody {
   if (isVdeError(error)) {
     return {
@@ -78,8 +88,9 @@ function unwrap<T>(envelope: Envelope<T>): CommandOutcome<T> {
     throw new VdeError(isErrorCode(code) ? code : 'E_INTERNAL', message, details, { retryable });
   }
   const outcome: CommandOutcome<T> = { data: envelope.data, warnings: envelope.warnings };
-  if (envelope.meta.catalogVersion !== undefined)
+  if (envelope.meta.catalogVersion !== undefined) {
     outcome.catalogVersion = envelope.meta.catalogVersion;
+  }
   return outcome;
 }
 
@@ -117,9 +128,54 @@ function describeDocument(document: DocumentSummary): string {
   return `${document.documentId}  ${escapeForTerminal(document.title)}  ${escapeForTerminal(path)}`;
 }
 
+function decodeStdin(bytes: Buffer): string {
+  if (bytes.byteLength > LIMITS.documentBytes) {
+    throw new VdeError('E_LIMIT_EXCEEDED', 'stdinの内容が1文書の大きさの上限を超えています。', {
+      limit: 'documentBytes',
+      max: LIMITS.documentBytes,
+      actual: bytes.byteLength,
+    });
+  }
+  if (bytes.includes(0)) {
+    throw new VdeError('E_INVALID_SOURCE', 'stdinの内容は開けません（contains-nul）。', {
+      path: 'stdin',
+      reason: 'contains-nul',
+    });
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw new VdeError('E_INVALID_SOURCE', 'stdinの内容は開けません（invalid-utf8）。', {
+      path: 'stdin',
+      reason: 'invalid-utf8',
+    });
+  }
+}
+
+interface OpenOptions {
+  format: 'auto' | 'markdown' | 'html';
+  title?: string;
+  key?: string;
+  recursive: boolean;
+  watch: boolean;
+  open?: boolean;
+  focus: boolean;
+  json: boolean;
+}
+
+interface ReadOptions {
+  lines?: { start: number; end: number };
+  revision?: string;
+  maxBytes?: number;
+  cursor?: string;
+  outline: boolean;
+  json: boolean;
+}
+
 export async function runCli(rawArgv: string[], context: CliContext): Promise<ExitCode> {
   const wantsJson = rawArgv.includes('--json');
   const control: DaemonControl = createDaemonControl(context.environment);
+  const browser = createBrowserLauncher(context.environment.env, context.environment.platform);
   let exitCode: ExitCode = ExitCode.success;
 
   const fail = (error: unknown, json: boolean) => {
@@ -169,6 +225,38 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     }
   };
 
+  // browserで管理UIを開く。開けなかったら、登録などの結果とは別にwarningとして伝える。
+  const openBrowser = async (connection: IpcConnection): Promise<Warning[]> => {
+    const { data } = unwrap(await connection.request<BootstrapResult>('ui.bootstrap', {}));
+    if (await browser.open(data.bootstrapUrl)) return [];
+    return [
+      {
+        code: 'W_BROWSER_OPEN_FAILED',
+        message:
+          'browserを開けませんでした。`vde-open ui --print-url`で表示したURLを、browserで開いてください。',
+        details: { uiUrl: data.uiUrl },
+      },
+    ];
+  };
+
+  const showUi = async (printUrl: boolean): Promise<CommandOutcome<UiResult>> => {
+    const connection = await control.ensure();
+    try {
+      if (printUrl) {
+        const { data } = unwrap(await connection.request<BootstrapResult>('ui.bootstrap', {}));
+        // 秘密を含むURL。通常の結果（JSON）には混ぜず、明示されたときだけ出す。
+        context.stderr('次のURLは60秒間・1回だけ有効な秘密を含みます。共有しないでください。\n');
+        context.stdout(`${data.bootstrapUrl}\n`);
+        return { data: { uiUrl: data.uiUrl, opened: false } };
+      }
+      const status = unwrap(await connection.request<DaemonStatus>('daemon.status', {})).data;
+      const warnings = await openBrowser(connection);
+      return { data: { uiUrl: status.uiUrl ?? '', opened: warnings.length === 0 }, warnings };
+    } finally {
+      connection.close();
+    }
+  };
+
   const program = new Command();
   program
     .name(PROGRAM_NAME)
@@ -179,15 +267,25 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     .helpOption('-h, --help', 'helpを表示する')
     .addHelpText(
       'after',
-      '\n`vo`は`vde-open`と同じコマンドです。fileを直接渡すと`open`として扱います（例: vo a.md）。',
+      '\n`vo`は`vde-open`と同じコマンドです。fileを直接渡すと`open`として扱います（例: vo a.md）。\n引数なしで実行すると、管理UIをbrowserで開きます。',
     )
     .exitOverride()
     .configureOutput({ writeOut: context.stdout, writeErr: context.stderr })
-    .action(() => {
-      context.stdout(program.helpInformation());
+    // 引数なしは`ui`と同じ（仕様5.1）。
+    .action(async () => {
+      await execute<UiResult>(
+        'ui',
+        false,
+        () => showUi(false),
+        () => '',
+      );
     });
 
   const openCommand = program.command('open');
+  // parserがoptionとして認識した指定だけを数える。`--`より後のfile名やoptionの値は数えない。
+  const seenOpenFlags = new Set<'open' | 'no-open'>();
+  openCommand.on('option:open', () => seenOpenFlags.add('open'));
+  openCommand.on('option:no-open', () => seenOpenFlags.add('no-open'));
   openCommand
     .description('文書を開く。directoryやglobは、対象の文書を列挙して開く')
     .argument('[paths...]', 'file、directory、glob。`-`はstdin')
@@ -195,12 +293,19 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     .option('--title <text>', '表示するtitle。1文書のときだけ')
     .option('--key <key>', 'stdinの文書を同じ1件として更新するためのkey。1文書のときだけ')
     .option('-R, --recursive', 'directoryを再帰的に列挙する', false)
+    .option('-w, --watch', 'directory／globに新しく現れた文書も開く', false)
+    .option('--open', 'browserで管理UIを開く')
+    .option('--no-open', 'browserを開かない')
+    .option('--focus', '最初に指定した文書を表示中の文書にする', false)
     .option('--json', '結果をJSONで出力する', false)
     .action(async (paths: string[], options: OpenOptions) => {
       await execute<OpenResult>(
         'open',
         options.json,
         async () => {
+          if (seenOpenFlags.size === 2) {
+            throw new VdeError('E_INVALID_ARGUMENT', '--openと--no-openは同時に指定できません。');
+          }
           const explicitStdin = paths.includes('-');
           const filePaths = paths.filter((path) => path !== '-');
           const fromStdin = explicitStdin || (filePaths.length === 0 && context.stdin.isPiped);
@@ -218,24 +323,48 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
             cwd: context.cwd,
             format: options.format,
             recursive: options.recursive,
+            watch: options.watch,
             ...(options.title === undefined ? {} : { title: options.title }),
             ...(options.key === undefined ? {} : { key: options.key }),
           };
-          if (!fromStdin) return viaDaemon('documents.open', { ...base, paths: filePaths });
-          if (options.format === 'auto') {
-            throw new VdeError('E_INVALID_ARGUMENT', 'stdinから開くときは--formatが必要です。');
+          let params: Record<string, unknown>;
+          if (fromStdin) {
+            if (options.format === 'auto') {
+              throw new VdeError('E_INVALID_ARGUMENT', 'stdinから開くときは--formatが必要です。');
+            }
+            // EOFまで読み切ってから登録する。途中の内容を完成した文書として扱わない。
+            params = {
+              ...base,
+              paths: [],
+              stdin: { content: decodeStdin(await context.stdin.read()) },
+            };
+          } else {
+            params = { ...base, paths: filePaths };
           }
-          // EOFまで読み切ってから登録する。途中の内容を完成した文書として扱わない。
-          const bytes = await context.stdin.read();
-          return viaDaemon('documents.open', {
-            ...base,
-            paths: [],
-            stdin: { content: decodeStdin(bytes) },
-          });
+
+          const { connection, started } = await control.ensureDetailed();
+          try {
+            const outcome = unwrap(await connection.request<OpenResult>('documents.open', params));
+            const warnings = [...(outcome.warnings ?? [])];
+            const first = outcome.data.documents[0];
+            if (options.focus && first) {
+              await connection.request('documents.focus', { documentId: first.documentId });
+            }
+            // 開く・browserを開く・focusするは、それぞれ独立した操作（仕様5.2）。
+            // 指定がなければ、端末からの実行で、daemonを新しく起動したときだけbrowserを開く。
+            const shouldOpen = options.open ?? (!options.json && context.stdoutIsTty && started);
+            if (shouldOpen) warnings.push(...(await openBrowser(connection)));
+            return { ...outcome, warnings };
+          } finally {
+            connection.close();
+          }
         },
         (data) =>
           [
             ...data.documents.map(describeDocument),
+            ...data.watchRules.map(
+              (rule) => `監視: ${rule.watchId}  ${escapeForTerminal(rule.pattern ?? rule.root)}`,
+            ),
             `${String(data.documents.length)}件（新規 ${String(data.created)}、更新 ${String(data.updated)}、変更なし ${String(data.unchanged)}）`,
           ].join('\n'),
       );
@@ -270,8 +399,9 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
 
   program
     .command('read')
-    .description('開いている文書の原文を取得する')
+    .description('開いている文書の原文または見出しの構造を取得する')
     .argument('<documentId>', '文書ID')
+    .option('--outline', '見出しの構造を取得する', false)
     .option('--lines <A:B>', '原文の行範囲（1始まり、両端を含む）', parseLines)
     .option('--revision <revision>', '取得する版。保持されていなければerror')
     .option(
@@ -296,15 +426,33 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
               { min: LIMITS.readMaxBytesMin, max: LIMITS.readMaxBytesMax },
             );
           }
+          if (options.outline && (options.lines !== undefined || options.cursor !== undefined)) {
+            throw new VdeError(
+              'E_INVALID_ARGUMENT',
+              '--outlineと--lines／--cursorは併用できません。',
+            );
+          }
           return viaDaemon('documents.read', {
             documentId,
+            outline: options.outline,
             ...(options.lines === undefined ? {} : { lines: options.lines }),
             ...(options.revision === undefined ? {} : { revision: options.revision }),
             ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
             ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
           });
         },
-        (data) => (context.stdoutIsTty ? escapeContentForTerminal(data.content) : data.content),
+        (data) => {
+          if (data.outline) {
+            return data.outline
+              .map(
+                (item) =>
+                  `${'  '.repeat(item.level - 1)}${escapeForTerminal(item.title)}  (${item.sectionId})`,
+              )
+              .join('\n');
+          }
+          const content = data.content ?? '';
+          return context.stdoutIsTty ? escapeContentForTerminal(content) : content;
+        },
       );
     });
 
@@ -312,7 +460,7 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     .command('close')
     .description('文書を一覧から外す。原本は削除しない')
     .argument('[targets...]', '文書IDまたはpath')
-    .option('--all', '開いている文書をすべて閉じる', false)
+    .option('--all', '開いている文書をすべて閉じ、監視ruleも解除する', false)
     .option('--json', '結果をJSONで出力する', false)
     .action(async (targets: string[], options: { all: boolean; json: boolean }) => {
       await execute<CloseResult>(
@@ -324,9 +472,99 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
       );
     });
 
+  program
+    .command('focus')
+    .description('管理UIで表示する文書を切り替える')
+    .argument('<documentId>', '文書ID')
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (documentId: string, options: { json: boolean }) => {
+      await execute<{ documentId: string }>(
+        'focus',
+        options.json,
+        () => viaDaemon('documents.focus', { documentId }),
+        (data) => `表示する文書を切り替えました: ${data.documentId}`,
+      );
+    });
+
+  program
+    .command('refresh')
+    .description('fileを読み直す。指定がなければ、開いているfileのすべて')
+    .argument('[documentId]', '文書ID')
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (documentId: string | undefined, options: { json: boolean }) => {
+      await execute<RefreshResult>(
+        'refresh',
+        options.json,
+        () => viaDaemon('documents.refresh', documentId === undefined ? {} : { documentId }),
+        (data) =>
+          `${String(data.documents.length)}件を確認し、${String(data.changed.length)}件を更新しました`,
+      );
+    });
+
+  const renderRules = (data: WatchListResult) =>
+    data.watchRules.length === 0
+      ? '監視ruleはありません'
+      : data.watchRules
+          .map(
+            (rule) =>
+              `${rule.watchId}  ${rule.kind}  ${escapeForTerminal(rule.pattern ?? rule.root)}${rule.recursive ? '  (再帰)' : ''}`,
+          )
+          .join('\n');
+
+  const watchCommand = program.command('watch').description('監視ruleを確認・解除する');
+  watchCommand
+    .command('list')
+    .description('監視ruleを一覧する')
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (options: { json: boolean }) => {
+      await execute<WatchListResult>(
+        'watch.list',
+        options.json,
+        () => viaDaemon('watch.list', {}),
+        renderRules,
+      );
+    });
+  watchCommand
+    .command('remove')
+    .description('監視ruleを解除する。開いている文書は閉じない')
+    .argument('<watchId>', '監視ruleのID')
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (watchId: string, options: { json: boolean }) => {
+      await execute<WatchListResult>(
+        'watch.remove',
+        options.json,
+        () => viaDaemon('watch.remove', { watchId }),
+        renderRules,
+      );
+    });
+
+  program
+    .command('ui')
+    .description('管理UIをbrowserで開く')
+    .option('--print-url', 'browserを開かず、一回限りのURLを表示する', false)
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (options: { printUrl: boolean; json: boolean }) => {
+      if (options.printUrl && options.json) {
+        fail(
+          new VdeError(
+            'E_INVALID_ARGUMENT',
+            '--print-urlの出力は秘密を含むため、--jsonとは併用できません。',
+          ),
+          true,
+        );
+        return;
+      }
+      await execute<UiResult>(
+        'ui',
+        options.json,
+        () => showUi(options.printUrl),
+        () => '',
+      );
+    });
+
   const renderStatus = (status: DaemonStatus) =>
     status.state === 'running'
-      ? `running  pid=${String(status.pid)}  開いている文書 ${String(status.openDocuments)}件`
+      ? `running  pid=${String(status.pid)}  開いている文書 ${String(status.openDocuments)}件  ${status.uiUrl ?? ''}`
       : 'stopped';
 
   const daemon = program.command('daemon').description('daemonを起動・確認・停止する');
@@ -393,14 +631,20 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
   program
     .command('serve')
     .description('daemonを前景で動かす。Ctrl+Cで停止する')
-    .action(async () => {
+    .option(
+      '--port <n>',
+      '管理UIのport。指定がなければ空きportを使う',
+      parseInteger('--port', 1, 65535),
+    )
+    .action(async (options: { port?: number }) => {
       try {
         const handle = await startDaemon({
           environment: context.environment,
           version: CLI_VERSION,
+          ...(options.port === undefined ? {} : { managementPort: options.port }),
         });
         context.stderr(
-          `daemonを前景で起動しました（pid=${String(process.pid)}）。Ctrl+Cで停止します。\n`,
+          `daemonを前景で起動しました（pid=${String(process.pid)}、${handle.uiUrl}）。Ctrl+Cで停止します。\n`,
         );
         const onSignal = () => void handle.stop('signal');
         process.once('SIGINT', onSignal);
@@ -488,44 +732,4 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     throw error;
   }
   return exitCode;
-}
-
-interface OpenOptions {
-  format: 'auto' | 'markdown' | 'html';
-  title?: string;
-  key?: string;
-  recursive: boolean;
-  json: boolean;
-}
-
-interface ReadOptions {
-  lines?: { start: number; end: number };
-  revision?: string;
-  maxBytes?: number;
-  cursor?: string;
-  json: boolean;
-}
-
-function decodeStdin(bytes: Buffer): string {
-  if (bytes.byteLength > LIMITS.documentBytes) {
-    throw new VdeError('E_LIMIT_EXCEEDED', 'stdinの内容が1文書の大きさの上限を超えています。', {
-      limit: 'documentBytes',
-      max: LIMITS.documentBytes,
-      actual: bytes.byteLength,
-    });
-  }
-  if (bytes.includes(0)) {
-    throw new VdeError('E_INVALID_SOURCE', 'stdinの内容は開けません（contains-nul）。', {
-      path: 'stdin',
-      reason: 'contains-nul',
-    });
-  }
-  try {
-    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-  } catch {
-    throw new VdeError('E_INVALID_SOURCE', 'stdinの内容は開けません（invalid-utf8）。', {
-      path: 'stdin',
-      reason: 'invalid-utf8',
-    });
-  }
 }

@@ -6,11 +6,14 @@ import {
   sourceKindSchema,
   sourceStateSchema,
   STATE_FORMAT_VERSION,
+  watchRuleSchema,
 } from '@vde-open/shared';
 import { z } from 'zod';
 
 export const revisionRecordSchema = z.strictObject({
   revision: revisionSchema,
+  // この版を解析した形式。文書の形式が後から変わっても、版ごとの解析条件は変えない。
+  format: documentFormatSchema,
   sourceSha256: sha256Schema,
   byteLength: z.number().int().nonnegative(),
   parserProfileVersion: z.string().min(1),
@@ -43,6 +46,7 @@ export const statePayloadSchema = z.strictObject({
   documents: z.record(documentIdSchema, documentRecordSchema),
   openOrder: z.array(documentIdSchema),
   activeDocumentId: documentIdSchema.nullable(),
+  watchRules: z.array(watchRuleSchema),
 });
 export type StatePayload = z.infer<typeof statePayloadSchema>;
 
@@ -54,7 +58,13 @@ export const stateFileSchema = z.strictObject({
 });
 
 export function emptyStatePayload(): StatePayload {
-  return { catalogVersion: 0, documents: {}, openOrder: [], activeDocumentId: null };
+  return {
+    catalogVersion: 0,
+    documents: {},
+    openOrder: [],
+    activeDocumentId: null,
+    watchRules: [],
+  };
 }
 
 // schemaでは表せない参照の整合性。違反はstate破損として扱う。
