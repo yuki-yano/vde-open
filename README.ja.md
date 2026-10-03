@@ -11,21 +11,27 @@ Agentと人が同じ資料を見ながら作業するための、ローカルの
 
 ## 導入
 
-Node.js 24以降が必要です（このrepositoryは`mise.toml`で24.21.0に固定しています）。
+Node.js 24以降が必要です。
+
+```bash
+bun add -g vde-open      # おすすめ: userごとに ~/.bun/bin へ導入する
+npm install -g vde-open  # これでも導入できる
+```
+
+- Bunで、userごとに1回導入するのがおすすめです。`~/.bun/bin`は、使っているNode.jsの版に左右されないので、mise などでNode.jsの版を切り替えても`vo`が消えません。Bunは導入に使うだけで、commandはNode.jsで動きます（`#!/usr/bin/env node`）。PATHにNode.js 24以降が必要です。Bunのruntimeでの実行（`bun --bun`）は試していません。
+- `npm install -g`は、そのときに使っているNode.jsの版の場所へ入ります。
+- projectごとの導入はおすすめしません。daemonはuserごとに1つなので、projectごとに版が違うと、同じdaemonに違う版のCLIがつながります。
+
+導入は、`.zshrc`などのshellの設定を変えません。導入時にbuildやscriptも実行しません（packageは依存をすべて同梱しています）。公開は、GitHub Actionsからprovenance付きで行います（「公開の手順」を参照）。
+
+このrepositoryのcloneから導入するときは、次のとおりです（`mise.toml`でNode.js 24.21.0に固定しています）。
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm build
-pnpm test:pack                              # artifacts/vde-open-0.1.0.tgz を作り、別のdirectoryへ導入して確かめる
-bun add -g ./artifacts/vde-open-0.1.0.tgz   # おすすめ: userごとに ~/.bun/bin へ導入する
+pnpm test:pack                              # artifacts/vde-open-<版>.tgz を作り、別のdirectoryへ導入して確かめる
+bun add -g ./artifacts/vde-open-0.1.0.tgz   # pathの先頭には必ず ./ を付ける（付けないとGitHubのrepositoryの名前として扱われる）
 ```
-
-- Bunで、userごとに1回導入するのがおすすめです。`~/.bun/bin`は、使っているNode.jsの版に左右されないので、mise などでNode.jsの版を切り替えても`vo`が消えません。Bunは導入に使うだけで、commandはNode.jsで動きます（`#!/usr/bin/env node`）。PATHにNode.js 24以降が必要です。Bunのruntimeでの実行（`bun --bun`）は試していません。
-- `npm install -g ./artifacts/vde-open-0.1.0.tgz`でも導入できますが、そのときに使っているNode.jsの版の場所へ入ります。
-- projectごとの導入はおすすめしません。daemonはuserごとに1つなので、projectごとに版が違うと、同じdaemonに違う版のCLIがつながります。
-- pathの先頭には必ず`./`を付けてください。付けないと、GitHubのrepositoryの名前として扱われます。
-
-導入は、`.zshrc`などのshellの設定を変えません。導入時にbuildやscriptも実行しません（tarballは依存をすべて同梱しています）。npmへの公開はしていません。
 
 ## `vde-open`と`vo`
 
@@ -59,8 +65,11 @@ Agentからの使い方は [docs/agent-usage.ja.md](docs/agent-usage.ja.md) に�
 [`skills/vde-open/SKILL.md`](skills/vde-open/SKILL.md) は、Agent（Claude Code、Codexなど`SKILL.md`を読むもの）に、`vo`をいつ・どう使うかを伝えるskillです（英語）。配布物にも含めています。使うときは、Agentのskillのdirectoryへlinkするかcopyします。
 
 ```bash
-ln -s "$PWD/skills/vde-open" ~/.claude/skills/vde-open   # Claude Code
-ln -s "$PWD/skills/vde-open" ~/.codex/skills/vde-open    # Codex
+# Bunで導入したとき: skillはglobalのpackageのdirectoryにある。
+ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.claude/skills/vde-open   # Claude Code
+ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skills/vde-open    # Codex
+# npmで導入したとき: 代わりに "$(npm root -g)/vde-open/skills/vde-open" を使う。
+# このrepositoryのcloneから使うとき: 代わりに "$PWD/skills/vde-open" を使う。
 ```
 
 ## 検索の範囲

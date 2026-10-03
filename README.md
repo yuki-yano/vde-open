@@ -11,21 +11,27 @@ A local document viewer for agents and people who work from the same material. O
 
 ## Install
 
-Node.js 24 or later is required (this repository pins 24.21.0 in `mise.toml`).
+Node.js 24 or later is required.
+
+```bash
+bun add -g vde-open      # recommended: user-level install into ~/.bun/bin
+npm install -g vde-open  # also works
+```
+
+- We recommend installing it once per user with Bun. `~/.bun/bin` does not depend on which Node.js version is active, so switching Node.js versions (with mise and similar tools) does not remove `vo`. Bun is only used to install; the commands run on Node.js (`#!/usr/bin/env node`), so Node.js 24 or later must be on your `PATH`. Running it on the Bun runtime (`bun --bun`) is not tested.
+- `npm install -g` installs into the prefix of the active Node.js version.
+- Installing it per project is not recommended. There is one daemon per user, so different versions in different projects would talk to the same daemon.
+
+Installing does not change shell files such as `.zshrc`, and runs no build or install scripts (the package bundles every dependency). Releases are published from GitHub Actions with provenance (see "Releasing").
+
+To install from a clone of this repository (pins Node.js 24.21.0 in `mise.toml`):
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm build
-pnpm test:pack                              # builds artifacts/vde-open-0.1.0.tgz and verifies an install in a separate directory
-bun add -g ./artifacts/vde-open-0.1.0.tgz   # recommended: user-level install into ~/.bun/bin
+pnpm test:pack                              # builds artifacts/vde-open-<version>.tgz and verifies an install in a separate directory
+bun add -g ./artifacts/vde-open-0.1.0.tgz   # always start the path with ./ (otherwise it is read as a GitHub repository)
 ```
-
-- We recommend installing it once per user with Bun. `~/.bun/bin` does not depend on which Node.js version is active, so switching Node.js versions (with mise and similar tools) does not remove `vo`. Bun is only used to install; the commands run on Node.js (`#!/usr/bin/env node`), so Node.js 24 or later must be on your `PATH`. Running it on the Bun runtime (`bun --bun`) is not tested.
-- `npm install -g ./artifacts/vde-open-0.1.0.tgz` also works, but it installs into the prefix of the active Node.js version.
-- Installing it per project is not recommended. There is one daemon per user, so different versions in different projects would talk to the same daemon.
-- Always start the path with `./`. Without it, the path is treated as a GitHub repository name.
-
-Installing does not change shell files such as `.zshrc`, and runs no build or install scripts (the tarball bundles every dependency). The package is not published to npm.
 
 ## `vde-open` and `vo`
 
@@ -59,8 +65,11 @@ How agents should use it is described in [docs/agent-usage.md](docs/agent-usage.
 [`skills/vde-open/SKILL.md`](skills/vde-open/SKILL.md) is a skill that teaches an agent (Claude Code, Codex, and others that read `SKILL.md`) when and how to use `vo`. It is also included in the package. To use it, link or copy the directory into your agent's skill directory:
 
 ```bash
-ln -s "$PWD/skills/vde-open" ~/.claude/skills/vde-open   # Claude Code
-ln -s "$PWD/skills/vde-open" ~/.codex/skills/vde-open    # Codex
+# Installed with Bun: the skill is in the global package directory.
+ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.claude/skills/vde-open   # Claude Code
+ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skills/vde-open    # Codex
+# Installed with npm: use "$(npm root -g)/vde-open/skills/vde-open" instead.
+# From a clone of this repository: use "$PWD/skills/vde-open".
 ```
 
 ## Search scope

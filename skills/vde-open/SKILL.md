@@ -10,7 +10,7 @@ vde-open is a local document viewer shared by a person and agents. The person re
 ## Before you start
 
 - Check that the CLI exists: `command -v vo || command -v vde-open`. Both names are the same CLI; if `vo` belongs to another tool on this machine, use `vde-open`.
-- If neither exists, do not install it on your own. Tell the user it is not installed and point them to the install steps (Node.js 24 or later; from a clone of the repository: `pnpm install --frozen-lockfile && pnpm build && pnpm test:pack && bun add -g ./artifacts/vde-open-0.1.0.tgz`).
+- If neither exists, do not install it on your own. Tell the user it is not installed and point them to the install steps (Node.js 24 or later; `bun add -g vde-open` or `npm install -g vde-open`).
 - The daemon starts automatically on the first command. You do not need to start it.
 
 ## Rules
