@@ -79,6 +79,8 @@ type Work = SearchWorkerRequest extends infer Request
   : never;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+// After requests to the worker pause this long, ask it to collect garbage once.
+const COLLECT_AFTER_IDLE_MS = 2000;
 
 const WAIT_STEP_MS = 20;
 // Amount indexed per request. Kept small so search requests can interleave.
@@ -156,6 +158,19 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
   let indexedAt = now().toISOString();
   // Index updates run one at a time. A request during a run triggers exactly one more run afterwards.
   let syncing: Promise<void> | null = null;
+  // Indexing and searching leave a lot of garbage in the worker, and an idle worker does not collect it
+  // on its own (about half of its heap after indexing many documents). Once requests pause, ask it to
+  // collect once.
+  let collectTimer: NodeJS.Timeout | null = null;
+  const scheduleCollect = () => {
+    if (collectTimer) clearTimeout(collectTimer);
+    collectTimer = setTimeout(() => {
+      collectTimer = null;
+      if (closed || worker === null || pending.size > 0) return;
+      void request({ op: 'collect' }).catch(() => undefined);
+    }, COLLECT_AFTER_IDLE_MS);
+    collectTimer.unref();
+  };
   let syncRequested = false;
 
   const failAll = (error: Error) => {
@@ -202,7 +217,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
 
   const request = <T>(work: Work): Promise<T> => {
     if (closed) return Promise.reject(new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));
-    return new Promise<T>((resolve, reject) => {
+    const result = new Promise<T>((resolve, reject) => {
       const id = nextId;
       nextId += 1;
       const timer = setTimeout(() => {
@@ -219,6 +234,9 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
       pending.set(id, { resolve: resolve as (result: unknown) => void, reject, timer });
       ensureWorker().postMessage({ id, ...work });
     });
+    if (work.op !== 'collect' && work.op !== 'diagnostics')
+      void result.then(scheduleCollect, scheduleCollect);
+    return result;
   };
 
   // The parse worker is recreated when another document's analysis times out, and every waiting analysis fails too.
@@ -583,6 +601,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
 
     async close() {
       closed = true;
+      if (collectTimer) clearTimeout(collectTimer);
       failAll(new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));
       const current = worker;
       worker = null;

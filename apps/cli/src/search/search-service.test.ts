@@ -104,6 +104,8 @@ parentPort.on('message', (request) => {
       staged.delete(request.documentId);
       committed.delete(request.documentId);
       return reply(request.id, null);
+    case 'collect':
+      return reply(request.id, null);
     case 'diagnostics':
       setTimeout(
         () => reply(request.id, { heapUsedBytes: 0, retained: { documents: committed.size } }),

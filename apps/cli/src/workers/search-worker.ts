@@ -15,7 +15,8 @@ export type SearchWorkerRequest =
   | { id: number; op: 'meta'; meta: IndexedMeta }
   | { id: number; op: 'remove'; documentId: string }
   | { id: number; op: 'search'; query: string; mode: SearchMode; documents: string[] | null }
-  | { id: number; op: 'diagnostics'; collectGarbage: boolean };
+  | { id: number; op: 'diagnostics'; collectGarbage: boolean }
+  | { id: number; op: 'collect' };
 
 const index = new SearchIndex();
 
@@ -28,6 +29,10 @@ function run(request: SearchWorkerRequest): unknown {
   switch (request.op) {
     case 'diagnostics':
       return diagnostics(request.collectGarbage);
+    // Indexing leaves a lot of garbage, and an idle worker does not collect it on its own.
+    case 'collect':
+      measureHeap(true);
+      return null;
     case 'begin':
       index.begin(request.meta);
       return null;

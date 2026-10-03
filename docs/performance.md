@@ -28,27 +28,27 @@ Daemon and IPC:
 
 | fixture | documents | cold open | indexing | search p50 | search p95 | list | read | update published | idle CPU | RSS |
 |---|---|---|---|---|---|---|---|---|---|---|
-| standard (100 documents / 10 MiB) | 100 | 724.5ms | 1560.2ms | 66.3ms | 186.0ms | 1.6ms | 3.1ms | 246.5ms | 0.1% | 1057.9MiB |
-| load (1,000 documents / 50 MiB) | 1000 | 5163.7ms | 8973.8ms | 425.4ms | 1154.4ms | 4.6ms | 1.1ms | 323.1ms | 0.3% | 2936.7MiB |
+| standard (100 documents / 10 MiB) | 100 | 728.7ms | 1538.2ms | 64.7ms | 175.7ms | 1.1ms | 1.7ms | 250.8ms | 0.6% | 1035.3MiB |
+| load (1,000 documents / 50 MiB) | 1000 | 5041.8ms | 8865.0ms | 422.4ms | 1200.2ms | 5.0ms | 1.2ms | 323.6ms | 3.0% | 2808.1MiB |
 
 Management UI:
 
 | fixture | all documents in the list | select the last document | save to screen (DOM) |
 |---|---|---|---|
-| standard (100 documents / 10 MiB) | 136.4ms | 104.3ms | 307.7ms |
-| load (1,000 documents / 50 MiB) | 232.1ms | 423.6ms | 339.4ms |
+| standard (100 documents / 10 MiB) | 137.8ms | 102.5ms | 316.2ms |
+| load (1,000 documents / 50 MiB) | 225.1ms | 413.9ms | 342.3ms |
 
 ## Against the goals
 
 | goal (spec 16.1) | result |
 |---|---|
-| Warm search p95 within 300 ms on the standard fixture | Met (186.0ms) |
-| About 1 second from a normal save to the updated view | Met (307.7ms to the screen; 339.4ms even under load) |
-| CPU does not keep spinning while idle | Met (0.1%, 0.3%; up to 1.0% in other runs) |
+| Warm search p95 within 300 ms on the standard fixture | Met (175.7ms) |
+| About 1 second from a normal save to the updated view | Met (316.2ms to the screen; 342.3ms even under load) |
+| CPU does not keep spinning while idle | Met (0.6%, 3.0%; the 3.0% includes the one garbage collection after the searches, see below) |
 
 ## Not met or not investigated
 
-- **RSS is large.** About 1.1 GB on the standard fixture and about 2.9 GB under load. The cause has not been investigated. The guess is that the MiniSearch index in the search worker (long sections are split into overlapping parts) and the V8 heap that grew while indexing are not returned after the idle period (Not verified). Values after a forced GC were not measured.
+- **RSS is large.** About 1.0 GB on the standard fixture and about 2.8 GB under load. Investigation on macOS (`vmmap` and the per-thread heaps from `daemon.diagnostics`): RSS includes about 220 MB of code shared with other processes (the Node.js binary and libraries). The search worker holds the index, about 120 MB of live heap for 10 MiB of text and about 490 MB for 50 MiB (it keeps the text twice, raw and normalized, plus MiniSearch postings per section). An idle worker never collected the garbage left by indexing and searching (941 MB of heap right after indexing the load fixture, 490 MB after a GC), so the search service now asks the worker to collect once after its requests pause for 2 seconds. Right after indexing the load fixture, this lowered RSS from 1.6 GB to 1.0 GB within 10 seconds. V8 keeps the freed pages for a while, so the RSS measured 5 seconds after the searches above changes little. Shrinking the index itself is not done.
 - Search p95 on the load fixture was 1154.4ms. The load fixture has no time goal, but search gets slower with many documents.
 - The table shows a single run, after the code and UI were translated to English. Compared with other runs on the same day, cold open, indexing, search, and update published differed by less than 15%. The management UI items vary more because they include the browser (list 104 to 176ms, select 90 to 144ms on the standard fixture). List and read take a few milliseconds, so their ratios vary a lot (list was 0.8 to 1.6ms). Idle CPU was 0.1 to 1.0% depending on the run.
 - Diagnostics (`daemon.diagnostics`) trigger no index sync or similar work unless garbage collection is requested. While diagnostics synced the index on every call, idle CPU measured 0.9% on the standard fixture (the diagnostics work after the idle period was counted).
