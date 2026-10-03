@@ -132,8 +132,9 @@ async function until(condition: () => boolean, timeoutMs = 3000): Promise<void> 
 }
 const shownText = () => container.querySelector('pre')?.textContent ?? '';
 function button(text: string): HTMLButtonElement {
-  const found = [...container.querySelectorAll('button')].find((item) =>
-    item.textContent?.includes(text),
+  // iconだけのbuttonは、aria-labelで探す。
+  const found = [...container.querySelectorAll('button')].find(
+    (item) => item.textContent?.includes(text) || item.getAttribute('aria-label') === text,
   );
   if (!found) throw new Error(`${text} のbuttonが見つかりません`);
   return found;
@@ -218,5 +219,109 @@ describe('SYS-013 通知の再接続と質問の再取得', () => {
     handlers?.onEvent({ type: 'resync-required', daemonId: 'd1', sequence: 6, catalogVersion: 1 });
     await until(() => feedbackRequests > before);
     expect(feedbackRequests).toBeGreaterThan(before);
+  });
+});
+
+describe('UX-002 検索の結果の版と、表示中の版', () => {
+  const notice = () =>
+    container.querySelector('[data-testid="section-target-notice"]')?.textContent ?? '';
+  const target = (revision: string, nonce = 1) => ({ sectionId: 'sec_0001', revision, nonce });
+
+  it('質問の版を表示している間は、新しい版の結果へ移動せず、理由を示して質問の版を保つ', async () => {
+    root.render(
+      <Viewer
+        api={api}
+        document={documentOf({ revision: REV2 })}
+        fixedRevision={REV1}
+        sectionTarget={target(REV2)}
+      />,
+    );
+    await until(() => notice() !== '');
+    expect(notice()).toContain('回答待ちの質問の版を表示しているため、移動しません');
+    expect(shownText()).toBe('本文 1');
+    expect(contentRequests).toEqual([REV1]);
+  });
+
+  it('更新を止めている間と、検索の後に更新された場合も、別の版の結果へは移動しない', async () => {
+    root.render(<Viewer api={api} document={documentOf()} sectionTarget={null} />);
+    await until(() => shownText() !== '');
+    button('更新を止める').click();
+    await settle();
+    root.render(
+      <Viewer api={api} document={documentOf({ revision: REV2 })} sectionTarget={target(REV2)} />,
+    );
+    await until(() => notice() !== '');
+    expect(notice()).toContain('更新を止めているため、移動しません');
+    expect(shownText()).toBe('本文 1');
+
+    root.unmount();
+    root = createRoot(container);
+    root.render(
+      <Viewer api={api} document={documentOf({ revision: REV2 })} sectionTarget={target(REV1)} />,
+    );
+    await until(() => notice() !== '');
+    expect(notice()).toContain('検索した後に文書が更新されたため');
+  });
+
+  it('版が同じでも移動しない表示では、その旨を示し、閉じると次の移動まで出さない', async () => {
+    root.render(<Viewer api={api} document={documentOf()} sectionTarget={target(REV1)} />);
+    await until(() => notice() !== '');
+    expect(notice()).toContain('この表示では、節の位置へ移動しません');
+    button('閉じる').click();
+    await until(() => notice() === '');
+    expect(notice()).toBe('');
+    root.render(<Viewer api={api} document={documentOf()} sectionTarget={target(REV1, 2)} />);
+    await until(() => notice() !== '');
+    expect(notice()).toContain('この表示では');
+  });
+});
+
+describe('文書のpathとIDのcopy（仕様13.2）', () => {
+  const copyResult = () =>
+    container.querySelector('[data-testid="copy-result"]')?.textContent ?? '';
+  function mockClipboard(writeText: (text: string) => Promise<void>): void {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  }
+
+  it('文書のpathとIDをcopyし、結果を示す', async () => {
+    const copied: string[] = [];
+    mockClipboard((text) => {
+      copied.push(text);
+      return Promise.resolve();
+    });
+    root.render(<Viewer api={api} document={documentOf()} />);
+    await until(() => shownText() !== '');
+    button('文書のpathをcopy').click();
+    await until(() => copyResult() !== '');
+    expect(copyResult()).toBe('文書のpathをcopyしました。');
+    button('文書のIDをcopy').click();
+    await until(() => copyResult() === '文書のIDをcopyしました。');
+    expect(copied).toEqual(['a.html', 'doc_1']);
+    expect(copyResult()).toBe('文書のIDをcopyしました。');
+  });
+
+  it('copyできなかったときは、成功と示さずに理由を示す', async () => {
+    mockClipboard(() => Promise.reject(new Error('許可されていません')));
+    root.render(<Viewer api={api} document={documentOf()} />);
+    await until(() => shownText() !== '');
+    button('文書のIDをcopy').click();
+    await until(() => copyResult() !== '');
+    expect(copyResult()).toBe('文書のIDをcopyできませんでした（許可されていません）。');
+  });
+
+  it('stdinから開いた文書には、pathのcopyを出さない', async () => {
+    mockClipboard(() => Promise.resolve());
+    root.render(
+      <Viewer
+        api={api}
+        document={documentOf({ sourceKind: 'stdin', displayPath: null, pathSegments: [] })}
+      />,
+    );
+    await until(() => shownText() !== '');
+    expect(
+      [...container.querySelectorAll('button')].some(
+        (item) => item.getAttribute('aria-label') === '文書のpathをcopy',
+      ),
+    ).toBe(false);
   });
 });

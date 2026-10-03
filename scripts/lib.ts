@@ -139,6 +139,10 @@ export function runNpm(args: string[], options: RunOptions): void {
   runInvocation(npmInvocation(args), options);
 }
 
+export function captureNpm(args: string[], options: RunOptions): CaptureResult {
+  return captureInvocation(npmInvocation(args), options);
+}
+
 export function captureCommand(
   command: string,
   args: string[],

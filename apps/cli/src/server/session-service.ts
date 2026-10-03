@@ -27,6 +27,8 @@ export interface SessionService {
   isActiveId(sessionId: string): boolean;
   // いずれかのsessionが破棄されたときに、その識別子とともに呼ばれる。
   onAnyRevoke(listener: (sessionId: string) => void): void;
+  // 保持している項目の数（資源の漏れの確認に使う。daemon.diagnostics）。
+  retainedCounts(): Record<string, number>;
 }
 
 // browserの管理sessionを扱う（仕様6.4）。秘密そのものは保持せず、digestで照合する。
@@ -64,6 +66,16 @@ export function createSessionService(now: () => number = Date.now): SessionServi
   };
 
   return {
+    retainedCounts() {
+      let listeners = 0;
+      for (const set of revokeListeners.values()) listeners += set.size;
+      return {
+        tickets: tickets.size,
+        sessions: sessions.size,
+        revokeListeners: listeners,
+        anyRevokeListeners: anyRevokeListeners.size,
+      };
+    },
     createBootstrapTicket() {
       sweep();
       const ticket = newSecret();

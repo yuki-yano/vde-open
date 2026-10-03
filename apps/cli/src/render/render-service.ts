@@ -102,6 +102,8 @@ export interface RenderService {
   // 表示の中から読み込もうとした、登録されていないfile。自分のsessionの権限だけを調べられる。
   missingOf(sessionId: string, grant: string): string[];
   readonly grantCount: number;
+  // 保持している項目の数（資源の漏れの確認に使う。daemon.diagnostics）。
+  retainedCounts(): Record<string, number>;
 }
 
 export interface RenderServiceOptions {
@@ -374,6 +376,9 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
   return {
     get grantCount() {
       return grants.size;
+    },
+    retainedCounts() {
+      return { grants: grants.size, snapshots: snapshots.size };
     },
 
     async createGrant(sessionId, rawParams, context) {

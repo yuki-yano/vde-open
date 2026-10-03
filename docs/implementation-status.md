@@ -19,7 +19,7 @@
 | P4 | 完了報告済み | Agent検索benchmark fixtureと閉じた文書除外 |
 | P5 | 完了報告済み | 保存前成功なし、タイムアウト・restart・二重送信テスト |
 | P6 | 完了報告済み | HTML回答案→本体確認→CLI取得、偽submit拒否 |
-| P7 | 未着手 | 全必須受け入れ項目、最終実行結果、制約の説明 |
+| P7 | 完了報告済み | 全必須受け入れ項目、最終実行結果、制約の説明 |
 
 ## P0の記録
 
@@ -354,13 +354,110 @@ P6時点の制約:
 - 管理UIから、staticの文書をinteractiveへ変える操作は、再有効化（希望がinteractiveの文書）だけ。新しくinteractiveにするときは、CLIで指定する。
 - Windowsは未検証。e2eはChromiumだけ。
 
+## P7の記録
+
+実行環境: macOS（Darwin 25.6.0、arm64）、Node.js 24.21.0、pnpm 12.8.1、Playwright 1.63.0（Chromiumは同梱のChrome Headless Shell 153、Firefox 155、WebKit 26.6）。
+
+| command | 結果 |
+|---|---|
+| `pnpm format:check` | exit 0 |
+| `pnpm lint` | exit 0 |
+| `pnpm typecheck` | exit 0 |
+| `pnpm test` | exit 0（59 files、542 tests） |
+| `pnpm build` | exit 0（`THIRD_PARTY_NOTICES.md`を生成） |
+| `pnpm test:pack` | exit 0（`artifacts/vde-open-0.1.0.tgz`。CLI-001・013・014・015とlicense noticeの確認を追加） |
+| `pnpm test:e2e` | exit 0（Chromiumで46件） |
+| `pnpm test:e2e:cross` | exit 0（Firefox・WebKitで各29件、計58件。表示の隔離・CSP・HTMLとの通信・認証） |
+| `pnpm perf` | exit 0（結果は`docs/performance.md`。管理画面の一覧・選択・保存から表示の反映を含む） |
+
+実装したもの:
+
+- 管理画面: `Cmd/Ctrl+K`の検索（`apps/web/src/components/search-dialog.tsx`。対象が開いている文書だけであることを示し、選んだ文書の節へ移動する）、900px未満でのdrawerと縦並び、検索のbutton。
+- daemonの診断（IPCの`daemon.diagnostics`）と、資源の検査（`tests/integration/resources.test.ts`）。性能の実測（`scripts/perf.ts`、`pnpm perf`、`docs/performance.md`）。
+- 配布の確認の追加（`scripts/pack-smoke.ts`）、`README.md`、`docs/architecture.md`、`docs/security-model.md`、`.github/workflows/ci.yml`。
+- 依存のlicense notice（`scripts/notices.ts`。tsdownとviteのpluginがbundleしたmoduleの一覧を書き、buildが`apps/cli/THIRD_PARTY_NOTICES.md`を作る。CSSの`@import`で入るTailwind CSS・tw-animate-css・shadcn・Geistは名前で加える）。
+- Firefox・WebKitのe2e（`playwright.config.ts`の`firefox`・`webkit` project、`pnpm test:e2e:cross`）。
+
+検証中に見つけて直したもの:
+
+- 900px以上の画面で、一覧の枠を横並び（flex）にしたため、一覧が枠の幅を超えて表示の領域に重なり、文書中のlinkを押せなかった（SEC-019のe2eで検出） → 一覧の枠を以前と同じblockに戻した。
+- 1回目の全体の試験で、`tests/integration/watch.test.ts`の「--watchを付けたdirectoryに現れた文書だけを登録する」が1回だけ失敗した（9.3秒で時間切れ）。単独では成功し、2回目の全体の試験でも成功した。原因は未確認（Chokidarが監視の開始直後の変更を通知しないことがある、という既知の事象（`docs/dependency-validation.md`）と同じかは Not verified）。
+
+レビュー: 1往復目でmust-fix 6件とshould-fix 4件、2往復目でmust-fix 4件とshould-fix 2件、3往復目でshould-fix 1件、4往復目でshould-fix 1件、5往復目（往復の上限）でshould-fix 2件。すべて修正した。5往復目の指摘への対応は、往復の上限のため、別Agentの再レビューを受けていない（修正を外すと試験が失敗することは確かめた）。以下は1往復目から順に、各往復の内容。
+
+- 読まない通知の接続で、書き込み待ちの通知が上限なく増えた → 接続ごとに256件までにし、超えた通知は捨てて取り直しの合図（`resync-required`）1つにまとめる。書き込みが`LIMITS.sseStallMs`（60秒）進まない接続は切り、socketも閉じる。heartbeatも同じ待ち行列に並べる。試験は`management.test.ts`の「PERF-004 通知を読まない接続」（受け手のsocketが埋まるまで出した後に5万件。上限を外すと50002件まで増えて失敗、切断を外すと失敗）。
+- 検索の結果の版を捨て、表示中の版の同じ番号の節へ移動した → 移動先を版と組で持ち、表示中の版と違えば移動せずに理由を示す（質問の版、更新の停止、検索の後の更新）。移動しない表示（HTML・原文）でもその旨を示す（`workspace.dom.test.tsx`の3件）。
+- 変換中の↑↓を検索の結果の操作に使った → 変換中のkeyは入力欄へそのまま渡す（`search-dialog.dom.test.tsx`）。
+- bundleした依存のlicense noticeがなかった → 上のとおり生成してtarballに含め、pack smokeでMiniSearch・Hono・Zod・React・Base UI・Tailwind CSSの著作権表示と、GeistのOFLの本文を確かめる。
+- PERF-002の管理画面と、保存から画面の表示までを測っていなかった → e2eの「PERF-002」（1,000文書の一覧、末尾の選択、保存の反映）と、`pnpm perf`の管理画面の測定を足した。
+- Firefox・WebKitの試験がCI定義になかった → projectとscriptを足し、macOSで実行した（58件）。
+- 結果を待っている間の↓で選択が-1になり、選んだ行がscrollで見えなくなった → 選択を両端で補正し、直前の選択から数える（keyを速く繰り返しても進む）。選んだ行を見える位置へscrollする。
+- 375px幅でheaderが横にはみ出した（516px） → 狭い画面ではbuttonの文字を隠してiconだけにする（名前は読み上げに残す）。UX-003でpageの幅と各buttonの位置を確かめる。
+- 監視の漏れを、管理の一覧の件数で数えていた → 作ったwatcherと閉じ終えたwatcherの数を数え、収支で確かめる（閉じる処理を外すと151≠1で失敗）。
+- CLI-014で、既にある`vo`を導入先に置いていなかった → npmのglobalのprefixのbinに別の`vo`を置いて導入し、npmが`EEXIST`でやめて`vo`が変わらないことを確かめる。既存のshellの設定fileの内容も前後で比べる。READMEに`EEXIST`のときの対処を書いた。
+
+検証中に見つけて直したもの（1往復目の対応中）:
+
+- Firefoxで、2つ目の管理画面（または通知の再接続）が約20秒止まった。通知のstreamの応答が`Cache-Control: no-cache`（保存を許す）だったため、Firefoxが同じURLへの2つ目の接続を、1つ目の応答が終わるまで待たせていた → 応答を`no-store`にし、UIのfetchも`cache: 'no-store'`にした。FB-011のe2eで2つ目の画面の表示を5秒以内と確かめる（修正を外すとFirefoxで失敗）。管理APIの試験でheaderも確かめる。
+
+2往復目:
+
+- sessionの失効・破棄で終えた通知の接続が、書き込みが詰まったまま残った（停止の監視を止めた後に、詰まった書き込みを待っていた） → 失効・破棄・詰まりのどれでも、残りを送らずにstreamとsocketを閉じる（`drop`）。接続の数は、書き込みを終えるまで診断に数える。試験は`management.test.ts`の「書き込みが詰まったままsessionが失効したら…」（失効のときに閉じる処理を外すと失敗）。
+- 表示する版の本文を取得できなかったとき、前の版の本文と見出しの一覧のまま、読み込んだ版だけを新しい版にしていたため、新しい版の検索結果で前の版の同じ番号の節へ移動した → 表示している内容と、それを取得した版を組で持ち、読み込めなかった版は別に持つ。読み込めない間は移動せず、理由を示す。e2eの「UX-002: 検索の結果の節へ移動し、表示する版を読み込めない間は…」（本文の取得を500にして再現。修正前の扱いでは失敗）。
+- license noticeの生成が、module IDをOSの区切りで分けていたため、Windowsでは`/`区切りのViteのIDを取りこぼす → `/`へそろえてからpackageを求める。`tests/scripts/notices.test.ts`（POSIX、Windowsの両方の区切り、scoped package）。Windowsでの実行はしていない。
+- 仕様13.2のコードのcopyと、文書のpath・IDのcopyがなかった → Markdownのcode blockに「コードをcopy」、viewerのheaderに「文書のpathをcopy」「文書のIDをcopy」を足し、結果（成功・失敗と理由）を状態の行に示す（`apps/web/src/lib/use-copy.ts`）。e2eで実際のclipboardの値を確かめ、DOMの試験で失敗の表示とstdinの文書を確かめる。
+- 取り直しの合図の連番が、書く時点の最新の連番だったため、合図の後ろに並んだ通知の連番が逆戻りした → 合図の連番を、最初に捨てた通知の連番にする。待ち行列を`apps/cli/src/server/http/event-queue.ts`へ分け、書き込みの完了を試験から進めて、書き込みの途中に通知が続く場合を確かめる（`event-queue.test.ts`。書く時点の最新に戻すと失敗）。
+- memoryの継続増加を検査していなかった → 診断に、各serviceが保持している項目の数と、GCの後のheapを足し、反復の3区間で比べる（`resources.test.ts`の「PERF-003 memoryの継続増加」。1回ごとに約40KiBを残す漏れを作ると失敗）。RSSは1回の測定で、漏れの検証とは分けて記録した（`docs/performance.md`）。
+
+3往復目:
+
+- memoryの検査が、daemonの本体のheapと、本体が保持する項目だけを見ていて、検索のworkerの中のindexの実体を観測していなかった。また、測る前に決まった時間（300ms）を待っていた → 検索と解析のworkerに診断の依頼を足し、それぞれのthreadでGCの後のheapを測る（`apps/cli/src/diagnostics/heap.ts`）。検索のworkerは、indexを今の文書の状態に合わせ終え（`sync`の完了を待つ）、消した項目を片付けてから、確定・途中の文書、索引の項目、語、片付け前の項目の数を返す（`SearchIndex.retainedCounts`）。試験は決まった時間を待たず、本体と各workerで同じ基準を確かめる。検索のworkerでindexの確定のたびに8,192要素の配列を残す変異で、1区間+2.6MBとなり失敗する。`search-index.test.ts`に、入れ直し・削除・途中での破棄を繰り返しても項目と語の数が戻る試験を足した。
+
+4往復目:
+
+- 診断が検索のindexの同期を待つため、診断の最中に停止すると、受付済みの処理の終わりを待つ停止（`ipc.drain`）が、indexの作成の完了まで待たされた → daemonは停止を始めたときに中断の合図（`AbortSignal`）を出し、診断は、検索のindexの同期と解析のworkerの応答を待つのをやめて`E_DAEMON_STOPPING`で終える（`apps/cli/src/diagnostics/until-aborted.ts`）。試験は`apps/cli/src/daemon/main.test.ts`の「索引の同期を待っている診断があっても、停止を待たせない」（解析を1件500msに遅らせた8文書で、停止が2秒未満。中断を外すと3.85秒で失敗）と、`until-aborted.test.ts`。
+
+5往復目（再レビュー未了）:
+
+- 検索のserviceの診断で、indexの同期の後のworkerの応答（片付けを待つ）の待ちは中断されなかった → 同期とworkerの応答をまとめて、停止の合図で待つのをやめる（中断済みなら、workerへ依頼しない）。`search-service.test.ts`の「indexの同期の後、workerの診断の応答を待っている間に中断されたら…」（workerの応答を3秒遅らせ、100ms後の中断で1秒未満に終わる。修正前の形では応答を待って成功し、失敗）。
+- （5往復目の対応の後、性能の測り直しで見つけて直した）診断のたびに検索のindexの同期を行っていたため、待機の前後に診断を呼ぶ性能の測定で、待機中のCPUが0.9%（標準）と出た → 同期と片付けは、回収を求めた診断（資源の漏れの検査）のときだけ行う。測り直して0.3%。
+- `untilAborted`は、すでに中断された合図を受けたとき、元の処理に失敗のhandlerを付けなかったため、元の処理が後から失敗すると未処理のrejectionになった → どちらの場合も元の処理の失敗を受ける。`until-aborted.test.ts`（すでに中断されていたとき・待っている間に中断されたときの2件。修正を外すと前者が失敗）。
+
+P7時点の制約:
+
+- Linux・WindowsのCIは、pushしていないので未実行（CI定義だけを同梱）。
+- Firefox・WebKitは、macOSで表示の隔離・CSP・HTMLとの通信・認証の試験だけを実行した。それ以外の画面操作は未検証。
+- daemonのRSSが大きい（`docs/performance.md`）。原因は未調査。
+
+## 全体のDoD（仕様17.1）
+
+機能完了条件:
+
+- [x] P0〜P7のすべてが17.2を満たし、このfileで完了報告済み。
+- [x] tarballから導入した`vde-open`と`vo`が、同じstateとdaemonを操作する（CLI-001〜004がPASS）。
+- [x] 0.1の対象外機能と、削除済みoptionが露出していない（CLI-010、UX-007がPASS）。
+
+テスト完了条件:
+
+- [x] 固定したNode 24で、7つのcommandがすべてexit 0（上のP7の記録）。
+- [x] 受け入れテスト125 IDのすべてに、testとPASS／FAIL／NOT RUNが対応づいている。FAILは0件（下の表。125件すべてPASS）。
+- [x] NOT RUNのIDはない。Linux・WindowsのCIは、IDとは別に未実行として記録している（各IDの検証はmacOSとChromiumで行い、security・bridgeの試験はFirefox・WebKitでも行った）。
+- [x] PERF-001〜005の実測値と測定環境が記録されている（`docs/performance.md`）。
+
+運用反映条件:
+
+- [x] `pnpm pack`で作ったtarball（`artifacts/vde-open-0.1.0.tgz`）で、`pnpm test:pack`がPASS。
+- [x] 仕様16.3の文書（README、agent-usage、architecture、security-model、dependency-validation、implementation-status、ADR）とCI定義がある。
+- [x] Node 24（`mise.toml`）と直接依存が完全版番号で固定され、lockfileがある。
+- [x] npm publish、push、利用者のshell設定の変更、既存`vo`の上書きをしていない。commitは利用者の指示の範囲（フェーズごと）だけ。
+
 ## 受け入れテストの対応
 
 状態は「未着手／PASS／FAIL／NOT RUN」。担当は、そのIDが最後に必要とする機能がそろうフェーズ。IDをPASSにするのは担当フェーズで全条件を検証したときだけで、先行フェーズで一部だけ検証したものは備考に部分検証として書く。
 
 | ID | 担当 | 状態 | test | 備考（部分検証を含む） |
 |---|---|---|---|---|
-| CLI-001 | P7 | 未着手 |  |  |
+| CLI-001 | P7 | PASS | `scripts/pack-smoke.ts`（手順1〜2） | tarballにcli・daemon・解析と検索のworker・同梱UI・agent-usage・READMEがある。空のdirectoryへ`--offline --ignore-scripts`で導入し、repoのnode_modulesなしで動く |
 | CLI-002 | P0 | PASS | `apps/cli/src/cli/run.test.ts`、`scripts/pack-smoke.ts`（手順3） |  |
 | CLI-003 | P1 | PASS | `tests/integration/documents.test.ts`、`scripts/pack-smoke.ts`（手順4） |  |
 | CLI-004 | P1 | PASS | `tests/integration/documents.test.ts`、`scripts/pack-smoke.ts`（手順5） |  |
@@ -372,9 +469,9 @@ P6時点の制約:
 | CLI-010 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | CLI-011 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | CLI-012 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| CLI-013 | P7 | 未着手 |  | P2で部分検証済み（`scripts/pack-smoke.ts`手順6: repo外のcwdから同梱UIを配信し、cwdのfileは配信しない） |
-| CLI-014 | P7 | 未着手 |  |  |
-| CLI-015 | P7 | 未着手 |  |  |
+| CLI-013 | P7 | PASS | `scripts/pack-smoke.ts`（手順6） | repoの外のcwdから同梱UIを配信する。cwdのfileと`.env`（`../`・encodeした`..`を含む）を配信しない |
+| CLI-014 | P7 | PASS | `scripts/pack-smoke.ts`、`README.md`（`vde-open`と`vo`）、`tests/docs/readme.test.ts` | 試験用のHOMEで導入し、shellの設定fileが増えない。既にある別の`vo`を変えない。READMEに名前の競合時の対処 |
+| CLI-015 | P7 | PASS | `scripts/pack-smoke.ts`（手順1） | packed package.jsonにinstall系のscriptと実行時の依存がない。導入先でbuildを求めない |
 | CLI-016 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | SYS-001 | P1 | PASS | `tests/integration/daemon.test.ts` |  |
 | SYS-002 | P2 | PASS | `tests/integration/browser.test.ts` | 既定のbrowser起動は、stdoutが端末である条件をCLIへ直接渡して検証（子processでは端末を再現できないため） |
@@ -472,29 +569,30 @@ P6時点の制約:
 | FB-020 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
 | FB-021 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
 | FB-022 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/integration/preview.test.ts`、`apps/cli/src/documents/service-html-mode.test.ts`、`apps/cli/src/render/render-service.test.ts` | 再起動の後、確定・回答待ちの内容は残る。前の画面のportからは回答案を変えられない。scriptの実行は、管理UIで許可し直すまで静的表示。許可し直しても、前の許可で発行した表示は戻らない |
-| UX-001 | P7 | 未着手 |  |  |
-| UX-002 | P7 | 未着手 |  |  |
-| UX-003 | P7 | 未着手 |  |  |
-| UX-004 | P7 | 未着手 |  |  |
-| UX-005 | P7 | 未着手 |  |  |
-| UX-006 | P7 | 未着手 |  |  |
-| UX-007 | P7 | 未着手 |  |  |
-| UX-008 | P7 | 未着手 |  |  |
-| PERF-001 | P7 | 未着手 |  |  |
-| PERF-002 | P7 | 未着手 |  |  |
-| PERF-003 | P7 | 未着手 |  |  |
-| PERF-004 | P7 | 未着手 |  |  |
-| PERF-005 | P7 | 未着手 |  |  |
+| UX-001 | P7 | PASS | `tests/e2e/ux.spec.ts`（UX-001 / UX-002）、`tests/e2e/feedback.spec.ts` | keyboardだけで検索・文書の移動・選択肢・入力・送信ができる。button・入力欄に名前とlabelがある |
+| UX-002 | P7 | PASS | `tests/e2e/ux.spec.ts`、`apps/web/src/components/search-dialog.dom.test.tsx`、`apps/web/src/components/workspace.dom.test.tsx` | `Cmd/Ctrl+K`で検索を開き、開いている文書だけを探す。Escapeで閉じるとfocusが戻る。入力欄の文字を奪わない（変換中のkeyは入力欄へ渡す。single-keyの操作は設けていない）。結果の版が表示中の版と違うとき、表示する版を読み込めないときは移動せず、理由を示す。コード・文書のpath・文書のIDをcopyできる（仕様13.2） |
+| UX-003 | P7 | PASS | `tests/e2e/ux.spec.ts` | 900px未満では一覧をdrawerにし、表示と回答panelを縦に並べる。375px幅でpageが横にはみ出さず、headerの操作は画面の中にある。全面を覆う要素を持つ巨大なHTMLでも、送信buttonは表示の外にあり押せる |
+| UX-004 | P7 | PASS | `tests/e2e/ux.spec.ts`、`tests/e2e/workspace.spec.ts` | 配色はreloadの後も残り、CLIで閉じた文書は一覧に出ない |
+| UX-005 | P7 | PASS | `tests/e2e/ux.spec.ts`、`tests/e2e/html.spec.ts`、`tests/e2e/interactive.spec.ts`、`apps/web/src/lib/diagnostics.ts` | 外部のURL・script・未登録のfileを、対象・理由・対処とともに示す。許可を広げるbuttonはない |
+| UX-006 | P7 | PASS | `tests/e2e/feedback.spec.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx`、`apps/cli/src/feedback/service.test.ts`、`apps/cli/src/server/http/feedback-http.test.ts` | 保存中・保存済み・送信済み・取得済みを別に表示する。保存に失敗した送信を成功として表示しない |
+| UX-007 | P7 | PASS | `tests/docs/readme.test.ts`、`apps/cli/src/cli/run.test.ts`（CLI-010） | READMEとAgent向けの資料とhelpに、group・tag・`--target`の名残がない。停止・保存先・検索の範囲・HTMLの制限を説明する |
+| UX-008 | P7 | PASS | `tests/docs/readme.test.ts`、`README.md`（検証した範囲） | 検証したOS（macOS）・browser（Chromiumは全件、Firefox・WebKitはsecurity・bridge）と、未検証（Linux・Windows、Firefox・WebKitのそれ以外の画面操作）を分けて書く |
+| PERF-001 | P7 | PASS | `scripts/perf.ts`、`docs/performance.md` | 100文書／10MiB: cold open 730.8ms、warm検索 p50 64.1ms／p95 169.0ms、保存から画面の表示まで303.2ms、RSS 1055.4MiB（macOS、Apple M5 Max、Node 24.21.0）。RSSが大きい点は未調査として記録 |
+| PERF-002 | P7 | PASS | `scripts/perf.ts`、`docs/performance.md`、`tests/e2e/ux.spec.ts`（PERF-002）、`tests/integration/documents.test.ts`（件数・大きさの上限） | 1,000文書／50MiB: hangなし、索引 8989.5ms、list 4.9ms、read 1.1ms、管理画面の一覧に全件が出るまで188.7ms、末尾の文書の選択 396.0ms、保存から画面の表示まで336.4ms、全件が検索の対象になる |
+| PERF-003 | P7 | PASS | `tests/integration/resources.test.ts` | 100回の開閉と監視ruleの追加・解除20回の後でも、監視しているdirectoryの数とNodeの有効な資源の数が増えず、外したwatcherはすべて閉じ終えている（作った数－閉じた数＝監視中の数）。開く・読む・検索する・表示する・閉じるの反復で、daemonの本体と検索のindexが保持している項目の数が3区間で同じで、本体・検索のworker・解析のworkerのGCの後のheapの区間ごとの増え方が1MiB未満 |
+| PERF-004 | P7 | PASS | `tests/integration/resources.test.ts`、`apps/cli/src/server/http/management.test.ts`、`apps/cli/src/workers/parse-service.test.ts`（MD-006） | 通知を読まないclientがいても、50回の連続した更新とほかのclientの操作が終わる。書き込みが詰まった接続の待ち行列は上限で止まり、読む接続には届き、詰まった接続は期限の後とsessionの失効のときにsocketまで閉じる。届く連番は逆戻りしない。大きい・深い文書は解析の時間と構造の上限で止まる |
+| PERF-005 | P7 | PASS | `tests/integration/resources.test.ts`、`apps/web/src/components/workspace.dom.test.tsx` | 3秒の待機のCPU時間が150ms未満。通知の接続・切断30回で購読が残らない。欠けた通知は一覧と質問の取り直しで回復する |
 
 ## 引継ぎ事項
 
-- 次はP7（UI仕上げ（`Cmd/Ctrl+K`の検索UIを含む）、負荷、cross-platform、pack-install、README、CI定義、全体DoD）。interactiveとSDKはADR-0012、HTMLの変換は`packages/document/src/html-static.ts`、SDKの本体は`apps/cli/src/render/bridge-sdk.ts`、本体側の通信は`apps/web/src/lib/bridge-host.ts`と`use-bridge.ts`。質問と回答は`apps/cli/src/feedback/service.ts`、回答panelは`apps/web/src/components/feedback-panel.tsx`。
+- P0〜P7は完了報告済み（全体のDoDは上の節）。未実行は、Linux・WindowsのCIと、Firefox・WebKitでのsecurity・bridge以外の画面操作。既知の制約は、daemonのRSSが大きいこと（`docs/performance.md`）。interactiveとSDKはADR-0012、検索UIは`apps/web/src/components/search-dialog.tsx`、性能の実測は`scripts/perf.ts`、資源の検査は`tests/integration/resources.test.ts`。
 - stateの形式に質問と回答（`feedbackRequests`）を足した。P4までの開発用state（`.dev-home`）は読めないので、消して作り直す。
 - 管理HTTPは`apps/cli/src/server/http/management.ts`、表示用のlistenerは`apps/cli/src/server/http/preview.ts`、UIは`apps/web/src/`、Markdownの描画は`packages/document/src/react.tsx`、HTMLの静的変換は`packages/document/src/html-static.ts`。
 - stateの形式に項目を足した（版ごとのassetと文書の位置、文書ごとのassets-root）。P2までの開発用state（`.dev-home`）は読めないので、消して作り直す。
 - 画面部品のhookは、happy-domの上で実際のReact DOMを動かしてテストできる（file先頭に`// @vitest-environment happy-dom`）。
 - 未解決の不具合: なし。
-- 未実行のtest: 上の表で「未着手」のもの。e2eのFirefox／WebKit。
+- 未実行のtest: Linux・WindowsのCI。Firefox・WebKitでの、security・bridge以外のe2e。
+- Firefox・WebKitのe2eは`pnpm test:e2e:cross`（先に`pnpm exec playwright install firefox webkit`が必要）。
 - 配布物はruntime依存を持たない方針（ADR-0001）。外部packageを足したら`apps/cli/tsdown.config.ts`の`deps.onlyBundle`へ追加する。
 - stdinを入力として扱うのは、shellのpipeかredirectのときだけ（ADR-0004）。
 - UIはTailwind CSS、shadcn/ui、Base UIで作る（利用者の指定、ADR-0006）。部品は`pnpm dlx shadcn@4.21.1 add <name>`で`apps/web/src/components/ui/`へ追加する。

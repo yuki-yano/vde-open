@@ -46,6 +46,8 @@ interface FakeWorkerOptions {
   delaySearch?: { query: string; ms: number };
   // hitを、一覧の順番ではなくtitleの順に並べる（後から入った文書が先頭に来る状況を作る）。
   sortByTitle?: boolean;
+  // 診断の応答を、この時間だけ遅らせる。
+  delayDiagnostics?: number;
 }
 
 // 本物のworkerと同じやり取り（始める→本文を分けて入れる→確定する）をする試験用worker。
@@ -102,6 +104,12 @@ parentPort.on('message', (request) => {
       staged.delete(request.documentId);
       committed.delete(request.documentId);
       return reply(request.id, null);
+    case 'diagnostics':
+      setTimeout(
+        () => reply(request.id, { heapUsedBytes: 0, retained: { documents: committed.size } }),
+        options.delayDiagnostics ?? 0,
+      );
+      return;
     case 'search': {
       const hits = [...committed.values()]
         .toSorted((a, b) =>
@@ -514,5 +522,25 @@ describe('SRCH-001 登録の途中で閉じた文書', () => {
       cursor: found.data.nextCursor as string,
     });
     expect(next.data.hits.map((hit) => hit.documentId)).toEqual([c]);
+  });
+});
+
+describe('診断と停止', () => {
+  it('indexの同期の後、workerの診断の応答を待っている間に中断されたら、待たずに終える', async () => {
+    write('a.md', '# 診断\n\n本文。\n');
+    await documents.open({ cwd: base, paths: ['a.md'] });
+    search = createSearchService({
+      store,
+      cursors: createCursorCodec(randomBytes(32)),
+      workerPath: fakeWorker({ delayDiagnostics: 3000 }),
+    });
+    // 先にindexを今の文書に合わせ、workerを動かしておく（検索はindexへの登録を待つ）。
+    await search.search({ query: '本文' });
+    const controller = new AbortController();
+    const started = Date.now();
+    const waiting = search.diagnostics(false, controller.signal);
+    setTimeout(() => controller.abort(), 100);
+    await expect(waiting).rejects.toMatchObject({ code: 'E_DAEMON_STOPPING' });
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 });

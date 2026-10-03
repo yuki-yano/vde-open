@@ -9,6 +9,8 @@ import type {
 } from '@vde-open/document/render';
 import { LIMITS, VdeError, type DocumentFormat } from '@vde-open/shared';
 
+import type { WorkerDiagnostics } from '../diagnostics/heap.ts';
+import { untilAborted } from '../diagnostics/until-aborted.ts';
 import { parseWorkerPath } from '../entry-paths.ts';
 import type { ParseRequest } from './parse-worker.ts';
 
@@ -30,6 +32,9 @@ type ParseWork = ParseRequest extends infer Request
   : never;
 
 export interface ParseService {
+  // workerのheap（資源の漏れの確認に使う。daemon.diagnostics）。workerがなければnull。
+  // signalが中断されたら（daemonの停止）、先に並んだ解析を待たずにE_DAEMON_STOPPINGで終える。
+  diagnostics(collectGarbage: boolean, signal?: AbortSignal): Promise<WorkerDiagnostics | null>;
   analyze(format: DocumentFormat, text: string): Promise<DocumentAnalysis>;
   // 文書やCSSが参照するlocal fileの候補を集める。
   scan(kind: ScanKind, text: string): Promise<ScannedReference[]>;
@@ -114,6 +119,10 @@ export function createParseService(options: ParseServiceOptions = {}): ParseServ
   };
 
   return {
+    diagnostics: (collectGarbage, signal) =>
+      worker === null
+        ? Promise.resolve(null)
+        : untilAborted(request<WorkerDiagnostics>({ op: 'diagnostics', collectGarbage }), signal),
     analyze: (format, text) => request({ op: 'analyze', format, text }),
     scan: (kind, text) => request({ op: 'scan', kind, text }),
     render: (input) => request({ op: 'render', input }),

@@ -11,9 +11,11 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "test": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --project=chromium",
+    "test:e2e:cross": "playwright test --project=firefox --project=webkit",
     "build": "node scripts/build.ts",
     "test:pack": "node scripts/pack-smoke.ts",
+    "perf": "node scripts/perf.ts",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {

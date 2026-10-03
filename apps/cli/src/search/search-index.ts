@@ -277,6 +277,20 @@ export class SearchIndex {
     return this.#documents.size;
   }
 
+  // 保持している項目の数（資源の漏れの確認に使う。daemon.diagnostics）。
+  // settleなら、消した項目の片付け（MiniSearchのvacuum）を終えてから数える。
+  async retainedCounts(settle: boolean): Promise<Record<string, number>> {
+    if (settle) await this.#mini.vacuum();
+    return {
+      documents: this.#documents.size,
+      staging: this.#staging.size,
+      entries: this.#entries.size,
+      miniDocuments: this.#mini.documentCount,
+      miniTerms: this.#mini.termCount,
+      miniDirt: this.#mini.dirtCount,
+    };
+  }
+
   get generation(): number {
     return this.#generation;
   }

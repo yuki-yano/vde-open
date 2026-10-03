@@ -350,7 +350,7 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
   return (
     <aside
       aria-label="質問への回答"
-      className="flex w-96 shrink-0 flex-col border-l bg-background"
+      className="flex max-h-[50svh] w-full shrink-0 flex-col border-t bg-background min-[900px]:max-h-none min-[900px]:w-96 min-[900px]:border-t-0 min-[900px]:border-l"
       data-testid="feedback-panel"
     >
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">

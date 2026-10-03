@@ -453,3 +453,25 @@ describe('SRCH-005 / SRCH-016 一致の種類と抜粋、上位の見出しのsc
     expect(hits[0]?.score).toBe(hits[1]?.score);
   });
 });
+
+describe('PERF-003 indexが保持する項目', () => {
+  it('入れ直しと削除を繰り返しても、項目と語の数は、残っている文書の分に戻る', async () => {
+    const before = await index.retainedCounts(true);
+    for (let round = 0; round < 30; round += 1) {
+      const changed = document(
+        9,
+        'extra.md',
+        `# 追加${String(round)}\n\n語${String(round)}を含む本文。\n`,
+      );
+      index.upsert(changed);
+      index.remove(changed.documentId);
+      // 入れている途中で捨てた文書も残らない。
+      index.begin(changed);
+      index.abort(changed.documentId);
+    }
+    const after = await index.retainedCounts(true);
+    expect(after).toEqual(before);
+    expect(after.staging).toBe(0);
+    expect(after.miniDirt).toBe(0);
+  });
+});

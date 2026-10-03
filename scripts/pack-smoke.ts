@@ -16,6 +16,7 @@ import {
   captureCommand,
   captureInstalledBin,
   captureInstalledBinAsync,
+  captureNpm,
   cliDir,
   repoRoot,
   runNpm,
@@ -49,9 +50,50 @@ function packTarball(): string {
     'package/dist/cli.js',
     'package/dist/daemon.js',
     'package/dist/workers/parse-worker.js',
+    'package/dist/workers/search-worker.js',
     'package/dist/web/index.html',
+    'package/docs/agent-usage.md',
+    'package/README.md',
+    'package/THIRD_PARTY_NOTICES.md',
   ]) {
     if (!entries.has(entry)) fail(`tarballに ${entry} がありません`);
+  }
+  for (const entry of entries) {
+    if (entry.endsWith('bundled-modules.json')) fail(`tarballに中間fileがあります: ${entry}`);
+  }
+  // bundleした依存（JS・CSS・font）のlicense noticeがある（仕様16.3、ADR-0001）。
+  const notices = captureCommand('tar', ['-xzOf', tarball, 'package/THIRD_PARTY_NOTICES.md'], {
+    cwd: repoRoot,
+  }).stdout;
+  for (const [name, text] of [
+    ['minisearch', 'Copyright'],
+    ['hono', 'Copyright'],
+    ['zod', 'Copyright'],
+    ['react-dom', 'Copyright'],
+    ['@base-ui/react', 'Copyright'],
+    ['tailwindcss', 'Copyright'],
+    ['@fontsource-variable/geist', 'SIL OPEN FONT LICENSE'],
+  ] as const) {
+    const start = notices.indexOf(`\n## ${name}@`);
+    if (start === -1) fail(`THIRD_PARTY_NOTICES.md に ${name} がありません`);
+    const next = notices.indexOf('\n## ', start + 1);
+    if (!notices.slice(start, next === -1 ? undefined : next).includes(text)) {
+      fail(`THIRD_PARTY_NOTICES.md の ${name} に「${text}」がありません`);
+    }
+  }
+  // CLI-015: 導入先でbuildや依存の導入を求めない（install時のscriptも、実行時の依存もない）。
+  const manifest = captureCommand('tar', ['-xzOf', tarball, 'package/package.json'], {
+    cwd: repoRoot,
+  });
+  const packed = JSON.parse(manifest.stdout) as {
+    scripts?: Record<string, string>;
+    dependencies?: Record<string, string>;
+  };
+  for (const hook of ['preinstall', 'install', 'postinstall', 'prepare']) {
+    if (packed.scripts?.[hook] !== undefined) fail(`tarballに ${hook} scriptがあります`);
+  }
+  if (Object.keys(packed.dependencies ?? {}).length > 0) {
+    fail(`tarballに実行時の依存があります: ${Object.keys(packed.dependencies ?? {}).join(', ')}`);
   }
   for (const entry of entries) {
     if (entry.startsWith('package/src/') || entry.endsWith('.ts')) {
@@ -64,9 +106,59 @@ function packTarball(): string {
 async function verifyInstalled(tarball: string, installDir: string): Promise<void> {
   // 手順2: 空のdirectoryへtarballだけを導入する。registryへは問い合わせない。
   writeFileSync(join(installDir, 'package.json'), '{"private":true}\n');
+  // CLI-014: 導入は、shellの設定fileや、既にある別の`vo`を変えない。
+  // 試験用のHOME（既存のshellの設定fileを置く）で導入し、前後の内容を比べる。
+  const home = join(installDir, 'home');
+  mkdirSync(home);
+  const shellFiles = ['.zshrc', '.zprofile', '.bashrc', '.bash_profile', '.profile'];
+  for (const name of ['.zshrc', '.bashrc']) {
+    writeFileSync(join(home, name), `# ${name}（試験用）\nexport VDE_OPEN_SMOKE=1\n`);
+  }
+  const shellState = () =>
+    JSON.stringify(
+      shellFiles.map((name) => {
+        const path = join(home, name);
+        return [name, existsSync(path) ? readFileSync(path, 'utf8') : null];
+      }),
+    );
+  const shellBefore = shellState();
+  const npmEnv = { ...process.env, HOME: home, USERPROFILE: home };
   runNpm(['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', tarball], {
     cwd: installDir,
+    env: npmEnv,
   });
+
+  // 既に別の`vo`がある導入先（globalのprefixのbin。PATHに入る場所）へ導入しても、その`vo`を置き換えない。
+  // npmは、--forceがなければ、ほかのpackageのものではないbinを置き換えずに導入をやめる（EEXIST）。
+  const prefix = join(installDir, 'global-prefix');
+  const prefixBin = process.platform === 'win32' ? prefix : join(prefix, 'bin');
+  mkdirSync(prefixBin, { recursive: true });
+  const existingName = process.platform === 'win32' ? 'vo.cmd' : 'vo';
+  const existingVo =
+    process.platform === 'win32' ? '@echo existing-vo\r\n' : '#!/bin/sh\necho existing-vo\n';
+  writeFileSync(join(prefixBin, existingName), existingVo, { mode: 0o755 });
+  const global = captureNpm(
+    [
+      'install',
+      '--global',
+      '--prefix',
+      prefix,
+      '--offline',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+      tarball,
+    ],
+    { cwd: installDir, env: npmEnv },
+  );
+  if (readFileSync(join(prefixBin, existingName), 'utf8') !== existingVo) {
+    fail('導入が、既にある別のvoを変えました');
+  }
+  if (global.status === 0) fail('既に別のvoがある導入先へ、導入が成功しました');
+  if (!global.stderr.includes('EEXIST')) {
+    fail(`既にあるvoとの競合ではない理由で、導入が失敗しました: ${global.stderr}`);
+  }
+  if (shellState() !== shellBefore) fail('導入がshellの設定fileを変えました');
 
   // binのshebangが、いま検証に使っているNodeを起動するようにする。
   // stateは導入先の中の試験用homeに置き、通常のdaemonとstateに触れない。
@@ -132,6 +224,14 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
       fail('UIのscriptを配信できていません');
     if ((await fetch(new URL('a.md', uiUrl))).status !== 404)
       fail('cwdのfileがUIのoriginから配信されています');
+    // CLI-013: cwdにある秘密のfileも、UIのoriginから配信しない。
+    writeFileSync(join(installDir, '.env'), 'SECRET=pack-smoke\n');
+    for (const path of ['.env', '../.env', '%2e%2e/.env']) {
+      const response = await fetch(new URL(path, uiUrl));
+      if (response.status !== 404 || (await response.text()).includes('SECRET=')) {
+        fail(`cwdの秘密のfileがUIのoriginから配信されています: ${path}`);
+      }
+    }
 
     // 手順6の続き: 導入先だけで、検索のworker（同梱のMiniSearch）が動く。
     const found = runJson<{ hits: Array<{ documentId: string }>; incomplete: boolean }>('vo', [

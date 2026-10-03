@@ -1,9 +1,12 @@
-import type { DocumentSummary, ServerEvent } from '@vde-open/shared';
-import { Monitor, Moon, Sun } from 'lucide-react';
+import type { DocumentSummary, SearchHit, ServerEvent } from '@vde-open/shared';
+import { Menu, Monitor, Moon, Search, Sun, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 
 import { DocumentWorkspace } from '@/components/document-workspace';
+import { SearchDialog } from '@/components/search-dialog';
 import { Sidebar } from '@/components/sidebar';
+import type { SectionTarget } from '@/components/viewer';
+import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { createApi, establishSession, forgetSession, type Api } from '@/lib/api';
 import {
@@ -61,6 +64,34 @@ export function Workspace({ api }: { api: Api }) {
   const [feedbackSignal, setFeedbackSignal] = useState(0);
   // 表示の中から登録されていないfileを読み込もうとした、という通知を受け取った回数。
   const [renderSignal, setRenderSignal] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
+  // 900px未満の画面で、文書の一覧（drawer）を開いているか。
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // 検索の結果から移動する先の節（検索した時点の版と組で持つ）。
+  const [sectionTarget, setSectionTarget] = useState<
+    (SectionTarget & { documentId: string }) | null
+  >(null);
+
+  // Cmd/Ctrl+Kで検索を開く。文字を入力しない組み合わせなので、入力中でも開いてよい。
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+  const openHit = (hit: SearchHit) => {
+    setActiveId(hit.documentId);
+    setSectionTarget((current) => ({
+      documentId: hit.documentId,
+      sectionId: hit.sectionId,
+      revision: hit.revision,
+      nonce: (current?.nonce ?? 0) + 1,
+    }));
+  };
 
   // 一覧をdaemonから取り直す。表示中の文書は、閉じられた場合だけ切り替える。
   const fetchList = useCallback(async () => {
@@ -147,8 +178,31 @@ export function Workspace({ api }: { api: Api }) {
 
   return (
     <div className="flex h-svh flex-col bg-background text-foreground">
-      <header className="flex items-center justify-between gap-3 border-b px-4 py-2">
-        <p className="text-sm font-semibold">vde-open</p>
+      {/* 狭い画面では、buttonの文字を隠してiconだけにする（名前は読み上げに残す）。 */}
+      <header className="flex min-w-0 items-center justify-between gap-2 border-b px-4 py-2 sm:gap-3">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="min-[900px]:hidden"
+          aria-expanded={drawerOpen}
+          aria-controls="document-list"
+          onClick={() => setDrawerOpen((open) => !open)}
+        >
+          {drawerOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
+          <span className="max-sm:sr-only">文書の一覧</span>
+        </Button>
+        <p className="shrink-0 text-sm font-semibold">vde-open</p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          onClick={() => setSearchOpen(true)}
+          aria-keyshortcuts="Meta+K Control+K"
+        >
+          <Search aria-hidden="true" />
+          <span className="max-sm:sr-only">開いている文書を検索</span>
+          <kbd className="ml-1 text-xs text-muted-foreground max-sm:hidden">⌘K</kbd>
+        </Button>
         <ToggleGroup
           value={[theme]}
           onValueChange={(value) => {
@@ -174,14 +228,22 @@ export function Workspace({ api }: { api: Api }) {
           {notice}
         </p>
       )}
-      <div className="flex min-h-0 flex-1">
-        <div className="shrink-0 border-r" style={{ width }}>
+      <div className="relative flex min-h-0 flex-1">
+        {/* 900px未満では、一覧をdrawerにする（横に3つの領域を詰めない。仕様13.2）。 */}
+        <div
+          id="document-list"
+          className={`${drawerOpen ? 'block' : 'hidden'} absolute inset-y-0 left-0 z-20 w-72 max-w-[85vw] shrink-0 border-r bg-background shadow-lg min-[900px]:static min-[900px]:block min-[900px]:max-w-none min-[900px]:shadow-none`}
+          style={{ width: drawerOpen ? undefined : width }}
+        >
           <Sidebar
             documents={documents}
             activeId={activeId}
             view={view}
             onViewChange={setView}
-            onSelect={setActiveId}
+            onSelect={(documentId) => {
+              setActiveId(documentId);
+              setDrawerOpen(false);
+            }}
             onClose={(documentId) => void api.close(documentId).then(load, load)}
             onReorder={reorder}
           />
@@ -190,7 +252,7 @@ export function Workspace({ api }: { api: Api }) {
           role="separator"
           aria-orientation="vertical"
           aria-label="一覧の幅を変える"
-          className="w-1 shrink-0 cursor-col-resize hover:bg-border"
+          className="hidden w-1 shrink-0 cursor-col-resize hover:bg-border min-[900px]:block"
           onPointerDown={startResize}
         />
         {active ? (
@@ -200,6 +262,7 @@ export function Workspace({ api }: { api: Api }) {
             document={active}
             feedbackSignal={feedbackSignal}
             renderSignal={renderSignal}
+            sectionTarget={sectionTarget?.documentId === active.documentId ? sectionTarget : null}
           />
         ) : (
           <main className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
@@ -207,6 +270,7 @@ export function Workspace({ api }: { api: Api }) {
           </main>
         )}
       </div>
+      <SearchDialog api={api} open={searchOpen} onOpenChange={setSearchOpen} onSelect={openHit} />
     </div>
   );
 }

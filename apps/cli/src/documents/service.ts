@@ -589,6 +589,18 @@ export class DocumentService {
     return this.#store.payload;
   }
 
+  // 保持している項目の数（資源の漏れの確認に使う。daemon.diagnostics）。
+  retainedCounts(): Record<string, number> {
+    return {
+      analysisCache: this.#analysisCache.size,
+      signatures: this.#signatures.size,
+      pathQueues: this.#pathQueues.size,
+      openEpochs: this.#openEpochs.size,
+      interactive: this.#interactive.size,
+      linkConfirmations: this.#linkConfirmations.size,
+    };
+  }
+
   // 全候補を先に検査し、1件でも問題があれば何も登録しない（仕様5.2）。
   async open(rawParams: unknown): Promise<ServiceResult<OpenResult>> {
     const params = openParamsSchema.parse(rawParams);

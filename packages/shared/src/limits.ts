@@ -26,6 +26,10 @@ export const LIMITS = {
   bootstrapTicketTtlMs: 60 * 1000,
   sessionIdleMs: 12 * 60 * 60 * 1000,
   sseHeartbeatMs: 15 * 1000,
+  // 1つの通知の接続で、書き終わっていない通知の数。超えた通知は捨て、取り直しの合図にまとめる。
+  ssePendingEvents: 256,
+  // 書き込みが進まないまま、この時間が過ぎた通知の接続は切る。
+  sseStallMs: 60 * 1000,
   assetBytes: 20 * MiB,
   documentAssetBytes: 100 * MiB,
   documentAssets: 500,

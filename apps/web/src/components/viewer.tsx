@@ -1,7 +1,7 @@
 import { classifyReference, dirnameOfLogicalPath, encodeLogicalPath } from '@vde-open/document';
-import { MarkdownView } from '@vde-open/document/react';
+import { codeOfBlock, MarkdownView } from '@vde-open/document/react';
 import type { DocumentSummary, FeedbackForUi, OutlineItem } from '@vde-open/shared';
-import { Pause, Play, RefreshCw } from 'lucide-react';
+import { Copy, Hash, Pause, Play, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -21,6 +21,7 @@ import { ApiError, type Api } from '@/lib/api';
 import { describeDiagnostic } from '@/lib/diagnostics';
 import { isViewMode, usePreference, type ViewMode } from '@/lib/preferences';
 import { useBridge, type BridgeStatus } from '@/lib/use-bridge';
+import { useCopy } from '@/lib/use-copy';
 import { useMarkdown } from '@/lib/use-markdown';
 import { useMissingAssets } from '@/lib/use-missing-assets';
 import { useRenderGrant } from '@/lib/use-render-grant';
@@ -49,6 +50,16 @@ export interface ViewerProps {
   renderSignal?: number;
   // 回答待ちの質問を取得するまで、表示する版を決めない（質問の版と違う版を一度表示しない）。
   waitingForRequest?: boolean;
+  // 検索の結果から移動する先の節。Markdownのプレビューでは、その見出しへ移動する。
+  sectionTarget?: SectionTarget | null;
+}
+
+// 検索の結果から移動する先。結果は検索した時点の版の節なので、版と組で持つ。
+// nonceは、同じ節へもう一度移動するときに変える。
+export interface SectionTarget {
+  sectionId: string;
+  revision: string;
+  nonce: number;
 }
 
 // HTMLとの通信を終えた理由の説明。
@@ -70,13 +81,19 @@ function bridgeNotice(status: BridgeStatus): string | null {
   );
 }
 
+// 表示している内容。本文と見出しの一覧は、それを取得した版と組で持つ。
 interface Loaded {
   revision: string;
-  text: string | null;
+  text: string;
   outline: OutlineItem[];
   // 見出しの一覧を取得できなかった理由。本文の表示は続ける。
   outlineError: string | null;
-  error: string | null;
+}
+
+// 読み込めなかった版と理由。表示している内容（前の版）とは分けて持つ。
+interface LoadFailure {
+  revision: string;
+  message: string;
 }
 
 // 未登録の文書を開く前の確認。pathは、daemonが解決した絶対path。
@@ -98,6 +115,7 @@ export function Viewer({
   request = null,
   renderSignal = 0,
   waitingForRequest = false,
+  sectionTarget = null,
 }: ViewerProps) {
   const [mode, setMode] = usePreference<ViewMode>('view-mode', 'preview', isViewMode);
   // 更新を止めた時点の版。止めている間は、新しい版が来ても差し替えない。
@@ -110,6 +128,7 @@ export function Viewer({
     ? null
     : (fixedRevision ?? pinnedRevision ?? document.revision);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
   const [pendingLink, setPendingLink] = useState<PendingLink | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -132,24 +151,22 @@ export function Viewer({
       ),
     ]).then(
       ([content, outline]) => {
-        if (!cancelled)
-          setLoaded({
-            revision: shownRevision,
-            text: content,
-            outline: outline.items,
-            outlineError: outline.error,
-            error: null,
-          });
+        if (cancelled) return;
+        setLoaded({
+          revision: shownRevision,
+          text: content,
+          outline: outline.items,
+          outlineError: outline.error,
+        });
+        setFailure(null);
       },
       (reason: unknown) => {
         if (cancelled) return;
-        setLoaded((current) => ({
+        // 表示している内容（前の版）は残し、その版のままとして扱う。
+        setFailure({
           revision: shownRevision,
-          text: current?.text ?? null,
-          outline: current?.outline ?? [],
-          outlineError: current?.outlineError ?? null,
-          error: reason instanceof Error ? reason.message : '読み込めませんでした。',
-        }));
+          message: reason instanceof Error ? reason.message : '読み込めませんでした。',
+        });
       },
     );
     return () => {
@@ -157,11 +174,11 @@ export function Viewer({
     };
   }, [api, document.documentId, shownRevision]);
 
-  // 次の版を読み込んでいる間は、直前の内容を表示し続ける。
+  // 次の版を読み込んでいる間と、読み込めなかった間は、直前の内容を表示し続ける。
   const text = loaded?.text ?? null;
   const outline = loaded?.outline ?? [];
   const outlineError = loaded?.outlineError ?? null;
-  const error = loaded?.error ?? null;
+  const error = failure !== null && failure.revision === shownRevision ? failure.message : null;
 
   const isMarkdown = document.format === 'markdown';
   const wantsPreview = mode === 'preview';
@@ -260,10 +277,60 @@ export function Viewer({
     [grant, openLink],
   );
 
+  // 文書のpath・ID・codeのcopy（仕様13.2）。結果は、状態の行に示す。
+  const { result: copied, copy } = useCopy();
+  const codeActions = useMemo(
+    () => (
+      <Button
+        variant="outline"
+        size="xs"
+        onClick={(event) => void copy('コード', codeOfBlock(event.currentTarget))}
+      >
+        <Copy aria-hidden="true" />
+        コードをcopy
+      </Button>
+    ),
+    [copy],
+  );
+
   const stale = paused && !fixed && document.revision !== shownRevision;
   const jumpTo = (anchor: string) => {
     window.document.getElementById(anchor)?.scrollIntoView({ block: 'start' });
   };
+  // 検索の結果で選んだ節の見出しへ移動する（表示中の版の見出しの一覧と本文を読み込んだ後）。
+  // 結果の版と表示中の版が違うときは、節番号が別の見出しを指しうるので移動せず、理由を示す。
+  // 質問の版や、更新を止めた版の表示は変えない。
+  const targetNonce = sectionTarget?.nonce ?? 0;
+  const [dismissedNonce, setDismissedNonce] = useState(0);
+  // 表示する版の内容を読み込み終えるまでは、比べない。読み込めなかった間は、前の版の内容を
+  // 表示しているので、移動しない。
+  const targetLoaded =
+    sectionTarget !== null && shownRevision !== null && loaded?.revision === shownRevision;
+  const targetMatches = targetLoaded && sectionTarget.revision === shownRevision;
+  const targetAnchor =
+    targetMatches && showMarkdown
+      ? (outline.find((item) => item.sectionId === sectionTarget.sectionId)?.anchor ?? null)
+      : null;
+  const targetNotice =
+    sectionTarget === null || targetNonce === dismissedNonce
+      ? null
+      : !targetLoaded
+        ? error !== null
+          ? '表示する版を読み込めないため、節へ移動しません。'
+          : null
+        : !targetMatches
+          ? fixed
+            ? '検索の結果は、表示中と別の版の節です。回答待ちの質問の版を表示しているため、移動しません。'
+            : paused
+              ? '検索の結果は、表示中と別の版の節です。更新を止めているため、移動しません。'
+              : '検索した後に文書が更新されたため、節へ移動しません。もう一度検索してください。'
+          : showMarkdown
+            ? null
+            : 'この表示では、節の位置へ移動しません（移動するのはMarkdownのプレビューだけです）。';
+  useEffect(() => {
+    if (targetAnchor === null || targetNonce === 0) return;
+    window.document.getElementById(targetAnchor)?.scrollIntoView({ block: 'start' });
+  }, [targetAnchor, targetNonce]);
   const diagnostics = [
     ...(grant?.diagnostics ?? []),
     ...missing.map((path) => ({ code: 'asset-requested', target: path, count: 1 })),
@@ -283,6 +350,28 @@ export function Viewer({
             {document.displayPath ?? '（stdinから開いた文書）'}
             {shownRevision && <span title={shownRevision}>　版 {shownRevision.slice(4, 12)}</span>}
           </p>
+        </div>
+        <div className="flex items-center gap-1">
+          {document.displayPath !== null && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="文書のpathをcopy"
+              title="文書のpathをcopy"
+              onClick={() => void copy('文書のpath', document.displayPath ?? '')}
+            >
+              <Copy aria-hidden="true" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="文書のIDをcopy"
+            title={`文書のIDをcopy（${document.documentId}）`}
+            onClick={() => void copy('文書のID', document.documentId)}
+          >
+            <Hash aria-hidden="true" />
+          </Button>
         </div>
         <Badge variant="outline">{isMarkdown ? 'Markdown' : 'HTML'}</Badge>
         {!isMarkdown && (
@@ -334,6 +423,25 @@ export function Viewer({
       </header>
 
       <div role="status" aria-live="polite" className="empty:hidden">
+        {copied !== null && (
+          <p
+            className={`border-b px-4 py-2 text-sm ${copied.ok ? 'bg-muted' : 'bg-destructive/10'}`}
+            data-testid="copy-result"
+          >
+            {copied.message}
+          </p>
+        )}
+        {targetNotice !== null && (
+          <div
+            className="flex flex-wrap items-center gap-2 border-b bg-muted px-4 py-2 text-sm"
+            data-testid="section-target-notice"
+          >
+            <p className="min-w-0 flex-1">{targetNotice}</p>
+            <Button variant="outline" size="sm" onClick={() => setDismissedNonce(targetNonce)}>
+              閉じる
+            </Button>
+          </div>
+        )}
         {stale && (
           <p className="border-b bg-muted px-4 py-2 text-sm">
             新しい版があります。更新を止めているため、表示は止めた時点の版のままです。
@@ -498,6 +606,7 @@ export function Viewer({
                   document={markdown.document}
                   {...(resolveImage ? { resolveImage } : {})}
                   onOpenLink={openMarkdownLink}
+                  codeActions={codeActions}
                 />
               </article>
             ) : !isMarkdown && wantsPreview && grantState.status === 'loading' ? (

@@ -11,6 +11,7 @@ import {
   type PathEnvironment,
 } from '../persistence/paths.ts';
 import { nodeStoreFs, type StoreFs } from '../persistence/store-fs.ts';
+import { createParseService, type ParseService } from '../workers/parse-service.ts';
 import { holdsLock } from './lock.ts';
 import { startDaemon, type DaemonHandle } from './main.ts';
 
@@ -181,6 +182,40 @@ describe('停止とcommitの交差', () => {
     const list = await after?.request<{ totalDocuments: number }>('documents.list', {});
     after?.close();
     expect(list).toMatchObject({ ok: true, data: { totalDocuments: 0 } });
+  });
+});
+
+describe('診断と停止の交差', () => {
+  it('索引の同期を待っている診断があっても、停止を待たせない', async () => {
+    // 解析を遅くして、索引の同期に時間がかかる状態にする（8文書×500ms）。
+    const real = createParseService();
+    const slow: ParseService = {
+      ...real,
+      analyze: async (format, text) => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        return real.analyze(format, text);
+      },
+    };
+    for (let index = 0; index < 8; index += 1) {
+      await writeFile(join(base, `${String(index)}.md`), `# 文書${String(index)}\n\n本文\n`);
+    }
+    daemon = await startDaemon({ environment, version: 'test', parse: slow });
+    for (let index = 0; index < 8; index += 1) await openDocument(`${String(index)}.md`);
+    const connection = await createDaemonControl(environment).connectExisting();
+    if (!connection) throw new Error('daemonへ接続できません');
+    const diagnosing = connection
+      .request('daemon.diagnostics', { collectGarbage: true }, { timeoutMs: 30_000 })
+      .then(
+        (envelope) => (envelope.ok ? 'completed' : envelope.error.code),
+        (error: { code: string }) => error.code,
+      );
+    // 診断が索引の同期を待ち始めてから、停止する。
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const started = Date.now();
+    await daemon.stop('test');
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(['E_DAEMON_STOPPING', 'E_DAEMON_UNAVAILABLE']).toContain(await diagnosing);
+    connection.close();
   });
 });
 

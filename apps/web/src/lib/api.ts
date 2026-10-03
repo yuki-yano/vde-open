@@ -9,6 +9,7 @@ import type {
   OutlineItem,
   ReadResult,
   RenderGrantResult,
+  SearchResult,
   ServerEvent,
   SessionResult,
   UiStatus,
@@ -100,6 +101,8 @@ export interface Api {
     revision: string,
     options?: { mode?: HtmlMode },
   ): Promise<RenderGrantResult>;
+  // 開いている文書を検索する（仕様9章）。
+  search(query: string, limit: number): Promise<SearchResult>;
   // 回答待ちの質問が固定した版と表示方法での表示。表示方法はdaemonが質問から決める。
   feedbackRenderGrant(requestId: string): Promise<RenderGrantResult>;
   // HTMLのSDKからの操作の中継。表示の権限（grant）が有効な間だけ成功する。
@@ -226,6 +229,10 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
       });
       return data;
     },
+    async search(query, limit) {
+      const params = new URLSearchParams({ query, limit: String(limit) });
+      return (await request<SearchResult>(`/search?${params.toString()}`)).data;
+    },
     async feedbackRenderGrant(requestId) {
       const { data } = await request<RenderGrantResult>(`/feedback/${requestId}/render-grants`, {
         method: 'POST',
@@ -307,6 +314,8 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
             // headerを付けられる素のfetchで読む。tokenをURLへ載せない。
             const response = await fetch(`${API}/events`, {
               headers: { Authorization: `Bearer ${token}` },
+              // 通知のstreamは保存しない（同じURLへの接続を、browserのcacheで待たせない）。
+              cache: 'no-store',
               signal: controller.signal,
             });
             if (response.status === 401) {

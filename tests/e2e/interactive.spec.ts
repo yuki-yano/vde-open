@@ -277,6 +277,8 @@ test('FB-011: 別の画面の更新を知った後でも、HTMLが古い版を�
   const second = await context.newPage();
   await second.goto(await t.bootstrapUrl());
   const otherPanel = panelOf(second);
+  // 2つ目の画面も、通知の接続を待たされずに表示する（同じURLへの接続をbrowserのcacheで待たせない）。
+  await expect(otherPanel).toBeVisible({ timeout: 5000 });
   await otherPanel.getByRole('radio', { name: 'B', exact: true }).click();
   await otherPanel.getByRole('radio', { name: 'compact', exact: true }).click();
   await expect(otherPanel.getByTestId('feedback-status')).toHaveText('回答案を保存しました');

@@ -9,12 +9,19 @@ import {
   type ScanKind,
 } from '@vde-open/document/render';
 
+import { measureHeap } from '../diagnostics/heap.ts';
+
 export type ParseRequest =
   | { id: number; op: 'analyze'; format: 'markdown' | 'html'; text: string }
   | { id: number; op: 'scan'; kind: ScanKind; text: string }
-  | { id: number; op: 'render'; input: RenderInput };
+  | { id: number; op: 'render'; input: RenderInput }
+  | { id: number; op: 'diagnostics'; collectGarbage: boolean };
 
 function run(request: ParseRequest): unknown {
+  // 解析のworkerは、依頼の間に状態を持たない。heapだけを返す。
+  if (request.op === 'diagnostics') {
+    return { heapUsedBytes: measureHeap(request.collectGarbage), retained: {} };
+  }
   if (request.op === 'analyze') return analyzeDocument(request.text, request.format);
   if (request.op === 'scan') return scanReferences(request.kind, request.text);
   return renderDocument(request.input);

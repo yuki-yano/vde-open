@@ -35,6 +35,7 @@ beforeEach(async () => {
   renderStarted = () => undefined;
   renders = 0;
   const parse: ParseService = {
+    diagnostics: () => Promise.resolve(null),
     analyze: (format, text) => Promise.resolve(analyzeDocument(text, format)),
     scan: (kind, text) => Promise.resolve(scanReferences(kind, text)),
     render: async (input) => {
@@ -374,6 +375,7 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
       documents,
       sessions,
       parse: {
+        diagnostics: () => Promise.resolve(null),
         analyze: (format, text) => Promise.resolve(analyzeDocument(text, format)),
         scan: (kind, text) => Promise.resolve(scanReferences(kind, text)),
         render: (input) => Promise.resolve(renderDocument(input)),

@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { extname, join } from 'node:path';
 
-import { serve } from '@hono/node-server';
+import { serve, type HttpBindings } from '@hono/node-server';
 import {
   errorEnvelope,
   ExitCode,
@@ -32,6 +32,7 @@ import type { RenderService } from '../../render/render-service.ts';
 import type { SearchService } from '../../search/search-service.ts';
 import type { EventHub } from '../event-hub.ts';
 import type { SessionService } from '../session-service.ts';
+import { createEventQueue } from './event-queue.ts';
 
 const API_PREFIX = '/_/api/v1';
 const STREAM_FLUSH_MS = 100;
@@ -86,15 +87,20 @@ export interface ManagementDeps {
   onEvent?: (event: string, fields: Record<string, string | number>) => void;
   // 通知の接続を確かめる間隔。指定がなければ15秒（仕様6.5）。
   heartbeatMs?: number;
+  // 書き込みが進まない通知の接続を切るまでの時間。指定がなければ`LIMITS.sseStallMs`。
+  stallMs?: number;
 }
 
 export interface ManagementServer {
   readonly port: number;
   readonly origin: string;
+  // 通知の接続の数と、接続ごとの書き終わっていない通知の数の最大（診断用）。
+  eventStreams(): { streams: number; maxPending: number };
   close(): Promise<void>;
 }
 
 interface HttpEnv {
+  Bindings: Partial<HttpBindings>;
   Variables: { token: string };
 }
 
@@ -230,7 +236,8 @@ export async function startManagementServer(
   const app = new Hono<HttpEnv>();
   let origin = '';
   let host = '';
-  const streams = new Set<() => void>();
+  // 通知の接続ごとの、終える関数と書き終わっていない通知の数。
+  const streams = new Map<() => void, { readonly pending: number }>();
 
   // すべての応答に付けるheader。
   app.use('*', async (c, next) => {
@@ -571,8 +578,10 @@ export async function startManagementServer(
   });
 
   // fetchで読むSSE（仕様6.5）。IDと版だけを流し、本文は流さない。
-  api.get('/events', (c) =>
-    streamSSE(c, async (stream) => {
+  // streamSSEが付ける`no-cache`は保存を許すので、`no-store`にする。保存できる応答だと、Firefoxは
+  // 同じURLへの2つ目の接続（別の画面や再接続）を、1つ目の応答が終わるまで約20秒待たせる。
+  api.get('/events', (c) => {
+    const response = streamSSE(c, async (stream) => {
       let closed = false;
       let wake: () => void = () => undefined;
       const done = new Promise<void>((resolve) => {
@@ -582,32 +591,40 @@ export async function startManagementServer(
         closed = true;
         wake();
       };
-      streams.add(finish);
-      stream.onAbort(finish);
-      // sessionが破棄されたら、開いたままの接続も閉じる。失効したsessionへ通知を流し続けない。
       const token = c.get('token');
-      const stopWatchingSession = deps.sessions.onRevoke(token, finish);
-
       // 書き込みは順に行い、streamを終える前に、依頼済みの書き込みが終わるのを待つ。
       // 待たずに閉じると、停止の直前に出した通知が届かない。
-      let writes: Promise<void> = Promise.resolve();
+      const queue = createEventQueue({
+        writeEvent: (event) =>
+          stream.writeSSE({
+            event: event.type,
+            id: String(event.sequence),
+            data: JSON.stringify(event),
+          }),
+        writeHeartbeat: () => stream.write(': heartbeat\n\n'),
+        // 書き込みの直前に確かめる。期限が切れたsessionへは、次の確認を待たずに送るのをやめる。
+        // 順番を待っている間に失効した場合も、ここで止まる。
+        beforeWrite: () => {
+          if (deps.sessions.isActive(token)) return true;
+          drop();
+          return false;
+        },
+        onError: finish,
+      });
+      // 送るのをやめて接続を切る（sessionの失効・破棄、書き込みの詰まり）。残りの書き込みはせず、
+      // 詰まった書き込みを終わらせてsocketも閉じる（読まない相手へ送る分を残さない）。
+      const drop = () => {
+        queue.stop();
+        finish();
+        stream.abort();
+        c.env.outgoing?.destroy();
+      };
+      streams.set(finish, queue);
+      stream.onAbort(finish);
+      // sessionが破棄されたら、開いたままの接続も閉じる。失効したsessionへ通知を流し続けない。
+      const stopWatchingSession = deps.sessions.onRevoke(token, drop);
       const send = (event: ServerEvent) => {
-        if (closed) return;
-        writes = writes
-          .then(() => {
-            // 書き込みの直前に確かめる。期限が切れたsessionへは、次の確認を待たずに送るのをやめる。
-            // 順番を待っている間に失効した場合も、ここで止まる。
-            if (!deps.sessions.isActive(token)) {
-              finish();
-              return undefined;
-            }
-            return stream.writeSSE({
-              event: event.type,
-              id: String(event.sequence),
-              data: JSON.stringify(event),
-            });
-          })
-          .catch(finish);
+        if (!closed) queue.send(event);
       };
       // 接続のたびに現在の連番を知らせる。受け手はここからstateを取り直す。
       send({
@@ -620,10 +637,15 @@ export async function startManagementServer(
       const heartbeat = setInterval(() => {
         // 接続を保っているだけでは、sessionの期限は延びない。期限が切れたら閉じる。
         if (!deps.sessions.isActive(token)) {
-          finish();
+          drop();
           return;
         }
-        void stream.write(': heartbeat\n\n').catch(finish);
+        // 受け手が読まず、書き込みが進まない接続は切る。受け手は接続し直して、stateを取り直す。
+        if (queue.stalledFor() >= (deps.stallMs ?? LIMITS.sseStallMs)) {
+          drop();
+          return;
+        }
+        queue.heartbeat();
       }, deps.heartbeatMs ?? LIMITS.sseHeartbeatMs);
       try {
         await done;
@@ -631,11 +653,14 @@ export async function startManagementServer(
         clearInterval(heartbeat);
         stopWatchingSession();
         unsubscribe();
+        await queue.settled();
+        // 書き込みを終えるまで、接続として数える（診断に、終わっていない接続を隠さない）。
         streams.delete(finish);
-        await writes;
       }
-    }),
-  );
+    });
+    response.headers.set('Cache-Control', 'no-store');
+    return response;
+  });
 
   api.all('*', (c) => fail(c, new VdeError('E_UNKNOWN_METHOD', '未知のAPIです。')));
   api.onError((error, c) => fail(c, error));
@@ -680,9 +705,14 @@ export async function startManagementServer(
   return {
     port,
     origin,
+    eventStreams() {
+      let maxPending = 0;
+      for (const queue of streams.values()) maxPending = Math.max(maxPending, queue.pending);
+      return { streams: streams.size, maxPending };
+    },
     async close() {
       // 通知のstreamを先に終える。最後の通知（daemon-stopping）が届いてから接続を閉じる。
-      for (const finish of streams) finish();
+      for (const finish of streams.keys()) finish();
       await new Promise((resolve) => setTimeout(resolve, STREAM_FLUSH_MS));
       await new Promise<void>((resolve) => {
         server.close(() => resolve());

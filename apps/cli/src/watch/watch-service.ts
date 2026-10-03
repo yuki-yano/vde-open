@@ -18,6 +18,9 @@ export interface WatchService {
   // 現在のstateに合わせて、監視するdirectoryを増減する。
   sync(): void;
   close(): Promise<void>;
+  // 監視しているdirectoryの数と、作ったwatcher・閉じ終えたwatcherの数（資源の漏れの確認に使う）。
+  // 作った数と閉じ終えた数の差が、まだ閉じていないwatcherの数になる。
+  readonly watcherStats: { directories: number; created: number; closed: number };
 }
 
 export interface WatchServiceOptions {
@@ -48,6 +51,7 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
   // 読めた文書の状態は、DocumentServiceが公開済みの内容と対にして持っている。
   const unreadable = new Map<string, string>();
   let closed = false;
+  const stats = { created: 0, closed: 0 };
   let activeRefreshes = 0;
   const waitingRefreshes: Array<() => void> = [];
 
@@ -163,6 +167,11 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     }
   };
 
+  const closeWatcher = async (entry: DirectoryWatcher) => {
+    await entry.watcher.close();
+    stats.closed += 1;
+  };
+
   const startWatcher = (directory: string, recursive: boolean) => {
     const watcher = watch(directory, {
       ignoreInitial: true,
@@ -188,6 +197,7 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
       });
     });
     watcher.on('error', report);
+    stats.created += 1;
     watchers.set(directory, { watcher, recursive });
   };
 
@@ -211,7 +221,7 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     for (const [directory, entry] of watchers) {
       if (desired.get(directory) === entry.recursive) continue;
       watchers.delete(directory);
-      void entry.watcher.close().catch(report);
+      void closeWatcher(entry).catch(report);
     }
     for (const [directory, recursive] of desired) {
       if (!watchers.has(directory)) startWatcher(directory, recursive);
@@ -240,6 +250,9 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
 
   return {
     sync,
+    get watcherStats() {
+      return { directories: watchers.size, ...stats };
+    },
     async close() {
       closed = true;
       clearInterval(fileCheck);
@@ -247,7 +260,7 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
       for (const wake of waitingRefreshes.splice(0)) wake();
-      const closing = [...watchers.values()].map((entry) => entry.watcher.close());
+      const closing = [...watchers.values()].map(closeWatcher);
       watchers.clear();
       await Promise.allSettled(closing);
     },

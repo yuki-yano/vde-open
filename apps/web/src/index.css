@@ -209,6 +209,15 @@
   background: var(--muted);
   font-size: 0.9em;
 }
+/* code blockの上の操作（copy）。code blockの右上に重ねる。 */
+.markdown-body [data-code-block] {
+  position: relative;
+}
+.markdown-body [data-code-actions] {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+}
 .markdown-body pre {
   padding: 0.9em 1em;
   overflow-x: auto;

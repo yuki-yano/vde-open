@@ -584,6 +584,13 @@ export class FeedbackService {
     return this.#result(this.#toUi(this.#store.payload, outcome.record));
   }
 
+  // 保持している項目の数（資源の漏れの確認に使う。daemon.diagnostics）。
+  retainedCounts(): Record<string, number> {
+    let waiters = 0;
+    for (const set of this.#waiters.values()) waiters += set.size;
+    return { waitedRequests: this.#waiters.size, waiters };
+  }
+
   // 停止の前に呼ぶ。待っている処理を終わらせる（質問の状態は変えない）。
   close(): void {
     this.#closed = true;

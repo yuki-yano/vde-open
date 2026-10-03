@@ -3,7 +3,7 @@ import { rm, rmdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { IPC_PROTOCOL_VERSION, VdeError, type DaemonStatus, type Warning } from '@vde-open/shared';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 
 import { createCursorCodec } from '../documents/cursor.ts';
 import { DocumentService, type DocumentEvent } from '../documents/service.ts';
@@ -24,6 +24,7 @@ import { startPreviewServer, type PreviewServer } from '../server/http/preview.t
 import { startIpcServer, type IpcServer } from '../server/ipc-server.ts';
 import { createSessionService } from '../server/session-service.ts';
 import { createWatchService, type WatchService } from '../watch/watch-service.ts';
+import { measureHeap } from '../diagnostics/heap.ts';
 import { createParseService, type ParseService } from '../workers/parse-service.ts';
 import {
   acquireLock,
@@ -37,6 +38,8 @@ import { createIpcKey, DAEMON_LOCK_NAME, removePointer, writePointer } from './r
 import { ensurePrivateDirectory } from './secure-dir.ts';
 
 const LOCK_CHECK_INTERVAL_MS = 2000;
+
+const diagnosticsParamsSchema = z.strictObject({ collectGarbage: z.boolean().default(false) });
 
 export interface DaemonOptions {
   environment: PathEnvironment;
@@ -108,6 +111,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   let announceStopping: () => void = () => undefined;
   let lockTimer: NodeJS.Timeout | null = null;
   let stopping: Promise<void> | null = null;
+  // 停止を始めたら中断する。
+  const stopRequested = new AbortController();
   // 自分が検査・作成したものだけを後始末する。
   const owned = { runtimeDir: false, key: false, socket: false };
   let resolveStopped: () => void = () => undefined;
@@ -116,6 +121,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   });
 
   const shutdown = async () => {
+    // 受付済みの処理のうち、終わりを待たなくてよい待ち（診断の索引の同期など）を先に終わらせる。
+    stopRequested.abort();
     if (lockTimer) clearInterval(lockTimer);
     // 受付済みの処理とcommitが終わるまで、lockを持ち続ける。
     // 途中で解放すると、次のdaemonの書込みと重なる。
@@ -288,6 +295,43 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           uiUrl,
         };
         return { data: status, catalogVersion: openedStore.payload.catalogVersion };
+      },
+      // 資源の数と使用量（性能と資源の漏れの確認に使う。PERF-003〜005）。文書の内容や秘密は含めない。
+      'daemon.diagnostics': async (params): Promise<MethodResult> => {
+        // 求められたときだけ、回収してからheapを測る（回収後のheapを反復の区間ごとに比べるため）。
+        // workerは、それぞれのthreadで回収して測る。検索のworkerは、indexを今の文書に合わせ終えてから測る。
+        const { collectGarbage } = diagnosticsParamsSchema.parse(params ?? {});
+        const workers = {
+          search: (await search?.diagnostics(collectGarbage, stopRequested.signal)) ?? null,
+          parse: (await parse?.diagnostics(collectGarbage, stopRequested.signal)) ?? null,
+        };
+        const heapUsedBytes = measureHeap(collectGarbage);
+        const activeResources: Record<string, number> = {};
+        for (const kind of process.getActiveResourcesInfo()) {
+          activeResources[kind] = (activeResources[kind] ?? 0) + 1;
+        }
+        const cpu = process.cpuUsage();
+        return {
+          data: {
+            watchers: watching.watcherStats,
+            eventSubscribers: events.subscriberCount,
+            eventStreams: management?.eventStreams() ?? { streams: 0, maxPending: 0 },
+            renderGrants: render.grantCount,
+            // 保持している項目の数。反復の後に増え続けていれば、解放の漏れ。
+            retained: {
+              documents: documents.retainedCounts(),
+              search: search?.retainedCounts() ?? {},
+              render: render.retainedCounts(),
+              feedback: answering.retainedCounts(),
+              sessions: sessions.retainedCounts(),
+            },
+            workers,
+            activeResources,
+            rssBytes: process.memoryUsage().rss,
+            heapUsedBytes,
+            cpuMicros: cpu.user + cpu.system,
+          },
+        };
       },
       'daemon.stop': (): MethodResult => {
         // 応答を返してから停止する。

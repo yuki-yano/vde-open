@@ -12,6 +12,8 @@ import {
   type SearchResult,
 } from '@vde-open/shared';
 
+import type { WorkerDiagnostics } from '../diagnostics/heap.ts';
+import { untilAborted } from '../diagnostics/until-aborted.ts';
 import type { CursorCodec } from '../documents/cursor.ts';
 import type { ServiceResult } from '../documents/service.ts';
 import { searchWorkerPath } from '../entry-paths.ts';
@@ -29,6 +31,13 @@ export interface SearchService {
   search(rawParams: unknown): Promise<ServiceResult<SearchResult>>;
   // 一覧に出す、文書ごとの検索の状態。
   stateOf(documentId: string): DocumentSearchState;
+  // 保持している項目の数（資源の漏れの確認に使う。daemon.diagnostics）。
+  retainedCounts(): Record<string, number>;
+  // workerのheapと、indexが保持している項目の数を返す。workerがなければnull。
+  // collectGarbageなら、indexを今の文書の状態に合わせ終え、workerで片付けとGCを行ってから測る
+  // （資源の漏れの検査のため。それ以外の診断では、同期などの処理を起こさない）。
+  // signalが中断されたら（daemonの停止）、待つのをやめてE_DAEMON_STOPPINGで終える。
+  diagnostics(collectGarbage: boolean, signal?: AbortSignal): Promise<WorkerDiagnostics | null>;
   close(): Promise<void>;
 }
 
@@ -70,6 +79,7 @@ type Work = SearchWorkerRequest extends infer Request
   : never;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+
 const WAIT_STEP_MS = 20;
 // 1回の依頼で索引へ入れる量。小さく分けて、その間に検索の依頼を挟めるようにする。
 // 重さは、索引に入れるfield（本文・見出し）の長さ（UTF-16のcode unit）。
@@ -374,6 +384,18 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
   };
 
   return {
+    retainedCounts() {
+      return { indexed: indexed.size, resident: resident.size, pending: pending.size };
+    },
+    diagnostics(collectGarbage, signal) {
+      // indexの同期と、workerの応答（片付けを待つ）の両方を、停止で待つのをやめられるようにする。
+      const work = (collectGarbage ? sync() : Promise.resolve()).then(() =>
+        worker === null || signal?.aborted === true
+          ? null
+          : request<WorkerDiagnostics>({ op: 'diagnostics', collectGarbage }),
+      );
+      return untilAborted(work, signal);
+    },
     sync() {
       void sync().catch(() => undefined);
     },

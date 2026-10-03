@@ -44,6 +44,14 @@ export interface MarkdownViewProps {
   resolveImage?: (src: string) => string | null;
   // localの文書へのlinkが押されたときに呼ばれる。指定がなければ、linkとして扱わない。
   onOpenLink?: (href: string) => void;
+  // code blockの上に置く操作（copyなど）。表示しているcodeは、操作の要素から`codeOfBlock`で読む。
+  codeActions?: ReactNode;
+}
+
+// code blockの中の要素（操作のbuttonなど）から、そのcode blockが表示しているcode
+// （色付けのための要素を除いた文字列）を読む。
+export function codeOfBlock(element: Element): string {
+  return element.closest('[data-code-block]')?.querySelector('pre code')?.textContent ?? '';
 }
 
 type Components = NonNullable<Parameters<typeof renderMarkdownReact>[1]>['components'];
@@ -53,6 +61,7 @@ type Components = NonNullable<Parameters<typeof renderMarkdownReact>[1]>['compon
 function createComponents(
   resolveImage: MarkdownViewProps['resolveImage'],
   onOpenLink: MarkdownViewProps['onOpenLink'],
+  codeActions: MarkdownViewProps['codeActions'],
 ): Components {
   function Link({ href, children, ...rest }: ComponentPropsWithoutRef<'a'>): ReactNode {
     if (!href) return <span>{children}</span>;
@@ -92,13 +101,30 @@ function createComponents(
     );
   }
 
-  return { a: Link, img: Image };
+  // code block。操作（codeActions）は、各code blockの上に置く。操作の中の要素から、
+  // その要素が属するcode blockのcodeを`codeOfBlock`で読む。
+  function Pre({ children, ...rest }: ComponentPropsWithoutRef<'pre'>): ReactNode {
+    if (codeActions === undefined) return <pre {...rest}>{children}</pre>;
+    return (
+      <div data-code-block="">
+        <div data-code-actions="">{codeActions}</div>
+        <pre {...rest}>{children}</pre>
+      </div>
+    );
+  }
+
+  return { a: Link, img: Image, pre: Pre };
 }
 
-export function MarkdownView({ document, resolveImage, onOpenLink }: MarkdownViewProps): ReactNode {
+export function MarkdownView({
+  document,
+  resolveImage,
+  onOpenLink,
+  codeActions,
+}: MarkdownViewProps): ReactNode {
   const components = useMemo(
-    () => createComponents(resolveImage, onOpenLink),
-    [resolveImage, onOpenLink],
+    () => createComponents(resolveImage, onOpenLink, codeActions),
+    [resolveImage, onOpenLink, codeActions],
   );
   return renderMarkdownReact(document, {
     ...MARKDOWN_PARSE_OPTIONS,

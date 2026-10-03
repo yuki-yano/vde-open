@@ -4,6 +4,7 @@ import { parentPort } from 'node:worker_threads';
 
 import type { SearchMode } from '@vde-open/shared';
 
+import { measureHeap, type WorkerDiagnostics } from '../diagnostics/heap.ts';
 import { SearchIndex, type IndexedMeta, type IndexPart } from '../search/search-index.ts';
 
 export type SearchWorkerRequest =
@@ -13,12 +14,20 @@ export type SearchWorkerRequest =
   | { id: number; op: 'abort'; documentId: string }
   | { id: number; op: 'meta'; meta: IndexedMeta }
   | { id: number; op: 'remove'; documentId: string }
-  | { id: number; op: 'search'; query: string; mode: SearchMode; documents: string[] | null };
+  | { id: number; op: 'search'; query: string; mode: SearchMode; documents: string[] | null }
+  | { id: number; op: 'diagnostics'; collectGarbage: boolean };
 
 const index = new SearchIndex();
 
+async function diagnostics(collectGarbage: boolean): Promise<WorkerDiagnostics> {
+  const retained = await index.retainedCounts(collectGarbage);
+  return { heapUsedBytes: measureHeap(collectGarbage), retained };
+}
+
 function run(request: SearchWorkerRequest): unknown {
   switch (request.op) {
+    case 'diagnostics':
+      return diagnostics(request.collectGarbage);
     case 'begin':
       index.begin(request.meta);
       return null;
@@ -46,9 +55,20 @@ function run(request: SearchWorkerRequest): unknown {
 }
 
 parentPort?.on('message', (request: SearchWorkerRequest) => {
+  let result: unknown;
   try {
-    parentPort?.postMessage({ id: request.id, ok: true, result: run(request) });
+    result = run(request);
   } catch {
     parentPort?.postMessage({ id: request.id, ok: false, reason: 'index-error' });
+    return;
   }
+  // 診断だけは、片付けを待ってから返す（ほかの処理は、その場で結果を返す）。
+  if (result instanceof Promise) {
+    result.then(
+      (value: unknown) => parentPort?.postMessage({ id: request.id, ok: true, result: value }),
+      () => parentPort?.postMessage({ id: request.id, ok: false, reason: 'index-error' }),
+    );
+    return;
+  }
+  parentPort?.postMessage({ id: request.id, ok: true, result });
 });
