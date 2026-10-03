@@ -47,6 +47,8 @@ function documentOf(overrides: Partial<DocumentSummary> = {}): DocumentSummary {
     updatedAt: T0,
     order: 0,
     pendingRequestIds: [],
+    htmlMode: 'static',
+    interactiveAllowed: false,
     ...overrides,
   };
 }
@@ -63,6 +65,7 @@ function requestOf(overrides: Partial<FeedbackForUi> = {}): FeedbackForUi {
     cancellation: null,
     acknowledgedAt: null,
     questionnaire,
+    renderMode: 'static',
     draftVersion: 0,
     draftAnswers: {},
     currentRevision: REV1,
@@ -98,6 +101,7 @@ beforeEach(() => {
     },
     outline: () => Promise.resolve([]),
     renderGrant: () => new Promise<RenderGrantResult>(() => undefined),
+    feedbackRenderGrant: () => new Promise<RenderGrantResult>(() => undefined),
     releaseGrants: () => Promise.resolve(),
     refresh: () => Promise.resolve(),
     documents: () =>

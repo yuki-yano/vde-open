@@ -9,6 +9,12 @@ const DESCRIPTIONS: Record<string, Describe> = {
     '文書が参照するfileを調べる処理が、時間内に終わらないか、構造の上限を超えたため、画像とCSSを登録していません。vo refresh <文書ID> で調べ直せます。',
   'script-removed': (_target, count) =>
     `scriptを${String(count)}件取り除きました。この表示ではscriptを動かしません。scriptが作る内容は表示されません。`,
+  'script-not-loaded': (_target, count) =>
+    `読み込めないscript（登録されていないfileや外部のURLを参照するもの）を${String(count)}件取り除きました。`,
+  'noscript-removed': (_target, count) =>
+    `noscript要素を${String(count)}件取り除きました。scriptを動かす表示では、noscriptの中身は表示されません。`,
+  'asset-requested': (target) =>
+    `表示の中から ${target} を読み込もうとしましたが、登録されていないため読み込めませんでした。vo open <文書> --assets-root <dir> --asset ${target} で登録すると読み込めます（scriptが実行時に読み込むfileは、自動では登録しません）。`,
   'event-handler-removed': (_target, count) =>
     `onclickなどのevent属性を、${String(count)}個の要素から取り除きました。`,
   'embed-removed': (_target, count) =>
@@ -34,7 +40,7 @@ const DESCRIPTIONS: Record<string, Describe> = {
   'asset-hidden': (target) =>
     `${target} は読み込みません。名前が「.」で始まるfileやdirectory（.env、.gitなど）は、文書から参照できません。`,
   'asset-unsupported': (target) =>
-    `${target} は、この場所では使えない種類のfileです。使えるのは、画像（PNG・JPEG・WebP・GIF・AVIF・SVG）、CSS、font（WOFF・WOFF2）です。`,
+    `${target} は、この場所では使えない種類のfileです。使えるのは、画像（PNG・JPEG・WebP・GIF・AVIF・SVG）、CSS、font（WOFF・WOFF2）と、scriptを動かす表示でのscript（.js・.mjs）とJSON（--assetで登録したもの）です。`,
   'data-url-blocked': (target) =>
     `data URL（${target}）は使えません。data URLで使えるのは、PNG・JPEG・WebP・GIF・AVIFの画像だけです。`,
   'css-invalid': (target) =>

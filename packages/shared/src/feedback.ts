@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { canonicalJson } from './canonical-json.ts';
-import { documentIdSchema, revisionSchema } from './documents.ts';
+import { documentIdSchema, htmlModeSchema, revisionSchema } from './documents.ts';
 import { LIMITS } from './limits.ts';
 
 // 質問定義（仕様11.2）。任意のJSON Schemaではなく、決まった形だけを受け付ける。
@@ -333,6 +333,8 @@ export type FeedbackForAgent = z.infer<typeof feedbackForAgentSchema>;
 // 管理UIへ返す質問の状態。質問定義と回答案、文書の現在の版を含む。
 export const feedbackForUiSchema = feedbackForAgentSchema.extend({
   questionnaire: questionnaireSchema,
+  // 質問を作ったときに固定した表示方法。interactiveなら、HTMLから回答案を送れる。
+  renderMode: htmlModeSchema,
   draftVersion: z.number().int().nonnegative(),
   draftAnswers: answersSchema,
   // 文書の現在の版。固定した版と違えば、新しい版がある。
@@ -351,7 +353,7 @@ export const feedbackCreateParamsSchema = z
     revision: revisionSchema.optional(),
     // 文書を開いてから、その版へ質問する。
     view: z.string().min(1).optional(),
-    htmlMode: z.enum(['static']).optional(),
+    htmlMode: htmlModeSchema.optional(),
     assetsRoot: z.string().min(1).optional(),
     assets: z.array(z.string().min(1)).max(LIMITS.documentAssets).default([]),
     // 再試行で同じ質問を重ねて作らないための識別子。

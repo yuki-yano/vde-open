@@ -748,6 +748,195 @@ describe('SEC-016 / SEC-017 表示用listenerの応答', () => {
   });
 });
 
+describe('interactive（scriptを動かす表示）', () => {
+  it('許可した文書だけ、inlineと登録済みのscriptと、登録済みfileへの通信を許すCSPで配信する', async () => {
+    t.write('site/app.html', '<script>document.title = "x"</script><p>本文</p>');
+    const document = await open(['site/app.html', '--html-mode', 'interactive']);
+    const ui = await connectUi(t);
+    const response = await ui.api<GrantData>(`/documents/${document.documentId}/render-grants`, {
+      method: 'POST',
+      body: { mode: 'interactive' },
+    });
+    expect(response.status).toBe(200);
+    const grant = response.json.data;
+    const html = await previewGet(ui, grant, 'app.html');
+    expect(html.text).toContain('<script>document.title = "x"</script>');
+    const csp = String(html.headers['content-security-policy']);
+    const base = `${ui.previewOrigin}${ui.filesPath(grant).replace(/files\/$/, '')}`;
+    expect(csp.split('; ')).toEqual([
+      "default-src 'none'",
+      `script-src 'unsafe-inline' ${base}`,
+      `style-src 'unsafe-inline' ${base}`,
+      `img-src ${base} data:`,
+      `font-src ${base}`,
+      `connect-src ${base}`,
+      "object-src 'none'",
+      "frame-src 'none'",
+      "worker-src 'none'",
+      "base-uri 'none'",
+      "form-action 'none'",
+      `frame-ancestors ${ui.origin}`,
+      'sandbox allow-scripts',
+    ]);
+    expect(csp).not.toContain('allow-same-origin');
+    expect(csp).not.toContain('unsafe-eval');
+    // 同じ文書でも、staticの表示はscriptを動かさない。
+    const staticGrant = await ui.grant(document.documentId);
+    const staticHtml = await previewGet(ui, staticGrant, 'app.html');
+    expect(staticHtml.text).not.toContain('<script');
+    expect(String(staticHtml.headers['content-security-policy'])).toContain("script-src 'none'");
+  });
+
+  it('許可していない文書は、interactiveの表示を発行せず、管理UIの確認なしには許可しない', async () => {
+    t.write('site/app.html', '<p>本文</p>');
+    const document = await open(['site/app.html']);
+    const ui = await connectUi(t);
+    const refused = await ui.api(`/documents/${document.documentId}/render-grants`, {
+      method: 'POST',
+      body: { mode: 'interactive' },
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.json.error.code).toBe('E_INTERACTIVE_NOT_ALLOWED');
+    const unconfirmed = await ui.api(`/documents/${document.documentId}/html-mode`, {
+      method: 'POST',
+      body: { mode: 'interactive' },
+    });
+    expect(unconfirmed.json.error.code).toBe('E_CONFIRMATION_REQUIRED');
+    const enabled = await ui.api<{ interactiveAllowed: boolean }>(
+      `/documents/${document.documentId}/html-mode`,
+      { method: 'POST', body: { mode: 'interactive', confirmed: true } },
+    );
+    expect(enabled.json.data.interactiveAllowed).toBe(true);
+    // 再起動の後は、希望だけが残り、許可は付け直すまで外れる。
+    await t.run(['daemon', 'restart', '--json']);
+    expect(await list()).toEqual([
+      expect.objectContaining({ htmlMode: 'interactive', interactiveAllowed: false }),
+    ]);
+  });
+
+  it('登録されていないfileの読み込みは404で、その表示の権限を持つsessionだけが不足として取得できる', async () => {
+    t.write('site/app.html', '<p>本文</p>');
+    t.write('site/secret.json', '{"secret":true}');
+    const document = await open(['site/app.html', '--html-mode', 'interactive']);
+    const ui = await connectUi(t);
+    const grant = (
+      await ui.api<GrantData>(`/documents/${document.documentId}/render-grants`, {
+        method: 'POST',
+        body: { mode: 'interactive' },
+      })
+    ).json.data;
+    expect((await previewGet(ui, grant, 'secret.json')).status).toBe(404);
+    const missing = await ui.api<{ missing: string[] }>('/render-grants/missing', {
+      method: 'POST',
+      body: { grant: grant.grant },
+    });
+    expect(missing.json.data.missing).toEqual(['secret.json']);
+    const other = await connectUi(t);
+    const hidden = await other.api<{ missing: string[] }>('/render-grants/missing', {
+      method: 'POST',
+      body: { grant: grant.grant },
+    });
+    expect(hidden.json.data.missing).toEqual([]);
+  });
+});
+
+describe('質問の表示とHTMLからの回答案（仕様12.2、11.7）', () => {
+  const questionnaire = {
+    schemaVersion: 1,
+    title: '確認',
+    fieldOrder: ['layout'],
+    answerSchema: {
+      type: 'object',
+      properties: { layout: { type: 'string', title: '採用案', enum: ['A', 'B'] } },
+      required: ['layout'],
+      additionalProperties: false,
+    },
+  };
+
+  async function ask(args: string[]): Promise<{ requestId: string; revision: string }> {
+    t.write('q.json', JSON.stringify(questionnaire));
+    const result = await t.run(['ask', 'q.json', ...args, '--json']);
+    return result.json<{ request: { requestId: string; revision: string } }>().data.request;
+  }
+
+  it('質問の表示の権限は、質問が固定した版と表示方法で発行する', async () => {
+    t.write('site/app.html', '<p>本文</p><script>document.title = "x"</script>');
+    const interactive = await ask(['--view', 'site/app.html', '--html-mode', 'interactive']);
+    t.write('site/plain.html', '<p>本文</p><script>document.title = "x"</script>');
+    const plain = await ask(['--view', 'site/plain.html']);
+    // staticで作った後に許可しても、質問の表示はstatic。
+    await open(['site/plain.html', '--html-mode', 'interactive']);
+    const ui = await connectUi(t);
+    const issue = (requestId: string) =>
+      ui.api<GrantData & { mode: string; revision: string; bridge: unknown }>(
+        `/feedback/${requestId}/render-grants`,
+        { method: 'POST', body: {} },
+      );
+    const pinned = (await issue(interactive.requestId)).json.data;
+    expect(pinned).toMatchObject({
+      mode: 'interactive',
+      revision: interactive.revision,
+      bridge: { requestId: interactive.requestId },
+    });
+    const staticPinned = (await issue(plain.requestId)).json.data;
+    expect(staticPinned).toMatchObject({ mode: 'static', bridge: null });
+    expect((await previewGet(ui, staticPinned, 'plain.html')).text).not.toContain('<script');
+    // 文書の表示の発行では、質問を指定できない。
+    const refused = await ui.api('/documents/x/render-grants', {
+      method: 'POST',
+      body: { requestId: interactive.requestId },
+    });
+    expect(refused.status).toBe(400);
+  });
+
+  it('HTMLからの回答案の操作は、表示の権限が有効な間だけ、発行したsessionで受け付ける', async () => {
+    t.write('site/app.html', '<p>本文</p>');
+    const request = await ask(['--view', 'site/app.html', '--html-mode', 'interactive']);
+    const ui = await connectUi(t);
+    const { grant } = (
+      await ui.api<GrantData>(`/feedback/${request.requestId}/render-grants`, {
+        method: 'POST',
+        body: {},
+      })
+    ).json.data;
+    const ready = await ui.api<{ requestId: string; draftVersion: number }>(
+      '/render-grants/bridge/ready',
+      { method: 'POST', body: { grant } },
+    );
+    expect(ready.json.data).toMatchObject({ requestId: request.requestId, draftVersion: 0 });
+    const saved = await ui.api<{ draftVersion: number }>('/render-grants/bridge/draft', {
+      method: 'PUT',
+      body: { grant, expectedDraftVersion: 0, answers: { layout: 'B' } },
+    });
+    expect(saved.json.data.draftVersion).toBe(1);
+    // 古い版をもとにした置き換えは競合。
+    const stale = await ui.api('/render-grants/bridge/draft', {
+      method: 'PUT',
+      body: { grant, expectedDraftVersion: 0, answers: { layout: 'A' } },
+    });
+    expect(stale.json.error.code).toBe('E_DRAFT_CONFLICT');
+    // 別のsessionからは使えない。
+    const other = await connectUi(t);
+    const foreign = await other.api('/render-grants/bridge/ready', {
+      method: 'POST',
+      body: { grant },
+    });
+    expect(foreign.status).toBe(403);
+    expect(foreign.json.error.code).toBe('E_RENDER_GRANT_INVALID');
+    // 返却した後は、表示もHTMLからの操作も使えない。
+    await ui.api('/render-grants/release', { method: 'POST', body: { grants: [grant] } });
+    const released = await ui.api('/render-grants/bridge/draft', {
+      method: 'PUT',
+      body: { grant, expectedDraftVersion: 1, answers: { layout: 'A' } },
+    });
+    expect(released.status).toBe(403);
+    expect(released.json.error.code).toBe('E_RENDER_GRANT_INVALID');
+    const current = (await ui.api<{ draftAnswers: unknown }>(`/feedback/${request.requestId}`)).json
+      .data;
+    expect(current.draftAnswers).toEqual({ layout: 'B' });
+  });
+});
+
 describe('SEC-019 文書中のlinkから文書を開く', () => {
   interface LinkResult {
     status: string;
@@ -1079,14 +1268,14 @@ describe('assetの上限', () => {
     expect(notDirectory.exitCode).toBe(2);
     const mode = await t.run(['open', 'docs/a.md', '--html-mode', 'static', '--json']);
     expect(mode.exitCode).toBe(2);
-    const interactive = await t.run([
+    const unknownMode = await t.run([
       'open',
       'site/index.html',
       '--html-mode',
-      'interactive',
+      'dynamic',
       '--json',
     ]);
-    expect(interactive.exitCode).toBe(2);
+    expect(unknownMode.exitCode).toBe(2);
     const several = await t.run([
       'open',
       'site/index.html',

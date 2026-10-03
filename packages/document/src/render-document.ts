@@ -19,6 +19,10 @@ export interface RenderInput {
   assets: Array<{ logicalPath: string; role: AssetRole }>;
   // 登録済みのCSS fileの内容。参照を調べ直してから配信する。
   stylesheets: Array<{ logicalPath: string; text: string }>;
+  // HTMLの表示方法。interactiveでは、登録済みのscriptとevent handlerを残す。
+  mode: 'static' | 'interactive';
+  // interactiveのHTMLへ最初のscriptとして入れるSDK。入れないならnull。
+  sdkScript: string | null;
 }
 
 export interface RenderOutput {
@@ -49,7 +53,16 @@ export function renderDocument(input: RenderInput): RenderOutput {
     const info = analyzeMarkdownRender(staticInput, log);
     return { html: null, stylesheets, links: info.links, diagnostics: info.diagnostics };
   }
-  const result = transformStaticHtml(staticInput, log);
+  const result = transformStaticHtml(
+    {
+      ...staticInput,
+      interactive: input.mode === 'interactive',
+      ...(input.mode === 'interactive' && input.sdkScript !== null
+        ? { sdkScript: input.sdkScript }
+        : {}),
+    },
+    log,
+  );
   return { html: result.html, stylesheets, links: result.links, diagnostics: result.diagnostics };
 }
 

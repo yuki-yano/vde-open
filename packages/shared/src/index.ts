@@ -1,3 +1,4 @@
+export * from './bridge.ts';
 export * from './canonical-json.ts';
 export * from './documents.ts';
 export * from './envelope.ts';

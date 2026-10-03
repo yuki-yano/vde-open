@@ -136,6 +136,7 @@ export class FeedbackService {
     return {
       ...this.#toAgent(record),
       questionnaire: structuredClone(record.questionnaire),
+      renderMode: record.renderMode,
       draftVersion: record.draftVersion,
       draftAnswers: structuredClone(record.draftAnswers),
       currentRevision: document?.currentRevision ?? null,
@@ -283,7 +284,9 @@ export class FeedbackService {
         requestId,
         documentId,
         revision: pinned,
-        renderMode: 'static',
+        // 表示方法も、質問を作ったときのものに固定する（仕様11.4）。scriptの実行を許可済みの
+        // interactiveのHTMLだけが、HTMLから回答案を送れる質問になる。
+        renderMode: this.#documents.interactiveAllowed(documentId) ? 'interactive' : 'static',
         questionnaireHash,
         questionnaire,
         status: 'pending',
@@ -469,12 +472,16 @@ export class FeedbackService {
   }
 
   // 回答案を置き換える。もとにした版が違えば、上書きせずに競合を返す（仕様11.6）。
+  // authorizeは、保存のtransactionの中（先に並んだ操作がcommitされた後）で呼ぶ認可の確認。
+  // HTMLからの回答案のように、受け付けた後に権限が失効しうる経路で使う。
   async updateDraft(
     requestId: string,
     rawParams: unknown,
+    options: { authorize?: () => void } = {},
   ): Promise<ServiceResult<{ draftVersion: number }>> {
     const params = feedbackDraftParamsSchema.parse(rawParams);
     const record = await this.#store.transaction((tx) => {
+      options.authorize?.();
       const current = this.#require(tx.state, requestId);
       if (current.status !== 'pending') {
         throw new VdeError('E_REQUEST_NOT_PENDING', 'この質問は、回答を受け付けていません。', {

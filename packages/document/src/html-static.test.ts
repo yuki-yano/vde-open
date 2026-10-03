@@ -324,3 +324,91 @@ describe('登録済みのassetだけを残す', () => {
     expect(result.html).toBe(source);
   });
 });
+
+describe('interactive（scriptを動かす表示）の変換', () => {
+  function interactive(source: string, assets: Record<string, AssetRole> = {}, sdkScript?: string) {
+    return transformStaticHtml({
+      source,
+      documentLogicalPath: 'pages/index.html',
+      assets: new Map(Object.entries(assets)),
+      interactive: true,
+      ...(sdkScript === undefined ? {} : { sdkScript }),
+    });
+  }
+
+  it('inlineのscript、登録済みのscript file、event属性は残す。未登録・外部のscriptは要素ごと外す', () => {
+    const result = interactive(
+      `<script>window.a = 1</script>
+       <script type="module" src="/js/app.mjs"></script>
+       <script src="missing.js"></script>
+       <script src="https://cdn.example/x.js"></script>
+       <button onclick="go()">押す</button>`,
+      { 'js/app.mjs': 'script' },
+    );
+    const found = inspect(result.html);
+    expect(found.tags.filter((tag) => tag === 'script')).toHaveLength(2);
+    expect(result.html).toContain('<script>window.a = 1</script>');
+    // root-relativeの参照は、文書からの相対pathへ直す。
+    expect(result.html).toContain('<script type="module" src="../js/app.mjs"></script>');
+    expect(found.attributes).toContain('onclick');
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        { code: 'script-not-loaded', target: null, count: 2 },
+        { code: 'asset-not-registered', target: 'pages/missing.js', count: 1 },
+        { code: 'remote-asset-blocked', target: 'https://cdn.example/x.js', count: 1 },
+      ]),
+    );
+  });
+
+  it('埋め込み・base・自動の遷移・先読み・formの送信先・popup・download・pingはstaticと同じく外す', () => {
+    const result = interactive(
+      `<base href="https://evil.example/"><meta http-equiv="refresh" content="0;url=https://evil.example/">
+       <link rel="preconnect" href="https://evil.example"><link rel="modulepreload" href="x.js">
+       <iframe src="https://evil.example"></iframe><iframe srcdoc="<script>1</script>"></iframe>
+       <object data="x"></object><embed src="x"><portal src="x"></portal>
+       <form action="https://evil.example/"><button formaction="https://evil.example/">送る</button></form>
+       <a href="https://evil.example/" target="_blank" ping="https://evil.example/" download>link</a>
+       <noscript><img src="https://evil.example/pixel.png"></noscript>
+       <svg><script>1</script></svg>`,
+    );
+    const found = inspect(result.html);
+    for (const tag of ['base', 'iframe', 'object', 'embed', 'portal', 'noscript', 'svg']) {
+      expect(found.tags).not.toContain(tag);
+    }
+    expect(found.tags.filter((tag) => tag === 'meta' || tag === 'link')).toEqual([]);
+    for (const name of ['action', 'formaction', 'target', 'ping', 'download', 'srcdoc', 'href']) {
+      expect(found.attributes).not.toContain(name);
+    }
+    expect(result.links).toHaveLength(1);
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
+      expect.arrayContaining([
+        'noscript-removed',
+        'embed-removed',
+        'base-removed',
+        'meta-refresh-removed',
+      ]),
+    );
+  });
+
+  it('SDKは、headの最初のscriptとして入れる。scriptを閉じる文字列を含むSDKは入れない', () => {
+    const result = interactive(
+      '<!doctype html><html><head><script>first()</script></head><body></body></html>',
+      {},
+      'window.sdk = 1;',
+    );
+    expect(result.html).toContain('<head><script>window.sdk = 1;</script><script>first()</script>');
+    expect(() => interactive('<p>x</p>', {}, 'a = "</script><script>evil()"')).toThrow();
+  });
+
+  it('staticでは、同じ文書のscriptとevent属性を残さず、SDKも入れない', () => {
+    const result = transformStaticHtml({
+      source: '<script>1</script><button onclick="go()">押す</button>',
+      documentLogicalPath: 'index.html',
+      assets: new Map(),
+      sdkScript: 'window.sdk = 1;',
+    });
+    const found = inspect(result.html);
+    expect(found.tags).not.toContain('script');
+    expect(found.attributes).not.toContain('onclick');
+  });
+});

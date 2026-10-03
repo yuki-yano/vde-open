@@ -1,4 +1,4 @@
-import type { RenderGrantResult } from '@vde-open/shared';
+import type { HtmlMode, RenderGrantResult } from '@vde-open/shared';
 import { useEffect, useRef, useState } from 'react';
 
 import type { Api } from './api.ts';
@@ -44,6 +44,17 @@ export function splitRetired(
   };
 }
 
+// 表示の取得の条件。modeとrequestIdも、版と同じく、表示の権限を分ける。
+export interface GrantOptions {
+  mode: HtmlMode;
+  // 回答待ちの質問を表示するなら、その質問。版と表示方法はdaemonが質問から決める（modeは使わない）。
+  requestId: string | null;
+  // 同じ条件で、新しい表示（新しいinstance）として取り直すときに変える値。
+  nonce: number;
+}
+
+const STATIC_OPTIONS: GrantOptions = { mode: 'static', requestId: null, nonce: 0 };
+
 // 表示する版ごとに、表示用の権限を取得する。
 // updatedAtは、文書の状態が最後に更新された時刻（一覧のsummaryの値）。
 //
@@ -55,13 +66,15 @@ export function useRenderGrant(
   documentId: string,
   revision: string | null,
   updatedAt: string,
+  options: GrantOptions = STATIC_OPTIONS,
 ): GrantState {
+  const { mode, requestId, nonce } = options;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   // 表示に使っている権限と、その権限の対象（文書と版）。
   const held = useRef<{ key: string; grant: string } | null>(null);
   // 表示から外すことにした権限。画面の差し替えが反映された後に返す。
   const retired = useRef<string[]>([]);
-  const key = `${documentId}\n${revision ?? ''}`;
+  const key = `${documentId}\n${revision ?? ''}\n${mode}\n${requestId ?? ''}\n${String(nonce)}`;
   const shown = loaded !== null && loaded.key === key ? loaded : null;
   const fetchToken = fetchTokenOf(shown, updatedAt);
   // この描画で画面に出す表示の権限。
@@ -79,7 +92,11 @@ export function useRenderGrant(
       return undefined;
     }
     let cancelled = false;
-    void api.renderGrant(documentId, revision).then(
+    const issuing =
+      requestId === null
+        ? api.renderGrant(documentId, revision, { mode })
+        : api.feedbackRenderGrant(requestId);
+    void issuing.then(
       (grant) => {
         if (cancelled) {
           // 取得を待っている間に不要になった。表示には使っていないので、そのまま返す。
@@ -118,7 +135,7 @@ export function useRenderGrant(
     return () => {
       cancelled = true;
     };
-  }, [api, documentId, revision, key, fetchToken]);
+  }, [api, documentId, revision, mode, requestId, key, fetchToken]);
 
   // 画面の更新のたびに、その後で、表示から外した権限を返す。
   // effectは、自分が属する描画が画面へ反映された後に動く。その描画で画面に出している権限は返さない。

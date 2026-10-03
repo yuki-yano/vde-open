@@ -131,14 +131,9 @@ function parseFormat(value: string): 'auto' | 'markdown' | 'html' {
   throw new InvalidArgumentError('--formatはauto、markdown、htmlのいずれかです。');
 }
 
-function parseHtmlMode(value: string): 'static' {
-  if (value === 'static') return value;
-  if (value === 'interactive') {
-    throw new InvalidArgumentError(
-      'interactive（scriptを動かす表示）は、この版ではまだ使えません。staticを指定してください。',
-    );
-  }
-  throw new InvalidArgumentError('--html-modeはstaticを指定してください。');
+function parseHtmlMode(value: string): 'static' | 'interactive' {
+  if (value === 'static' || value === 'interactive') return value;
+  throw new InvalidArgumentError('--html-modeはstaticかinteractiveを指定してください。');
 }
 
 function describeDocument(document: DocumentSummary): string {
@@ -176,7 +171,7 @@ interface OpenOptions {
   key?: string;
   recursive: boolean;
   watch: boolean;
-  htmlMode?: 'static';
+  htmlMode?: 'static' | 'interactive';
   assetsRoot?: string;
   asset: string[];
   open?: boolean;
@@ -197,7 +192,7 @@ interface AskOptions {
   document?: string;
   revision?: string;
   view?: string;
-  htmlMode?: 'static';
+  htmlMode?: 'static' | 'interactive';
   assetsRoot?: string;
   asset: string[];
   operationId?: string;
@@ -398,7 +393,11 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     .option('--key <key>', 'stdinの文書を同じ1件として更新するためのkey。1文書のときだけ')
     .option('-R, --recursive', 'directoryを再帰的に列挙する', false)
     .option('-w, --watch', 'directory／globに新しく現れた文書も開く', false)
-    .option('--html-mode <mode>', 'HTMLの表示方法。static（scriptを動かさない）', parseHtmlMode)
+    .option(
+      '--html-mode <mode>',
+      'HTMLの表示方法。static（既定。scriptを動かさない）、interactive（scriptを動かすことを許可する）',
+      parseHtmlMode,
+    )
     .option(
       '--assets-root <dir>',
       '画像やCSSなどのlocal fileを読める範囲。指定がなければ、文書のあるdirectory',
@@ -722,7 +721,11 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     .option('--document <documentId>', '開いている文書へ質問する')
     .option('--revision <revision>', '--documentの、質問する版。指定がなければ現在の版')
     .option('--view <path>', '文書を開いてから、その版へ質問する')
-    .option('--html-mode <mode>', '--viewで開くHTMLの表示方法。static', parseHtmlMode)
+    .option(
+      '--html-mode <mode>',
+      '--viewで開くHTMLの表示方法。interactiveなら、HTMLから回答案を送れる',
+      parseHtmlMode,
+    )
     .option('--assets-root <dir>', '--viewで開く文書の、local fileを読める範囲')
     .option(
       '--asset <path>',

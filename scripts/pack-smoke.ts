@@ -213,6 +213,34 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     }
     if (htmlId) runJson('vo', ['close', htmlId]);
 
+    // 手順6の続き: 導入先だけで、scriptを動かす表示と、HTMLへの同梱SDKの注入が動く。
+    writeFileSync(join(installDir, 'site', 'app.html'), '<script>document.title="app"</script>');
+    const interactiveAsk = runJson<{ request: { requestId: string; documentId: string } }>('vo', [
+      'ask',
+      'q.json',
+      '--view',
+      'site/app.html',
+      '--html-mode',
+      'interactive',
+    ]).request;
+    const bridged = await post<{ documentUrl: string; bridge: { instanceId: string } | null }>(
+      `/feedback/${interactiveAsk.requestId}/render-grants`,
+      {},
+      token,
+    );
+    const appResponse = await fetch(bridged.documentUrl);
+    const appHtml = await appResponse.text();
+    if (
+      bridged.bridge === null ||
+      !appHtml.includes(bridged.bridge.instanceId) ||
+      !appHtml.includes('<script>document.title="app"</script>') ||
+      !(appResponse.headers.get('content-security-policy') ?? '').includes('sandbox allow-scripts')
+    ) {
+      fail('scriptを動かす表示と、同梱SDKの注入が、導入先で動いていません');
+    }
+    runJson('vo', ['feedback', 'cancel', interactiveAsk.requestId]);
+    runJson('vo', ['close', interactiveAsk.documentId]);
+
     runJson('vo', ['close', openedId]);
     if (runJson<Documents>('vde-open', ['list']).documents.length !== 0) {
       fail('voのcloseがvde-openの一覧に反映されていません');

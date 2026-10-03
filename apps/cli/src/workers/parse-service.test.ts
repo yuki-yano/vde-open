@@ -92,6 +92,8 @@ parentPort.on('message', (request) => {
         { logicalPath: 'a.png', role: 'image' },
         { logicalPath: 's.css', role: 'style' },
       ],
+      mode: 'static',
+      sdkScript: null,
       stylesheets: [
         {
           logicalPath: 's.css',

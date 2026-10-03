@@ -64,7 +64,7 @@ export const feedbackRecordSchema = z.strictObject({
   requestId: requestIdSchema,
   documentId: documentIdSchema,
   revision: revisionSchema,
-  renderMode: z.enum(['static']),
+  renderMode: htmlModeSchema,
   questionnaireHash: sha256Schema,
   questionnaire: questionnaireSchema,
   status: feedbackStatusSchema,

@@ -18,7 +18,7 @@
 | P3 | 完了報告済み | security fixture、path traversal、他文書/API遮断 |
 | P4 | 完了報告済み | Agent検索benchmark fixtureと閉じた文書除外 |
 | P5 | 完了報告済み | 保存前成功なし、タイムアウト・restart・二重送信テスト |
-| P6 | 未着手 | HTML回答案→本体確認→CLI取得、偽submit拒否 |
+| P6 | 完了報告済み | HTML回答案→本体確認→CLI取得、偽submit拒否 |
 | P7 | 未着手 | 全必須受け入れ項目、最終実行結果、制約の説明 |
 
 ## P0の記録
@@ -311,6 +311,49 @@ P5時点の制約:
 - `--view`は、文書を開くcommitと質問を作るcommitが別（ADR-0011）。
 - Windowsは未検証。
 
+## P6の記録
+
+実行環境: macOS（Darwin 25.6.0、arm64）、Node.js 24.21.0、pnpm 12.8.1、Chromium（Playwright 1.63.0同梱のChrome Headless Shell 153）。
+
+| command | 結果 |
+|---|---|
+| `pnpm format:check` | exit 0 |
+| `pnpm lint` | exit 0 |
+| `pnpm typecheck` | exit 0 |
+| `pnpm test` | exit 0（53 files、505 tests） |
+| `pnpm build` | exit 0 |
+| `pnpm test:pack` | exit 0（手順6に、導入先だけでscriptを動かす表示とSDKの注入が動くことの確認を追加） |
+| `pnpm test:e2e` | exit 0（Chromiumで38件） |
+
+実装したもの:
+
+- scriptを動かす表示（interactive）。文書ごとの希望をstateに残し、scriptの実行の許可はdaemonのmemoryだけに持つ（ADR-0012）。CLIの`--html-mode interactive`（`open`、`ask --view`）と、管理UIの確認つきの操作（`POST /documents/:id/html-mode`）で許可する。再起動・閉じる操作・stdinの更新・`--html-mode static`で外れる。
+- interactiveの変換（scriptとevent属性を残し、登録済みのscriptだけを読み込む）、CSP（`script-src 'unsafe-inline' GRANT_BASE`、`connect-src GRANT_BASE`、`sandbox allow-scripts`）、iframeの`sandbox="allow-scripts"`。回答待ちの質問の表示の権限（`POST /feedback/:id/render-grants`）と、HTMLからの操作の中継（`POST /render-grants/bridge/ready`、`PUT /render-grants/bridge/draft`）。未登録のfileの読み込みの記録と、管理UIでの案内（`POST /render-grants/missing`、通知`render-diagnostics`）。
+- 同梱SDK（`window.vde.ready()`、`window.vde.feedback.updateDraft`・`onDraftChanged`）と、MessagePortでの通信（`apps/cli/src/render/bridge-sdk.ts`、`apps/web/src/lib/bridge-host.ts`、`apps/web/src/lib/use-bridge.ts`）。SDKは、interactiveで作った回答待ちの質問を、その版で表示するときだけ入れる。
+- 管理UI。表示方法の表示（「scriptを動かす表示」「静的表示」）、再起動の後の再有効化、静的表示への切り替え、HTMLとの通信の状態と「表示し直す」。回答待ちの質問がある文書は、質問を取得するまで表示する版を決めない。
+- `docs/agent-usage.md`に、interactiveとSDKの使い方と限界を追記。
+
+レビュー: 1往復目でmust-fix 4件とshould-fix 3件、2往復目でmust-fix 2件とshould-fix 1件、3往復目でshould-fix 1件（判定はマージ可）。すべて修正した。3往復目の指摘への対応は、P7のレビューで確認を受ける。P5の3往復目の指摘への対応も、1往復目で確認を受けた（指摘なし）。以下は1往復目から順に、各往復の内容。
+
+- 許可を外した後に許可し直すと、前の許可で発行したinteractiveの表示が使えるようになった → 許可に世代を持たせ、表示の権限を発行したときの世代に結び付けた。
+- 表示の権限を返却・失効した後も、表示中のHTMLから回答案を保存できた（管理UIが、自分のsessionで管理APIを呼んでいた） → HTMLからの操作を、表示の権限とともに中継する専用の経路（`POST /render-grants/bridge/ready`、`PUT /render-grants/bridge/draft`）にし、daemonが権限・session・質問を毎回確かめる。失効の応答の後に通信を終える。
+- 質問の表示方法が、質問に固定した表示方法ではなく、いまの文書の表示方法で決まっていた（staticで作った質問に、後から許可したscriptが動いた） → 仕様12.2の`POST /feedback/:id/render-grants`を実装し、版と表示方法をdaemonが質問から決めるようにした。文書の表示の発行では、質問を指定できない。
+- 原文の表示からプレビューへ戻ると、新しいiframeとの通信が始まらないのに、通信中と表示していた → iframeを画面から外したら通信を終え、プレビューへ戻ったら新しい表示として発行し直すようにした。
+- （should-fix）HTMLから届いた回答案を、JSONへ変換してから検証していて、Dateが文字列になり、undefinedのfieldが消えたまま受け付けていた → 受け取った値のまま検証するようにした。
+- （should-fix）仕様12.2の`POST /feedback/:id/render-grants`がなかった → 上記のとおり実装した。
+- （should-fix）scriptを動かす表示の説明で「外部へは通信できません」と断定していた → 登録したfileへの読み込みと通信に限ることと、iframe自身の遷移などすべての外部への通信を止めるものではないことを分けて書いた。
+- （2往復目）表示の権限が失効した後も、別の画面による回答案の変更を、表示中のHTMLへ知らせていた（HTMLから要求しない限り、通信も終わらなかった） → 知らせる回答案も、表示の権限を確かめる経路で取得し、失効していれば知らせずに通信を終えるようにした。
+- （2往復目）入口で権限を確かめた後、保存の順番を待つ間に、権限の返却・scriptの許可の取消・sessionの失効が起きても、HTMLからの回答案を保存していた → 保存のtransactionの中でも権限を確かめ直すようにした。
+- （2往復目、should-fix）変換を待つ間に質問が終わっても（中止・確定・削除）、SDKを入れた表示を発行していた → 変換を終えて登録する直前に、質問を確かめ直すようにした。
+- （3往復目、should-fix）保存の待ち行列の途中で権限を失効させる試験が、HTMLからの保存が並んだことを固定50msの待ちで推定していた（処理が遅れると、入口での拒否だけでも成功してしまう） → stateの更新の登録を数え、並んだことを確かめてから失効させるようにした（入口で拒否されると、並ばないので試験が終わらずに失敗する）。
+- この対応の検証中に、全体の試験の負荷の下で、P3の表示の権限のhookのDOMテスト（固定30msの待ち）が1回失敗した → 起きることを確かめる箇所は、条件が成り立つまで待つ形に直した（P3で確かめた修正を外すと、今も失敗する）。
+
+P6時点の制約:
+
+- interactiveは、任意の敵対的なscriptを安全に動かす仕組みではない。iframe自身の遷移、CPU・memoryの消費までは止めない。
+- 管理UIから、staticの文書をinteractiveへ変える操作は、再有効化（希望がinteractiveの文書）だけ。新しくinteractiveにするときは、CLIで指定する。
+- Windowsは未検証。e2eはChromiumだけ。
+
 ## 受け入れテストの対応
 
 状態は「未着手／PASS／FAIL／NOT RUN」。担当は、そのIDが最後に必要とする機能がそろうフェーズ。IDをPASSにするのは担当フェーズで全条件を検証したときだけで、先行フェーズで一部だけ検証したものは備考に部分検証として書く。
@@ -390,16 +433,16 @@ P5時点の制約:
 | SEC-001 | P2 | PASS | `tests/integration/http.test.ts`、`apps/cli/src/server/session-service.test.ts`、`tests/e2e/viewer.spec.ts` |  |
 | SEC-002 | P2 | PASS | `tests/integration/http.test.ts` |  |
 | SEC-003 | P2 | PASS | `tests/integration/http.test.ts`、`tests/e2e/viewer.spec.ts` |  |
-| SEC-004 | P6 | 未着手 |  | iframe内でscriptを動かす検証が必要。P3で部分検証済み（`tests/e2e/html.spec.ts`: 空のsandbox、別origin、`allow-same-origin`なし、管理のtokenと表示の権限が互いに使えない） |
+| SEC-004 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/e2e/html.spec.ts`、`tests/integration/preview.test.ts` | scriptを動かす表示のiframeから、管理画面のDOM・sessionStorage・localStorage・cookie・管理APIに触れられない。`allow-same-origin`なし。staticでの検証はP3 |
 | SEC-005 | P3 | PASS | `packages/document/src/html-static.test.ts`、`tests/e2e/html.spec.ts` |  |
 | SEC-006 | P3 | PASS | `packages/document/src/html-static.test.ts`、`tests/e2e/html.spec.ts` | 外部への要求は、browserのrequestと、記録用のserverの両方で0件を確認 |
-| SEC-007 | P6 | 未着手 |  | interactiveが必要なためP6 |
-| SEC-008 | P6 | 未着手 |  | interactiveが必要なためP6 |
+| SEC-007 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/integration/preview.test.ts` | `--asset`で登録したJSON（inline scriptの`fetch('./data.json')`）とmodule（inline moduleの相対import）を読める。未登録の相対pathは404。管理APIと外部へのfetchはCSPの`connect-src`で拒否 |
+| SEC-008 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`packages/document/src/html-static.test.ts` | popup・上位の画面の移動・formの送信・download・worker（data:・blob:）が起きない。iframe自身の遷移までは止めない（仕様10.1） |
 | SEC-009 | P3 | PASS | `packages/document/src/references.test.ts`、`tests/integration/preview.test.ts` |  |
 | SEC-010 | P3 | PASS | `tests/integration/preview.test.ts` |  |
 | SEC-011 | P3 | PASS | `tests/integration/preview.test.ts` | 別のprocessが同時にpathを差し替える攻撃までは防いでいない |
 | SEC-012 | P3 | PASS | `packages/document/src/css-transform.test.ts`、`tests/integration/preview.test.ts` | 外部への通信は、応答のpolicy（CSP）でも止める。変換は、それに頼らずに取り除く |
-| SEC-013 | P6 | 未着手 |  | module importの実行にはinteractiveが必要。P3で部分検証済み（`tests/integration/preview.test.ts`: 登録していないpathは404で、同じdirectoryのfileも公開されない） |
+| SEC-013 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/integration/preview.test.ts`、`apps/cli/src/render/render-service.test.ts` | 未登録のmoduleのimportは404で、rootを公開しない。読み込もうとしたfileを表示ごとに記録し、管理UIで`--asset`での登録を案内する |
 | SEC-014 | P3 | PASS | `tests/integration/preview.test.ts` |  |
 | SEC-015 | P3 | PASS | `tests/integration/preview.test.ts`、`apps/cli/src/render/render-service.test.ts`、`apps/web/src/lib/use-render-grant.dom.test.tsx`、`tests/e2e/html.spec.ts` | UIが権限を返す順序についての最後の修正は、commit後の再レビューで指摘なし |
 | SEC-016 | P3 | PASS | `tests/integration/preview.test.ts` |  |
@@ -409,26 +452,26 @@ P5時点の制約:
 | SEC-020 | P3 | PASS | `tests/e2e/release.spec.ts` | 配布物（`apps/cli/dist`）を対象に確認 |
 | FB-001 | P5 | PASS | `tests/e2e/feedback.spec.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx` | 回答案の保存の応答と再取得の順番、空の回答の明示 |
 | FB-002 | P5 | PASS | `packages/shared/src/feedback.test.ts`、`apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` | Zodのrecordが`__proto__`を黙って捨てるので、JSONの読み込みで拒否する（ADR-0011） |
-| FB-003 | P6 | 未着手 |  | P5で部分検証済み（`packages/shared/src/feedback.test.ts`: 回答案は未完成を許し、型・値・大きさを検証、64KiB）。SDKの最大サイズはP6 |
+| FB-003 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`packages/shared/src/feedback.test.ts`、`apps/web/src/lib/bridge-host.test.ts` | 質問定義と回答案がともに最大に近い大きさ（日本語で各60KiB程度）でも、SDKのready（2回）とupdateDraftが成立する。64KiBを超える回答案、Date・undefined・非有限の数などの値は、変換せずに拒否 |
 | FB-004 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
 | FB-005 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
 | FB-006 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
-| FB-007 | P6 | 未着手 |  |  |
-| FB-008 | P6 | 未着手 |  |  |
-| FB-009 | P6 | 未着手 |  |  |
-| FB-010 | P6 | 未着手 |  |  |
-| FB-011 | P6 | 未着手 |  | P5で部分検証済み（`apps/cli/src/feedback/service.test.ts`: もとにした回答案の版が違えば`E_DRAFT_CONFLICT`、上書きしない）。SDKのbaseDraftVersionはP6 |
+| FB-007 | P6 | PASS | `tests/e2e/interactive.spec.ts` | HTMLのupdateDraft→回答panelでの送信→CLIのwaitで、回答・質問・版・submissionが一致する |
+| FB-008 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/web/src/lib/bridge-host.test.ts` | HTMLが横取りしたportから送ったsubmit・ack・cancel・search・read・open・confirmOlderRevisionは`E_METHOD_NOT_ALLOWED`。質問は回答待ちのまま |
+| FB-009 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/web/src/lib/bridge-host.test.ts`、`tests/integration/preview.test.ts`、`apps/cli/src/render/render-service.test.ts` | portは表示したiframe（`event.source`で確認）へ1回だけ渡す。管理UIのwindowからの要求、読み直した後の要求には渡さない。古いinstanceのframeは通信を終える。原文の表示へ切り替えたら通信を終え、プレビューへ戻ったら新しい表示として始める。表示の権限の返却・失効の後は、daemonがHTMLからの操作を拒否し、通信を終える |
+| FB-010 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/web/src/lib/bridge-host.test.ts` | 形の違うframe、128KiBを超えるframe、1秒に20件を超えるframeで通信を終え、管理UIからの回答とdaemonは動き続ける |
+| FB-011 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/web/src/lib/bridge-host.test.ts`、`apps/cli/src/feedback/service.test.ts` | 別の画面の更新をHTMLが`onDraftChanged`で受け取った後でも、古い`baseDraftVersion`でのupdateDraftは`E_DRAFT_CONFLICT`で、上書きしない。SDKは版を読み替えない |
 | FB-012 | P5 | PASS | `apps/cli/src/feedback/service.test.ts` |  |
 | FB-013 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`apps/cli/src/server/http/feedback-http.test.ts` | commitの途中で管理APIの接続を切り、同じ送信IDで再送しても1回だけ確定する。保存できなかった送信には成功を返さず、回答待ちのまま |
 | FB-014 | P5 | PASS | `apps/cli/src/feedback/service.test.ts` |  |
-| FB-015 | P6 | 未着手 |  | P5で部分検証済み（`tests/e2e/feedback.spec.ts`、`apps/web/src/components/workspace.dom.test.tsx`: 回答待ちの間は質問の版を表示し続け、更新の停止より優先する。新しい版の警告を出す）。HTMLとSDKはP6 |
-| FB-016 | P6 | 未着手 |  | P5で部分検証済み（`apps/cli/src/feedback/service.test.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx`: 旧版の確認がなければ送信しない、確認後にさらに版が変われば確認し直し、確認した版を送る）。SDKから確認できないことはP6 |
+| FB-015 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/e2e/feedback.spec.ts`、`apps/web/src/components/workspace.dom.test.tsx`、`apps/cli/src/render/render-service.test.ts`、`tests/integration/preview.test.ts` | 質問の間にHTMLとCSSが更新されても、質問の版（scriptとCSSを含む）を表示し続け、新しい版の警告を出す。SDKに旧版の確認はない。質問の表示方法は質問に固定し、staticで作った質問は、後から許可してもscriptを動かさない |
+| FB-016 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/cli/src/feedback/service.test.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx` | 旧版の確認は回答panelだけで行い、確認した版を送る。確認後に版が変われば確認し直し |
 | FB-017 | P5 | PASS | `tests/integration/feedback.test.ts`、`apps/cli/src/feedback/service.test.ts` | browserを閉じる操作は、管理UIのsessionの終了で確認 |
 | FB-018 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts`、`tests/e2e/feedback.spec.ts` |  |
 | FB-019 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts`、`tests/e2e/feedback.spec.ts` |  |
 | FB-020 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
 | FB-021 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
-| FB-022 | P6 | 未着手 |  |  |
+| FB-022 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/integration/preview.test.ts`、`apps/cli/src/documents/service-html-mode.test.ts`、`apps/cli/src/render/render-service.test.ts` | 再起動の後、確定・回答待ちの内容は残る。前の画面のportからは回答案を変えられない。scriptの実行は、管理UIで許可し直すまで静的表示。許可し直しても、前の許可で発行した表示は戻らない |
 | UX-001 | P7 | 未着手 |  |  |
 | UX-002 | P7 | 未着手 |  |  |
 | UX-003 | P7 | 未着手 |  |  |
@@ -445,7 +488,7 @@ P5時点の制約:
 
 ## 引継ぎ事項
 
-- 次はP6（interactive iframe、限定SDK、MessagePort、旧版確認）。質問と回答は`apps/cli/src/feedback/service.ts`、契約は`packages/shared/src/feedback.ts`、回答panelは`apps/web/src/components/feedback-panel.tsx`。文書の操作は`apps/cli/src/documents/service.ts`、検索は`apps/cli/src/search/`、解析と検索のworkerは`apps/cli/src/workers/`。
+- 次はP7（UI仕上げ（`Cmd/Ctrl+K`の検索UIを含む）、負荷、cross-platform、pack-install、README、CI定義、全体DoD）。interactiveとSDKはADR-0012、HTMLの変換は`packages/document/src/html-static.ts`、SDKの本体は`apps/cli/src/render/bridge-sdk.ts`、本体側の通信は`apps/web/src/lib/bridge-host.ts`と`use-bridge.ts`。質問と回答は`apps/cli/src/feedback/service.ts`、回答panelは`apps/web/src/components/feedback-panel.tsx`。
 - stateの形式に質問と回答（`feedbackRequests`）を足した。P4までの開発用state（`.dev-home`）は読めないので、消して作り直す。
 - 管理HTTPは`apps/cli/src/server/http/management.ts`、表示用のlistenerは`apps/cli/src/server/http/preview.ts`、UIは`apps/web/src/`、Markdownの描画は`packages/document/src/react.tsx`、HTMLの静的変換は`packages/document/src/html-static.ts`。
 - stateの形式に項目を足した（版ごとのassetと文書の位置、文書ごとのassets-root）。P2までの開発用state（`.dev-home`）は読めないので、消して作り直す。

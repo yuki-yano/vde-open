@@ -21,6 +21,8 @@ function document(path: string | null, title = 'doc'): DocumentSummary {
     updatedAt: '',
     order: counter,
     pendingRequestIds: [],
+    htmlMode: null,
+    interactiveAllowed: false,
   };
 }
 

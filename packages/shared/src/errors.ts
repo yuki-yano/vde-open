@@ -41,6 +41,8 @@ export const ERROR_SPECS = {
   E_UNAUTHORIZED: { exit: ExitCode.forbidden, retryable: false },
   E_INSECURE_PATH: { exit: ExitCode.forbidden, retryable: false },
   E_ASSET_REJECTED: { exit: ExitCode.forbidden, retryable: false },
+  E_INTERACTIVE_NOT_ALLOWED: { exit: ExitCode.forbidden, retryable: false },
+  E_RENDER_GRANT_INVALID: { exit: ExitCode.forbidden, retryable: false },
   // 上限
   E_LIMIT_EXCEEDED: { exit: ExitCode.limit, retryable: false },
   E_MAX_BYTES_TOO_SMALL: { exit: ExitCode.limit, retryable: false },

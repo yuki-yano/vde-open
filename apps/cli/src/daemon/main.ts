@@ -186,7 +186,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     const searching = search;
     const emit = (event: DocumentEvent) => {
       // 開いている文書、公開している版、読めるかどうかが変わったら、indexを合わせる。
-      if (event.type !== 'focus-requested' && event.type !== 'feedback-changed') searching.sync();
+      if (
+        event.type !== 'focus-requested' &&
+        event.type !== 'feedback-changed' &&
+        event.type !== 'render-diagnostics'
+      ) {
+        searching.sync();
+      }
       events.publish(event);
       // 開いている文書が変わったら、監視するdirectoryと、表示の権限も合わせる。
       if (event.type === 'catalog-changed') {
@@ -222,6 +228,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       sessions,
       parse: parser,
       previewOrigin: () => previewOrigin,
+      // 表示の中から登録されていないfileを読み込もうとしたら、UIへ知らせる（pathは通知に含めない）。
+      onMissing: (documentId) => emit({ type: 'render-diagnostics', documentId }),
     });
     pruneGrants = () => render.pruneClosed();
     preview = await startPreviewServer(

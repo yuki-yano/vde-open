@@ -39,6 +39,7 @@ function requestOf(overrides: Partial<FeedbackForUi> = {}): FeedbackForUi {
     cancellation: null,
     acknowledgedAt: null,
     questionnaire,
+    renderMode: 'static',
     draftVersion: 0,
     draftAnswers: {},
     currentRevision: REV1,

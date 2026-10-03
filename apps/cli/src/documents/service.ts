@@ -19,6 +19,7 @@ import { scanReferences, type ScanKind, type ScannedReference } from '@vde-open/
 import {
   closeParamsSchema,
   documentIdSchema,
+  htmlModeChangeParamsSchema,
   LIMITS,
   listParamsSchema,
   openParamsSchema,
@@ -28,6 +29,7 @@ import {
   type CloseResult,
   type DocumentFormat,
   type DocumentSummary,
+  type HtmlMode,
   type LinkOpenResult,
   type ListResult,
   type OpenResult,
@@ -79,7 +81,8 @@ export interface DocumentEvent {
     | 'document-changed'
     | 'document-status'
     | 'focus-requested'
-    | 'feedback-changed';
+    | 'feedback-changed'
+    | 'render-diagnostics';
   documentId?: string;
   revision?: string | null;
   requestId?: string;
@@ -180,6 +183,8 @@ interface Problem {
 interface UpsertOptions {
   title?: string | undefined;
   key?: string | undefined;
+  // HTMLの表示方法の希望。指定がなければ、新しい文書はstatic、既存の文書は変えない。
+  htmlMode?: HtmlMode | undefined;
   // falseなら、閉じている文書を開き直さない（監視による更新で使う）。
   reopen: boolean;
 }
@@ -208,6 +213,7 @@ export function toSummary(
   order: number,
   searchState: DocumentSummary['searchState'] = 'excluded',
   pendingRequestIds: string[] = [],
+  interactiveAllowed = false,
 ): DocumentSummary {
   return {
     documentId: record.documentId,
@@ -224,6 +230,8 @@ export function toSummary(
     updatedAt: record.updatedAt,
     order,
     pendingRequestIds,
+    htmlMode: record.format === 'html' ? record.htmlMode : null,
+    interactiveAllowed,
   };
 }
 
@@ -319,6 +327,11 @@ export class DocumentService {
   readonly #pathQueues = new Map<string, Promise<void>>();
   // 文書を閉じた回数。閉じる前に始めた処理の結果を、開き直した後の文書へ結び付けないために使う。
   readonly #openEpochs = new Map<string, number>();
+  // scriptを動かす表示（interactive）の実行の許可。文書IDと、許可したときの閉じた回数と、許可の世代。
+  // daemonのmemoryだけに持つ（再起動・閉じる・別sourceへの置き換えで、自動では引き継がない。仕様10.2）。
+  // 世代は許可するたびに新しくする。外した後に許可し直しても、前の許可で発行した表示は戻らない。
+  readonly #interactive = new Map<string, { epoch: number; generation: number }>();
+  #interactiveGenerations = 0;
   readonly #linkConfirmations = new Map<string, LinkConfirmation>();
 
   constructor(options: DocumentServiceOptions) {
@@ -453,6 +466,75 @@ export class DocumentService {
   // 文書を閉じた回数。閉じる前に始めた処理が、開き直した後の文書に対して成立しないようにする。
   openEpoch(documentId: string): number {
     return this.#openEpochs.get(documentId) ?? 0;
+  }
+
+  // HTMLの文書で、scriptを動かす表示（interactive）を、このdaemonで明示的に許可済みなら、その許可の世代。
+  interactiveGeneration(documentId: string): number | null {
+    const record = this.#store.payload.documents[documentId];
+    const permission = this.#interactive.get(documentId);
+    const allowed =
+      record !== undefined &&
+      record.isOpen &&
+      record.format === 'html' &&
+      record.htmlMode === 'interactive' &&
+      permission !== undefined &&
+      permission.epoch === this.openEpoch(documentId);
+    return allowed ? permission.generation : null;
+  }
+
+  interactiveAllowed(documentId: string): boolean {
+    return this.interactiveGeneration(documentId) !== null;
+  }
+
+  // 許可を変える。許可済みのまま許可しても、世代は変えない。変わったらtrue。
+  #setInteractive(documentId: string, allowed: boolean): boolean {
+    const before = this.interactiveGeneration(documentId);
+    if (!allowed) this.#interactive.delete(documentId);
+    else if (before === null) {
+      this.#interactiveGenerations += 1;
+      this.#interactive.set(documentId, {
+        epoch: this.openEpoch(documentId),
+        generation: this.#interactiveGenerations,
+      });
+    }
+    return before !== this.interactiveGeneration(documentId);
+  }
+
+  // 管理UIの明示的な操作で、HTMLの表示方法を変える。interactiveにするには確認が必要（仕様10.2）。
+  async setHtmlMode(rawParams: unknown): Promise<ServiceResult<DocumentSummary>> {
+    const params = htmlModeChangeParamsSchema.parse(rawParams);
+    if (params.mode === 'interactive' && !params.confirmed) {
+      throw new VdeError(
+        'E_CONFIRMATION_REQUIRED',
+        'scriptを動かす表示にするには、確認が必要です。',
+        { documentId: params.documentId },
+      );
+    }
+    const result = await this.#store.transaction((tx) => {
+      const record = tx.state.documents[params.documentId];
+      if (!record?.isOpen) {
+        throw new VdeError('E_DOCUMENT_NOT_OPEN', '文書は開かれていません。', {
+          documentId: params.documentId,
+        });
+      }
+      if (record.format !== 'html') {
+        throw new VdeError('E_INVALID_ARGUMENT', '表示方法はHTMLの文書だけで選べます。', {
+          documentId: params.documentId,
+        });
+      }
+      if (record.htmlMode !== params.mode) {
+        record.htmlMode = params.mode;
+        record.updatedAt = this.#now().toISOString();
+      }
+      return { catalogVersion: tx.state.catalogVersion };
+    });
+    this.#setInteractive(params.documentId, params.mode === 'interactive');
+    this.#emit({ type: 'document-status', documentId: params.documentId });
+    return {
+      data: this.#summary(this.#store.payload, params.documentId),
+      catalogVersion: result.catalogVersion,
+      warnings: [],
+    };
   }
 
   #record(item: Incoming): void {
@@ -635,6 +717,7 @@ export class DocumentService {
         const outcome = this.#upsert(tx, item, {
           title: params.title,
           key: params.key,
+          htmlMode: item.format === 'html' ? params.htmlMode : undefined,
           reopen: true,
         });
         touched.push(outcome.documentId);
@@ -703,7 +786,31 @@ export class DocumentService {
       };
     });
     for (const item of incoming) this.#record(item);
+    // scriptの実行の許可は、commitの後にだけ変える。明示的なinteractiveの指定で許可し、
+    // staticの指定と、stdinの更新（別の内容への置き換え）では外す。同じfileの開き直しでは保つ。
+    const permissionChanged: string[] = [];
+    result.data.documents.forEach((summary, index) => {
+      const item = incoming[index];
+      if (summary.format !== 'html' || !item) return;
+      let changed = false;
+      // stdinの更新は、別の内容への置き換え。前の許可は外し、明示的な指定があれば許可し直す。
+      if (params.htmlMode === 'static' || item.sourceKind !== 'file') {
+        changed = this.#setInteractive(summary.documentId, false);
+      }
+      if (params.htmlMode === 'interactive') {
+        changed = this.#setInteractive(summary.documentId, true) || changed;
+      }
+      if (changed) permissionChanged.push(summary.documentId);
+    });
+    result.data.documents = result.data.documents.map((summary) =>
+      this.#summary(this.#store.payload, summary.documentId),
+    );
     for (const event of events) this.#emit(event);
+    for (const documentId of permissionChanged) {
+      if (!events.some((event) => event.documentId === documentId)) {
+        this.#emit({ type: 'document-status', documentId });
+      }
+    }
     return result;
   }
 
@@ -892,6 +999,7 @@ export class DocumentService {
 
     if (!existing) {
       const documentId = `doc_${randomUUID()}`;
+      const htmlMode: HtmlMode = options.htmlMode ?? 'static';
       state.documents[documentId] = {
         documentId,
         sourceKind: item.sourceKind,
@@ -910,7 +1018,7 @@ export class DocumentService {
         revisions: [revisionRecord],
         assetsRoot: item.assetsRoot,
         extraAssets: item.extraAssets,
-        htmlMode: 'static',
+        htmlMode,
       };
       state.openOrder.push(documentId);
       return { documentId, outcome: 'created', openSetChanged: true, revisionChanged: true };
@@ -970,6 +1078,10 @@ export class DocumentService {
       existing.key = options.key;
       changed = true;
     }
+    if (options.htmlMode !== undefined && existing.htmlMode !== options.htmlMode) {
+      existing.htmlMode = options.htmlMode;
+      changed = true;
+    }
     if (options.reopen && item.displayPath !== null && existing.displayPath !== item.displayPath) {
       existing.displayPath = item.displayPath;
       changed = true;
@@ -990,6 +1102,7 @@ export class DocumentService {
       state.openOrder.indexOf(documentId),
       this.#searchStateOf(documentId),
       pendingRequestIdsOf(state, documentId),
+      this.interactiveAllowed(documentId),
     );
   }
 

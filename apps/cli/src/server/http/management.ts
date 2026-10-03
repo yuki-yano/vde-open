@@ -128,6 +128,19 @@ async function loadStaticAssets(webRoot: string | null): Promise<Map<string, Sta
   return assets;
 }
 
+// 回答案を含むbody。重複したkeyと`__proto__`を拒否するため、原文から読む（ADR-0011）。
+function parseAnswersBody(text: string): unknown {
+  try {
+    return parseStrictJson(text);
+  } catch (error) {
+    if (!(error instanceof StrictJsonError)) throw error;
+    throw new VdeError('E_INVALID_ARGUMENT', '回答案をJSONとして読めません。', {
+      reason: error.reason,
+      pointer: error.pointer,
+    });
+  }
+}
+
 function toErrorBody(error: unknown): ErrorBody {
   if (isVdeError(error)) {
     return {
@@ -413,17 +426,61 @@ export async function startManagementServer(
   // 回答案を置き換える。重複したkeyを見つけるため、bodyは原文から読む（仕様11.2）。
   api.put('/feedback/:id/draft', async (c) => {
     const requestId = requestIdSchema.parse(c.req.param('id'));
-    let body: unknown;
-    try {
-      body = parseStrictJson(await c.req.text());
-    } catch (error) {
-      if (!(error instanceof StrictJsonError)) throw error;
-      throw new VdeError('E_INVALID_ARGUMENT', '回答案をJSONとして読めません。', {
-        reason: error.reason,
-        pointer: error.pointer,
-      });
-    }
+    const body = parseAnswersBody(await c.req.text());
     return ok(c, 'feedback.draft', await deps.feedback.updateDraft(requestId, body));
+  });
+
+  // 回答待ちの質問が固定した版と表示方法での、表示の権限（仕様12.2）。
+  api.post('/feedback/:id/render-grants', async (c) => {
+    const requestId = requestIdSchema.parse(c.req.param('id'));
+    const result = await deps.render.createGrantForRequest(
+      deps.sessions.idOf(c.get('token')),
+      requestId,
+      { origin: c.req.header('origin') ?? origin },
+    );
+    return c.json(
+      successEnvelope(result, {
+        command: 'feedback.render-grant',
+        catalogVersion: deps.documents.state.catalogVersion,
+      }),
+    );
+  });
+
+  // HTMLのSDKからの操作（回答案の取得と置き換え）。管理UIが、表示のiframeから受け取って中継する。
+  // 権限（表示）はbodyで受け取り、いまも有効で、このsessionのもので、質問が回答待ちかを毎回確かめる。
+  const bridgeOf = (token: string, grant: unknown) => {
+    const found =
+      typeof grant === 'string' ? deps.render.bridgeOf(deps.sessions.idOf(token), grant) : null;
+    if (!found) {
+      throw new VdeError(
+        'E_RENDER_GRANT_INVALID',
+        '表示の権限が失効したため、HTMLからの回答案は受け付けません。',
+      );
+    }
+    return found;
+  };
+  api.post('/render-grants/bridge/ready', async (c) => {
+    const body = z.strictObject({ grant: z.string().min(1).max(128) }).parse(await c.req.json());
+    const { requestId } = bridgeOf(c.get('token'), body.grant);
+    return ok(c, 'render-grants.bridge-ready', deps.feedback.getForUi(requestId));
+  });
+  api.put('/render-grants/bridge/draft', async (c) => {
+    const { grant, ...draft } = parseAnswersBody(await c.req.text()) as Record<string, unknown>;
+    const token = c.get('token');
+    const { requestId } = bridgeOf(token, grant);
+    // 保存の順番を待つ間に、権限の返却・scriptの許可の取消・sessionの失効が起きうる。
+    // 保存のtransactionの中でも、同じ質問への権限が有効かを確かめ直す。
+    return ok(
+      c,
+      'render-grants.bridge-draft',
+      await deps.feedback.updateDraft(requestId, draft, {
+        authorize: () => {
+          if (bridgeOf(token, grant).requestId !== requestId) {
+            throw new VdeError('E_RENDER_GRANT_INVALID', '表示の権限が変わりました。');
+          }
+        },
+      }),
+    );
   });
 
   // 保存済みの回答案を、回答として確定する。回答そのものは受け取らない（仕様11.8）。
@@ -450,15 +507,35 @@ export async function startManagementServer(
     const body = z
       .strictObject({ revision: z.string().optional(), mode: z.string().optional() })
       .parse(await c.req.json());
-    const result = await deps.render.createGrant(deps.sessions.idOf(c.get('token')), {
-      documentId: c.req.param('id'),
-      ...body,
-    });
+    // 状態を変えるrequestのOriginは、入口で管理UIのoriginだと確かめてある。
+    // HTMLのSDKは、このoriginの親とだけ通信を始める。
+    const result = await deps.render.createGrant(
+      deps.sessions.idOf(c.get('token')),
+      { documentId: c.req.param('id'), ...body },
+      { origin: c.req.header('origin') ?? origin },
+    );
     return c.json(
       successEnvelope(result, {
         command: 'documents.render-grant',
         catalogVersion: deps.documents.state.catalogVersion,
       }),
+    );
+  });
+
+  // 表示の中から読み込もうとした、登録されていないfile。権限はURLへ載せず、bodyで渡す。
+  api.post('/render-grants/missing', async (c) => {
+    const body = z.strictObject({ grant: z.string().min(1).max(128) }).parse(await c.req.json());
+    const missing = deps.render.missingOf(deps.sessions.idOf(c.get('token')), body.grant);
+    return c.json(successEnvelope({ missing }, { command: 'render-grants.missing' }));
+  });
+
+  // HTMLの表示方法を変える。scriptを動かす表示（interactive）にするには、確認が必要（仕様10.2）。
+  api.post('/documents/:id/html-mode', async (c) => {
+    const body = (await c.req.json()) as Record<string, unknown>;
+    return ok(
+      c,
+      'documents.html-mode',
+      await deps.documents.setHtmlMode({ ...body, documentId: c.req.param('id') }),
     );
   });
 

@@ -1,6 +1,6 @@
 import { classifyReference, dirnameOfLogicalPath, encodeLogicalPath } from '@vde-open/document';
 import { MarkdownView } from '@vde-open/document/react';
-import type { DocumentSummary, OutlineItem } from '@vde-open/shared';
+import type { DocumentSummary, FeedbackForUi, OutlineItem } from '@vde-open/shared';
 import { Pause, Play, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
@@ -20,7 +20,9 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ApiError, type Api } from '@/lib/api';
 import { describeDiagnostic } from '@/lib/diagnostics';
 import { isViewMode, usePreference, type ViewMode } from '@/lib/preferences';
+import { useBridge, type BridgeStatus } from '@/lib/use-bridge';
 import { useMarkdown } from '@/lib/use-markdown';
+import { useMissingAssets } from '@/lib/use-missing-assets';
 import { useRenderGrant } from '@/lib/use-render-grant';
 
 const PARSE_FAILURE: Record<string, string> = {
@@ -41,6 +43,31 @@ export interface ViewerProps {
   document: DocumentSummary;
   // 回答待ちの質問が固定している版。あれば、新しい版が来てもこの版を表示し続ける（仕様11.4）。
   fixedRevision?: string | null;
+  // この文書への質問。interactiveで作った回答待ちの質問なら、HTMLから回答案を受け付ける。
+  request?: FeedbackForUi | null;
+  // 表示の中から登録されていないfileを読み込もうとした、という通知の回数。
+  renderSignal?: number;
+  // 回答待ちの質問を取得するまで、表示する版を決めない（質問の版と違う版を一度表示しない）。
+  waitingForRequest?: boolean;
+}
+
+// HTMLとの通信を終えた理由の説明。
+const BRIDGE_CLOSED: Record<string, string> = {
+  navigated: '文書の表示が読み直されたため、この文書からの回答案の受け付けを終えました。',
+  'request-closed': '質問が終わったため、この文書からの回答案の受け付けを終えました。',
+  expired: '表示の権限が失効したため、この文書からの回答案の受け付けを終えました。',
+  replaced: 'この文書からの回答案の受け付けを終えました。',
+};
+
+function bridgeNotice(status: BridgeStatus): string | null {
+  if (status.status === 'connected') {
+    return 'この文書のscriptから、回答案を受け付けています。回答の確定は、右の「Agentへ回答を送信」だけで行います。';
+  }
+  if (status.status !== 'closed') return null;
+  return (
+    BRIDGE_CLOSED[status.reason] ??
+    '文書のscriptから、決まりに合わない通信（大きすぎる、多すぎる、形が違うなど）があったため、回答案の受け付けを終えました。'
+  );
 }
 
 interface Loaded {
@@ -64,7 +91,14 @@ interface PendingLink {
 }
 
 // 文書を切り替えたら作り直す（呼び出し側がkeyにdocumentIdを渡す）。
-export function Viewer({ api, document, fixedRevision = null }: ViewerProps) {
+export function Viewer({
+  api,
+  document,
+  fixedRevision = null,
+  request = null,
+  renderSignal = 0,
+  waitingForRequest = false,
+}: ViewerProps) {
   const [mode, setMode] = usePreference<ViewMode>('view-mode', 'preview', isViewMode);
   // 更新を止めた時点の版。止めている間は、新しい版が来ても差し替えない。
   const [pinnedRevision, setPinnedRevision] = useState<string | null>(null);
@@ -72,7 +106,9 @@ export function Viewer({ api, document, fixedRevision = null }: ViewerProps) {
   // 回答待ちの質問があれば、質問の版を表示する（回答を記録する版と、見ている版を一致させる）。
   // その間は、更新を止める・再開する操作で表示の版を変えない。
   const fixed = fixedRevision !== null;
-  const shownRevision = fixedRevision ?? pinnedRevision ?? document.revision;
+  const shownRevision = waitingForRequest
+    ? null
+    : (fixedRevision ?? pinnedRevision ?? document.revision);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [pendingLink, setPendingLink] = useState<PendingLink | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -130,12 +166,44 @@ export function Viewer({ api, document, fixedRevision = null }: ViewerProps) {
   const isMarkdown = document.format === 'markdown';
   const wantsPreview = mode === 'preview';
   const markdown = useMarkdown(isMarkdown && wantsPreview ? text : null);
-  const grantState = useRenderGrant(api, document.documentId, shownRevision, document.updatedAt);
+  // 回答待ちの質問を表示している間は、質問が固定した版と表示方法で表示する（仕様11.4）。
+  // 表示方法はdaemonが質問から決める（staticで作った質問は、後からscriptを許可しても動かさない）。
+  // interactiveで作った質問なら、HTMLから回答案を受け付ける。
+  const pinnedRequestId =
+    fixedRevision !== null && request?.status === 'pending' && request.revision === fixedRevision
+      ? request.requestId
+      : null;
+  const pinnedStatic = pinnedRequestId !== null && request?.renderMode === 'static';
+  // それ以外の表示では、利用者が明示的に許可したHTMLだけ、scriptを動かす（仕様10.2）。
+  const interactive =
+    !isMarkdown && document.htmlMode === 'interactive' && document.interactiveAllowed;
+  // 表示し直すとき（新しい表示として通信を始め直す）に増やす。
+  const [frameNonce, setFrameNonce] = useState(0);
+  const grantState = useRenderGrant(api, document.documentId, shownRevision, document.updatedAt, {
+    mode: interactive ? 'interactive' : 'static',
+    requestId: pinnedRequestId,
+    nonce: frameNonce,
+  });
   const grant = grantState.status === 'ready' ? grantState.grant : null;
+  const missing = useMissingAssets(api, grant?.grant ?? null, renderSignal);
+  const [confirmingInteractive, setConfirmingInteractive] = useState(false);
+  const [modeError, setModeError] = useState<string | null>(null);
+  const changeMode = (next: 'static' | 'interactive') => {
+    setConfirmingInteractive(false);
+    setModeError(null);
+    void api
+      .setHtmlMode(document.documentId, next)
+      .catch((reason: unknown) =>
+        setModeError(reason instanceof Error ? reason.message : '表示方法を変えられませんでした。'),
+      );
+  };
 
   const showMarkdown = isMarkdown && wantsPreview && markdown.status === 'ready';
   // HTMLは、変換した内容を、別のoriginのsandboxの中で表示する。
   const frameUrl = !isMarkdown && wantsPreview ? (grant?.documentUrl ?? null) : null;
+  // HTMLとの通信は、iframeを画面に出している間だけ。外したら通信を終える。
+  const frame = useRef<HTMLIFrameElement>(null);
+  const bridge = useBridge(api, frame, frameUrl !== null ? grant : null, request);
 
   // 内容が差し替わるたびに、読んでいた位置へ戻す。
   useLayoutEffect(() => {
@@ -196,14 +264,20 @@ export function Viewer({ api, document, fixedRevision = null }: ViewerProps) {
   const jumpTo = (anchor: string) => {
     window.document.getElementById(anchor)?.scrollIntoView({ block: 'start' });
   };
-  const diagnostics = grant?.diagnostics ?? [];
+  const diagnostics = [
+    ...(grant?.diagnostics ?? []),
+    ...missing.map((path) => ({ code: 'asset-requested', target: path, count: 1 })),
+  ];
+  const notice = bridgeNotice(bridge);
+  // 表示方法は、daemonが発行した表示の権限のとおりに示す。
+  const frameMode = grant?.mode ?? 'static';
   // HTMLのlinkは表示の中では押せないので、一覧から開く。Markdownのlinkは本文から開ける。
   const links = isMarkdown ? [] : (grant?.links ?? []);
 
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col" aria-label="文書の表示">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-56">
           <h1 className="truncate text-base font-semibold">{document.title}</h1>
           <p className="truncate text-xs text-muted-foreground">
             {document.displayPath ?? '（stdinから開いた文書）'}
@@ -211,7 +285,11 @@ export function Viewer({ api, document, fixedRevision = null }: ViewerProps) {
           </p>
         </div>
         <Badge variant="outline">{isMarkdown ? 'Markdown' : 'HTML'}</Badge>
-        {!isMarkdown && <Badge variant="outline">静的表示</Badge>}
+        {!isMarkdown && (
+          <Badge variant="outline" data-testid="html-mode">
+            {frameMode === 'interactive' ? 'scriptを動かす表示' : '静的表示'}
+          </Badge>
+        )}
         {fixed ? (
           <Badge variant="secondary">質問の版を表示中</Badge>
         ) : (
@@ -221,7 +299,12 @@ export function Viewer({ api, document, fixedRevision = null }: ViewerProps) {
           value={[mode]}
           onValueChange={(value) => {
             const next: unknown = value[0];
-            if (isViewMode(next)) setMode(next);
+            if (!isViewMode(next)) return;
+            // 原文からプレビューへ戻ったHTMLは、新しい表示として通信を始める（portは表示ごとに1回だけ）。
+            if (next === 'preview' && mode !== 'preview' && !isMarkdown) {
+              setFrameNonce((nonce) => nonce + 1);
+            }
+            setMode(next);
           }}
           size="sm"
           aria-label="表示の切り替え"
@@ -271,6 +354,52 @@ export function Viewer({ api, document, fixedRevision = null }: ViewerProps) {
             {PARSE_FAILURE[markdown.reason] ?? PARSE_FAILURE['parse-error']}
           </p>
         )}
+        {pinnedStatic && document.interactiveAllowed && (
+          <p className="border-b bg-muted px-4 py-2 text-sm">
+            この質問は静的表示で作られたため、回答が終わるまでは、scriptを動かさずに表示します。
+          </p>
+        )}
+        {!isMarkdown &&
+          document.htmlMode === 'interactive' &&
+          !document.interactiveAllowed &&
+          !pinnedStatic && (
+            <div className="flex flex-wrap items-center gap-2 border-b bg-muted px-4 py-2 text-sm">
+              <p className="min-w-0 flex-1">
+                このHTMLは、scriptを動かす表示で開かれました。daemonの再起動などで、scriptを動かす許可が外れたため、いまは静的表示です。
+              </p>
+              <Button size="sm" variant="outline" onClick={() => setConfirmingInteractive(true)}>
+                scriptを動かす表示を有効にする
+              </Button>
+            </div>
+          )}
+        {frameMode === 'interactive' && (
+          <div className="flex flex-wrap items-center gap-2 border-b bg-muted px-4 py-2 text-sm">
+            <p className="min-w-0 flex-1">
+              この文書のscriptを動かしています。scriptが読み込めるのはこの文書に登録したfileだけで、管理画面・管理API・fileには触れられません。表示の中でのpageの移動などを含め、すべての外部への通信を止めるものではありません。
+            </p>
+            <Button size="sm" variant="outline" onClick={() => changeMode('static')}>
+              静的表示に切り替える
+            </Button>
+          </div>
+        )}
+        {notice !== null && (
+          <div
+            className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm"
+            data-testid="bridge-status"
+          >
+            <p className="min-w-0 flex-1">{notice}</p>
+            {bridge.status === 'closed' && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setFrameNonce((value) => value + 1)}
+              >
+                表示し直す
+              </Button>
+            )}
+          </div>
+        )}
+        {modeError && <p className="border-b bg-destructive/10 px-4 py-2 text-sm">{modeError}</p>}
         {error && <p className="border-b bg-destructive/10 px-4 py-2 text-sm">{error}</p>}
         {linkError && <p className="border-b bg-destructive/10 px-4 py-2 text-sm">{linkError}</p>}
       </div>
@@ -337,15 +466,19 @@ export function Viewer({ api, document, fixedRevision = null }: ViewerProps) {
           <div className="flex min-w-0 flex-1 flex-col">
             {/* 枠の中は、開いた文書の内容。この製品の画面ではないことを、常に示す。 */}
             <p className="border-b bg-muted px-4 py-1 text-xs text-muted-foreground">
-              ここから下は、開いた文書の内容です（静的表示。scriptは動かず、linkと送信は無効です）。
+              {frameMode === 'interactive'
+                ? 'ここから下は、開いた文書の内容です（scriptを動かす表示。この画面の操作や送信の部品ではありません。linkとformの送信は無効です）。'
+                : 'ここから下は、開いた文書の内容です（静的表示。scriptは動かず、linkと送信は無効です）。'}
             </p>
             <iframe
-              // 版ごとに作り直す。前の版の表示は残さない。
+              // 表示ごとに作り直す。前の表示は残さない。
               key={frameUrl}
+              ref={frame}
               title={`${document.title} の表示`}
               src={frameUrl}
-              // 空のsandbox。scriptも、同じoriginとしての扱いも、送信も、popupも許可しない。
-              sandbox=""
+              // 同じoriginとしての扱い・送信・popup・別pageへの移動・downloadは、どちらでも許可しない。
+              // interactiveだけ、scriptの実行を許可する（仕様10.2）。
+              sandbox={frameMode === 'interactive' ? 'allow-scripts' : ''}
               referrerPolicy="no-referrer"
               className="min-h-0 w-full flex-1 border-0 bg-white"
               data-testid="document-frame"
@@ -410,6 +543,23 @@ export function Viewer({ api, document, fixedRevision = null }: ViewerProps) {
           </aside>
         )}
       </div>
+
+      <AlertDialog open={confirmingInteractive} onOpenChange={setConfirmingInteractive}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>この文書のscriptを動かしますか</AlertDialogTitle>
+            <AlertDialogDescription>
+              このHTMLのscriptを、ブラウザの中で動かします。scriptが読み込めるのはこの文書に登録したfileだけで、管理画面・管理API・fileには触れられません。ただし、表示の中でのpageの移動などを含め、すべての外部への通信を止めるものではなく、任意のscriptを安全に動かす仕組みでもありません。自分やAgentが用意した、信頼できるHTMLだけで有効にしてください。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>戻る</AlertDialogCancel>
+            <AlertDialogAction onClick={() => changeMode('interactive')}>
+              scriptを動かす
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={pendingLink !== null}

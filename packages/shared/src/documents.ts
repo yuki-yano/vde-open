@@ -17,8 +17,8 @@ export type SourceState = z.infer<typeof sourceStateSchema>;
 
 export const searchStateSchema = z.enum(['ready', 'indexing', 'excluded']);
 
-// HTMLの表示方法。interactive（scriptを許可する表示）はP6で足す。
-export const htmlModeSchema = z.enum(['static']);
+// HTMLの表示方法。static: scriptを動かさない（既定）。interactive: 明示的に許可したときだけscriptを動かす。
+export const htmlModeSchema = z.enum(['static', 'interactive']);
 export type HtmlMode = z.infer<typeof htmlModeSchema>;
 
 // 文書が参照するlocal fileの種別。配信時のheaderと、使える文脈を決める。
@@ -51,6 +51,10 @@ export const documentSummarySchema = z.strictObject({
   updatedAt: z.string(),
   order: z.number().int().nonnegative(),
   pendingRequestIds: z.array(z.string()),
+  // HTMLの表示方法の希望。Markdownはnull。
+  htmlMode: htmlModeSchema.nullable(),
+  // interactiveを希望し、このdaemonでscriptの実行を許可済みか。再起動などで許可が外れたらfalse。
+  interactiveAllowed: z.boolean(),
 });
 export type DocumentSummary = z.infer<typeof documentSummarySchema>;
 
@@ -222,6 +226,7 @@ export const serverEventSchema = z.strictObject({
     'daemon-stopping',
     'resync-required',
     'feedback-changed',
+    'render-diagnostics',
   ]),
   daemonId: z.string(),
   sequence: z.number().int().nonnegative(),
@@ -303,8 +308,24 @@ export const renderGrantResultSchema = z.strictObject({
   assets: z.array(z.strictObject({ logicalPath: z.string(), role: assetRoleSchema })),
   links: z.array(renderLinkSchema),
   diagnostics: z.array(renderDiagnosticSchema),
+  // HTMLと本体の間の通信。HTMLへ同梱SDKを入れた表示だけにある。instanceIdは、この表示の識別子。
+  bridge: z.strictObject({ instanceId: z.string(), requestId: z.string() }).nullable(),
 });
 export type RenderGrantResult = z.infer<typeof renderGrantResultSchema>;
+
+// 表示の中から読み込もうとした、登録されていないfile（仕様10.3）。
+export const renderMissingResultSchema = z.strictObject({
+  missing: z.array(z.string()),
+});
+export type RenderMissingResult = z.infer<typeof renderMissingResultSchema>;
+
+// HTMLの表示方法を、管理UIの明示的な操作で変える。interactiveにするときは確認が必要。
+export const htmlModeChangeParamsSchema = z.strictObject({
+  documentId: documentIdSchema,
+  mode: htmlModeSchema,
+  confirmed: z.boolean().default(false),
+});
+export type HtmlModeChangeParams = z.input<typeof htmlModeChangeParamsSchema>;
 
 export const linkOpenParamsSchema = z.strictObject({
   documentId: documentIdSchema,

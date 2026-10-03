@@ -3,6 +3,7 @@ import type {
   DocumentSummary,
   FeedbackForUi,
   FeedbackSubmitParams,
+  HtmlMode,
   LinkOpenResult,
   ListResult,
   OutlineItem,
@@ -94,7 +95,24 @@ export interface Api {
   focus(documentId: string): Promise<void>;
   refresh(documentId: string): Promise<void>;
   // 文書の1つの版を表示するための権限を取得する。
-  renderGrant(documentId: string, revision: string): Promise<RenderGrantResult>;
+  renderGrant(
+    documentId: string,
+    revision: string,
+    options?: { mode?: HtmlMode },
+  ): Promise<RenderGrantResult>;
+  // 回答待ちの質問が固定した版と表示方法での表示。表示方法はdaemonが質問から決める。
+  feedbackRenderGrant(requestId: string): Promise<RenderGrantResult>;
+  // HTMLのSDKからの操作の中継。表示の権限（grant）が有効な間だけ成功する。
+  bridgeReady(grant: string): Promise<FeedbackForUi>;
+  bridgeDraft(
+    grant: string,
+    expectedDraftVersion: number,
+    answers: Answers,
+  ): Promise<{ draftVersion: number }>;
+  // 表示の中から読み込もうとした、登録されていないfile。
+  renderMissing(grant: string): Promise<string[]>;
+  // HTMLの表示方法を変える。interactiveにするときは、利用者の確認を経てから呼ぶ。
+  setHtmlMode(documentId: string, mode: HtmlMode): Promise<DocumentSummary>;
   // 表示をやめた権限を返す。
   releaseGrants(grants: string[]): Promise<void>;
   // 文書中のlinkが指すlocalの文書を開く。未登録の文書は、確認を求めるerrorになる。
@@ -201,10 +219,47 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
     async refresh(documentId) {
       await request(`/documents/${documentId}/refresh`, { method: 'POST' });
     },
-    async renderGrant(documentId, revision) {
+    async renderGrant(documentId, revision, options = {}) {
       const { data } = await request<RenderGrantResult>(`/documents/${documentId}/render-grants`, {
         method: 'POST',
-        body: JSON.stringify({ revision }),
+        body: JSON.stringify({ revision, mode: options.mode ?? 'static' }),
+      });
+      return data;
+    },
+    async feedbackRenderGrant(requestId) {
+      const { data } = await request<RenderGrantResult>(`/feedback/${requestId}/render-grants`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      return data;
+    },
+    async bridgeReady(grant) {
+      return (
+        await request<FeedbackForUi>('/render-grants/bridge/ready', {
+          method: 'POST',
+          body: JSON.stringify({ grant }),
+        })
+      ).data;
+    },
+    async bridgeDraft(grant, expectedDraftVersion, answers) {
+      return (
+        await request<{ draftVersion: number }>('/render-grants/bridge/draft', {
+          method: 'PUT',
+          body: JSON.stringify({ grant, expectedDraftVersion, answers }),
+        })
+      ).data;
+    },
+    async renderMissing(grant) {
+      const { data } = await request<{ missing: string[] }>('/render-grants/missing', {
+        method: 'POST',
+        body: JSON.stringify({ grant }),
+      });
+      return data.missing;
+    },
+    async setHtmlMode(documentId, mode) {
+      const { data } = await request<DocumentSummary>(`/documents/${documentId}/html-mode`, {
+        method: 'POST',
+        body: JSON.stringify({ mode, confirmed: true }),
       });
       return data;
     },

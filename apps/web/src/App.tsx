@@ -59,6 +59,8 @@ export function Workspace({ api }: { api: Api }) {
   const lastEvent = useRef<{ daemonId: string; sequence: number } | null>(null);
   // 質問の変更の通知を受け取った回数。回答panelは、これが変わるたびに質問を取り直す。
   const [feedbackSignal, setFeedbackSignal] = useState(0);
+  // 表示の中から登録されていないfileを読み込もうとした、という通知を受け取った回数。
+  const [renderSignal, setRenderSignal] = useState(0);
 
   // 一覧をdaemonから取り直す。表示中の文書は、閉じられた場合だけ切り替える。
   const fetchList = useCallback(async () => {
@@ -99,6 +101,7 @@ export function Workspace({ api }: { api: Api }) {
       if (event.type === 'feedback-changed' || event.type === 'resync-required' || gap) {
         setFeedbackSignal((value) => value + 1);
       }
+      if (event.type === 'render-diagnostics') setRenderSignal((value) => value + 1);
       if (event.type !== 'hello' || gap) void load();
     };
     const stream = api.events({
@@ -196,6 +199,7 @@ export function Workspace({ api }: { api: Api }) {
             api={api}
             document={active}
             feedbackSignal={feedbackSignal}
+            renderSignal={renderSignal}
           />
         ) : (
           <main className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">

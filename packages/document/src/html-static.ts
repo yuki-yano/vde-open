@@ -1,4 +1,4 @@
-// HTML文書を、scriptなしで表示する形へ変換する（仕様10.4）。
+// HTML文書を表示する形へ変換する（仕様10.4）。staticはscriptなし、interactiveは登録済みのscriptだけを残す。
 // parse5の構文木を書き換えて出力する。HTMLの文字列への正規表現の置換はしない。
 import { parse, serialize, type DefaultTreeAdapterMap } from 'parse5';
 
@@ -49,6 +49,10 @@ export interface StaticHtmlInput {
   documentLogicalPath: string;
   // 配信できるassetのlogical pathと種別。
   assets: ReadonlyMap<string, AssetRole>;
+  // interactive: 文書のscriptとevent handlerを残す（登録済みのscript fileだけを読み込む）。既定はstatic。
+  interactive?: boolean;
+  // 最初のscriptとして入れる、HTMLと本体の間の通信のSDK（interactiveのときだけ）。
+  sdkScript?: string;
 }
 
 export interface StaticHtmlResult {
@@ -121,6 +125,8 @@ const MAX_LINK_TEXT = 120;
 
 // 走査の方針。変換と、参照の収集で共有する。
 interface Policy {
+  // scriptとevent handlerを残すか（interactive）。
+  interactive: boolean;
   // 参照を残すなら出力するURL、取り除くならnull。
   asset(url: string, context: ReferenceContext): string | null;
   link(href: string, text: string): void;
@@ -209,10 +215,19 @@ function rewriteElement(element: HtmlElement, policy: Policy): boolean {
     );
   }
 
-  // scriptが参照するfileは、表示では使わないが、文書の版には含める。
+  // scriptが参照するfileは、staticの表示では使わないが、文書の版には含める。
+  // interactiveでは、登録済みのfileだけを読み込む。読み込めないscriptは要素ごと外す。
   if (tag === 'script') {
     const src = getAttribute(element, 'src');
-    if (src !== undefined) policy.asset(src, 'script');
+    if (src !== undefined) {
+      const resolved = policy.asset(src, 'script');
+      if (policy.interactive) {
+        if (resolved === null) return false;
+        element.attrs = element.attrs.map((attribute) =>
+          attribute.name === 'src' ? { ...attribute, value: resolved } : attribute,
+        );
+      }
+    }
   }
 
   const isAnchor = tag === 'a' || tag === 'area';
@@ -223,7 +238,8 @@ function rewriteElement(element: HtmlElement, policy: Policy): boolean {
     const name = attribute.name;
     if (!ATTRIBUTE_NAME.test(name)) continue;
     if (name.startsWith('on')) {
-      handlers += 1;
+      if (policy.interactive) kept.push(attribute);
+      else handlers += 1;
       continue;
     }
     if (REMOVED_ATTRIBUTES.has(name)) {
@@ -245,6 +261,10 @@ function rewriteElement(element: HtmlElement, policy: Policy): boolean {
       continue;
     }
     if (name === 'src') {
+      if (tag === 'script') {
+        if (policy.interactive) kept.push(attribute);
+        continue;
+      }
       const isImage =
         tag === 'img' ||
         (tag === 'input' && (getAttribute(element, 'type') ?? '').toLowerCase() === 'image');
@@ -300,6 +320,11 @@ function rewriteTree(root: HtmlParent, policy: Policy): void {
         );
         continue;
       }
+      if (child.tagName === 'script' && policy.interactive) {
+        if (rewriteElement(child, policy)) kept.push(child);
+        else policy.note('script-not-loaded', null);
+        continue;
+      }
       const removal = REMOVED_ELEMENTS[child.tagName];
       if (removal !== undefined) {
         if (child.tagName === 'script') rewriteElement(child, policy);
@@ -307,8 +332,10 @@ function rewriteTree(root: HtmlParent, policy: Policy): void {
         continue;
       }
       if (child.tagName === 'noscript') {
-        // scriptは動かないので、noscriptの中身をそのまま表示する。要素を外して中身を残す。
-        pending.splice(index + 1, 0, ...child.childNodes);
+        // staticではscriptが動かないので、noscriptの中身をそのまま表示する。要素を外して中身を残す。
+        // interactiveではscriptが動くので、noscriptの中身は表示されない。要素ごと外す。
+        if (policy.interactive) policy.note('noscript-removed', null);
+        else pending.splice(index + 1, 0, ...child.childNodes);
         continue;
       }
       if (!rewriteElement(child, policy)) continue;
@@ -336,18 +363,23 @@ function textOfStyle(element: HtmlElement): string {
 }
 
 // 変換後の出力をもう一度解析し、実行や遷移につながる要素・属性が残っていないことを確かめる。
-function assertStaticOutput(html: string): void {
+// interactiveでは、scriptとevent handlerだけを許す。
+function assertOutput(html: string, interactive: boolean): void {
   const stack: HtmlNode[] = [parse(html, { scriptingEnabled: false })];
   while (stack.length > 0) {
     const node = stack.pop() as HtmlNode;
     if (isElement(node)) {
       const unsafe =
         node.namespaceURI !== HTML_NAMESPACE ||
-        REMOVED_ELEMENTS[node.tagName] !== undefined ||
+        (REMOVED_ELEMENTS[node.tagName] !== undefined &&
+          !(interactive && node.tagName === 'script')) ||
+        (interactive && node.tagName === 'noscript') ||
         node.attrs.some(
-          (attribute) => attribute.name.startsWith('on') || REMOVED_ATTRIBUTES.has(attribute.name),
+          (attribute) =>
+            (attribute.name.startsWith('on') && !interactive) ||
+            REMOVED_ATTRIBUTES.has(attribute.name),
         );
-      if (unsafe) throw new Error(`unsafe static output: ${node.tagName}`);
+      if (unsafe) throw new Error(`unsafe output: ${node.tagName}`);
       if (node.tagName === 'template' && 'content' in node) stack.push(node.content);
     }
     if (isParent(node)) for (const child of node.childNodes) stack.push(child);
@@ -380,6 +412,7 @@ export function resolveAssetUrl(
   baseDir: string,
   assets: ReadonlyMap<string, AssetRole>,
   log: DiagnosticLog,
+  options: { scripts?: boolean } = {},
 ): string | null {
   const shown = url.slice(0, MAX_TARGET_LENGTH);
   const reference = classifyReference(url, baseDir);
@@ -413,8 +446,8 @@ export function resolveAssetUrl(
     log.note('asset-unsupported', reference.logicalPath);
     return null;
   }
-  // scriptは表示では使わない（要素ごと取り除く）。
-  if (context === 'script') return null;
+  // staticの表示ではscriptを使わない（要素ごと取り除く）。
+  if (context === 'script' && options.scripts !== true) return null;
   return `${relativeUrlTo(baseDir, reference.logicalPath)}${reference.suffix}`;
 }
 
@@ -425,10 +458,13 @@ export function transformStaticHtml(
   const baseDir = dirnameOfLogicalPath(input.documentLogicalPath);
   const links: StaticLink[] = [];
   const linkIds = new Set<string>();
+  const interactive = input.interactive === true;
 
   const policy: Policy = {
+    interactive,
     note: (code, target) => log.note(code, target),
-    asset: (url, context) => resolveAssetUrl(url, context, baseDir, input.assets, log),
+    asset: (url, context) =>
+      resolveAssetUrl(url, context, baseDir, input.assets, log, { scripts: interactive }),
     link(href, text) {
       log.note('link-disabled', null);
       const target = classifyLink(href);
@@ -441,19 +477,45 @@ export function transformStaticHtml(
     },
   };
 
-  // scriptは動かさないので、noscriptの中身を通常の要素として解析する。
-  // 既定の設定では中身が文字として素通りし、取り除く対象から漏れる。
+  // noscriptの中身を通常の要素として解析する。既定の設定では中身が文字として素通りし、
+  // 取り除く対象から漏れる（interactiveでは、noscriptは要素ごと外す）。
   const document = parse(input.source, { scriptingEnabled: false });
   rewriteTree(document, policy);
+  if (interactive && input.sdkScript !== undefined) insertFirstScript(document, input.sdkScript);
   const html = serialize(document);
-  assertStaticOutput(html);
+  assertOutput(html, interactive);
   return { html, links, diagnostics: log.list() };
+}
+
+// headの最初の子として、scriptを入れる。文書のどのscriptよりも先に動く。
+function insertFirstScript(document: HtmlParent, source: string): void {
+  if (source.toLowerCase().includes('</script'))
+    throw new Error('script text must not close itself');
+  const html = document.childNodes.find(
+    (node): node is HtmlElement => isElement(node) && node.tagName === 'html',
+  );
+  const head = html?.childNodes.find(
+    (node): node is HtmlElement => isElement(node) && node.tagName === 'head',
+  );
+  if (!head) throw new Error('document has no head');
+  const script: HtmlElement = {
+    nodeName: 'script',
+    tagName: 'script',
+    attrs: [],
+    namespaceURI: HTML_NAMESPACE as HtmlElement['namespaceURI'],
+    childNodes: [],
+    parentNode: head,
+    sourceCodeLocation: null,
+  };
+  script.childNodes = [{ nodeName: '#text', value: source, parentNode: script }];
+  head.childNodes.unshift(script);
 }
 
 // HTMLが参照するlocal fileの候補を集める。style要素とstyle属性の中の参照も含む。
 export function scanHtmlReferences(source: string): ScannedReference[] {
   const references: ScannedReference[] = [];
   const policy: Policy = {
+    interactive: false,
     asset(url, context) {
       references.push({ url, context });
       return url;

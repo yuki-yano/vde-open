@@ -85,12 +85,22 @@ function Probe({ revision = 'rev_1', updatedAt, tick = 0, onCommit }: ProbeProps
 
 // 画面の更新とeffectが落ち着くまで待つ。
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+// 条件が成り立つまで待つ。testを並行して動かす負荷の下では、画面の更新とeffectが遅れる。
+// 起きないことを確かめるときは、settleで待つ。
+async function until(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 3000;
+  while (!condition() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+const requested = (count: number) => until(() => pending.length >= count);
+const released = (count: number) => until(() => releases.length >= count);
 
 async function showFirst(scanFailed: boolean): Promise<void> {
   root.render(<Probe updatedAt={T0} />);
-  await settle();
+  await requested(1);
   pending[0]?.resolve(grant('g1', scanFailed));
-  await settle();
+  await until(() => displayedGrant() === 'g1');
   expect(displayedGrant()).toBe('g1');
 }
 
@@ -104,11 +114,12 @@ describe('表示の権限を返す順序', () => {
   it('取り直したら、新しい表示が画面へ出た後で、前の権限を返す', async () => {
     await showFirst(true);
     root.render(<Probe updatedAt={T1} />);
+    await requested(2);
     await settle();
     expect(pending).toHaveLength(2);
     expect(releases).toEqual([]);
     pending[1]?.resolve(grant('g2', false));
-    await settle();
+    await released(1);
     expect(displayedGrant()).toBe('g2');
     expect(releases).toEqual([{ grants: ['g1'], displayed: 'g2' }]);
     // 調べ終えた文書は、文書の状態が更新されても取り直さない。
@@ -120,7 +131,7 @@ describe('表示の権限を返す順序', () => {
   it('別の画面の更新が重なっても、画面に出ている権限を先に返さない', async () => {
     await showFirst(true);
     root.render(<Probe updatedAt={T1} />);
-    await settle();
+    await requested(2);
     expect(pending).toHaveLength(2);
 
     // 取り直しの途中で、権限とは関係のない更新が画面へ反映される。
@@ -128,7 +139,7 @@ describe('表示の権限を返す順序', () => {
     root.render(
       <Probe updatedAt={T1} tick={1} onCommit={() => pending[1]?.resolve(grant('g2', false))} />,
     );
-    await settle();
+    await released(1);
     expect(displayedGrant()).toBe('g2');
     // 前の描画のeffectは、まだ画面に出ているg1を返さない。返すのは、g2の表示が反映された後。
     expect(releases).toEqual([{ grants: ['g1'], displayed: 'g2' }]);
@@ -137,7 +148,7 @@ describe('表示の権限を返す順序', () => {
   it('取り直しに失敗したら、表示中の権限を保ち、取り直しを繰り返さない', async () => {
     await showFirst(true);
     root.render(<Probe updatedAt={T1} />);
-    await settle();
+    await requested(2);
     pending[1]?.reject(new Error('failed'));
     await settle();
     expect(displayedGrant()).toBe('g1');
@@ -145,38 +156,39 @@ describe('表示の権限を返す順序', () => {
     expect(releases).toEqual([]);
     // 次に文書の状態が更新されたら、もう一度だけ試す。
     root.render(<Probe updatedAt={T2} />);
-    await settle();
+    await requested(3);
     expect(pending).toHaveLength(3);
   });
 
   it('別の版へ切り替えると、前の版の表示が外れてから、前の権限を返す', async () => {
     await showFirst(false);
     root.render(<Probe revision="rev_2" updatedAt={T1} />);
+    await requested(2);
     await settle();
     // 新しい版の権限を待つ間、前の版の表示は外れている。前の権限は、まだ返していない。
     expect(displayedGrant()).toBe('');
     expect(releases).toEqual([]);
     pending[1]?.resolve(grant('g2', false));
-    await settle();
+    await released(1);
     expect(releases).toEqual([{ grants: ['g1'], displayed: 'g2' }]);
 
     // 切り替えに失敗した場合も、使わなくなった権限を返す。
     root.render(<Probe revision="rev_3" updatedAt={T1} />);
-    await settle();
+    await requested(3);
     pending[2]?.reject(new Error('failed'));
-    await settle();
+    await released(2);
     expect(releases.at(-1)).toEqual({ grants: ['g2'], displayed: '' });
   });
 
   it('表示をやめたら、使っていた権限を返す。待っている間に不要になった権限は、使わずに返す', async () => {
     await showFirst(false);
     root.render(<Probe revision="rev_2" updatedAt={T1} />);
-    await settle();
+    await requested(2);
     root.unmount();
-    await settle();
+    await released(1);
     expect(releases).toEqual([{ grants: ['g1'], displayed: '' }]);
     pending[1]?.resolve(grant('g2', false));
-    await settle();
+    await released(2);
     expect(releases.at(-1)).toEqual({ grants: ['g2'], displayed: '' });
     root = createRoot(container);
   });

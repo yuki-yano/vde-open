@@ -3,6 +3,8 @@ import type { AddressInfo } from 'node:net';
 
 import { isValidLogicalPath } from '@vde-open/document';
 
+import type { HtmlMode } from '@vde-open/shared';
+
 import type { PreviewFile, RenderService } from '../../render/render-service.ts';
 
 const CLOSE_GRACE_MS = 1000;
@@ -23,22 +25,25 @@ export interface PreviewServer {
   close(): Promise<void>;
 }
 
-// scriptを動かさない表示のpolicy（仕様10.5）。読み込めるのは、この表示に登録したfileだけ。
-function staticDocumentCsp(grantBase: string, ancestors: string[]): string {
+// 文書のpolicy（仕様10.5）。読み込めるのは、この表示に登録したfileだけ。
+// staticはscriptを動かさない。interactiveは、inlineと登録済みのscriptと、登録済みのfileへの通信だけを許す。
+// どちらも`allow-same-origin`を付けない（originを持たない）。
+function documentCsp(mode: HtmlMode, grantBase: string, ancestors: string[]): string {
+  const interactive = mode === 'interactive';
   return [
     "default-src 'none'",
-    "script-src 'none'",
+    interactive ? `script-src 'unsafe-inline' ${grantBase}` : "script-src 'none'",
     `style-src 'unsafe-inline' ${grantBase}`,
     `img-src ${grantBase} data:`,
     `font-src ${grantBase}`,
-    "connect-src 'none'",
+    interactive ? `connect-src ${grantBase}` : "connect-src 'none'",
     "object-src 'none'",
     "frame-src 'none'",
     "worker-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",
     `frame-ancestors ${ancestors.length > 0 ? ancestors.join(' ') : "'none'"}`,
-    'sandbox',
+    interactive ? 'sandbox allow-scripts' : 'sandbox',
   ].join('; ');
 }
 
@@ -54,7 +59,7 @@ function headersFor(file: PreviewFile, origin: string, ancestors: string[]) {
     'Cache-Control': 'no-store',
     'Content-Security-Policy':
       file.role === 'document'
-        ? staticDocumentCsp(`${origin}/r/${file.grant}/`, ancestors)
+        ? documentCsp(file.mode, `${origin}/r/${file.grant}/`, ancestors)
         : ASSET_CSP,
   };
   // sandboxの中の文書はoriginを持たないので、fontなどの読み込みはcross-originになる。

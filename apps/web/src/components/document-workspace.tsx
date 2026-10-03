@@ -11,10 +11,17 @@ interface DocumentWorkspaceProps {
   document: DocumentSummary;
   // 質問の変更の通知を受け取った回数。変わるたびに質問を取り直す。
   feedbackSignal: number;
+  // 表示の中から登録されていないfileを読み込もうとした、という通知の回数。
+  renderSignal: number;
 }
 
 // 文書の表示と、その文書への質問の回答panel。文書を切り替えたら作り直す（呼び出し側がkeyを渡す）。
-export function DocumentWorkspace({ api, document, feedbackSignal }: DocumentWorkspaceProps) {
+export function DocumentWorkspace({
+  api,
+  document,
+  feedbackSignal,
+  renderSignal,
+}: DocumentWorkspaceProps) {
   const pendingId = document.pendingRequestIds[0] ?? null;
   // 回答を送信した後も、同じ文書を表示している間は、その質問の状態（送信済み・取得済み）を表示する。
   const [remembered, setRemembered] = useState<string | null>(pendingId);
@@ -22,10 +29,20 @@ export function DocumentWorkspace({ api, document, feedbackSignal }: DocumentWor
   const requestId = pendingId ?? remembered;
   const { request, error, reload } = useFeedback(api, requestId, feedbackSignal, document.revision);
   const fixedRevision = request?.status === 'pending' ? request.revision : null;
+  // 回答待ちの質問があるなら、取得するまで文書を表示しない。表示する版と、HTMLから回答案を
+  // 受け付けるかは、質問で決まる（取得できなかったときは、文書の現在の版を表示する）。
+  const waitingForRequest = pendingId !== null && request === null && error === null;
 
   return (
     <div className="flex min-w-0 flex-1">
-      <Viewer api={api} document={document} fixedRevision={fixedRevision} />
+      <Viewer
+        api={api}
+        document={document}
+        fixedRevision={fixedRevision}
+        request={request}
+        renderSignal={renderSignal}
+        waitingForRequest={waitingForRequest}
+      />
       {request ? (
         <FeedbackPanel key={request.requestId} api={api} request={request} reload={reload} />
       ) : (

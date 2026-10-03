@@ -51,4 +51,10 @@ export const LIMITS = {
   // 回答を待つ時間（秒）。
   feedbackWaitDefaultSeconds: 120,
   feedbackWaitMaxSeconds: 3600,
+  // HTMLと本体の間の通信（MessagePort）の1件の大きさ（JSONのUTF-8）と、件数（仕様11.7）。
+  bridgeInboundFrameBytes: 128 * KiB,
+  bridgeOutboundFrameBytes: 256 * KiB,
+  bridgeMessagesPerSecond: 20,
+  // 1つの表示で記録する、登録されていないfileの読み込みの数。
+  renderMissingPerGrant: 32,
 } as const;
