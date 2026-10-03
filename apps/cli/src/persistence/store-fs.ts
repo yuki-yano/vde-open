@@ -1,5 +1,7 @@
 import { constants } from 'node:fs';
-import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, stat } from 'node:fs/promises';
+
+import { removeWithRetry, renameWithRetry } from './fs-retry.ts';
 
 // File operations used by StateStore. Tests replace this interface for fault injection.
 export interface StoreFs {
@@ -46,7 +48,7 @@ export const nodeStoreFs: StoreFs = {
   },
 
   async rename(from, to) {
-    await rename(from, to);
+    await renameWithRetry(from, to);
   },
 
   async syncDirectory(path) {
@@ -61,7 +63,7 @@ export const nodeStoreFs: StoreFs = {
   },
 
   async remove(path) {
-    await rm(path, { force: true });
+    await removeWithRetry(path);
   },
 
   async list(path) {

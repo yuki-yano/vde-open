@@ -105,6 +105,18 @@ describe('SYS-001 status when the daemon is not running', () => {
 });
 
 describe('starting and stopping the daemon', () => {
+  it('stops cleanly from the CLI: exit 0, the lock is released, and no shutdown step fails', async () => {
+    t.write('a.md', '# a\n');
+    expect((await t.run(['open', 'a.md', '--json'])).exitCode).toBe(0);
+    const stopped = await t.run(['daemon', 'stop', '--json']);
+    expect(stopped.exitCode, stopped.stdout + stopped.stderr).toBe(0);
+    expect(stopped.json<{ wasRunning: boolean }>().data.wasRunning).toBe(true);
+    expect(lockIsHeld()).toBe(false);
+    const log = readFileSync(join(t.home, 'logs', 'daemon.jsonl'), 'utf8');
+    expect(log).toContain('"event":"daemon.shutdown"');
+    expect(log).not.toContain('"event":"daemon.shutdown_failed"');
+  });
+
   it('starts automatically for commands that need it, and leaves no runtime files after stopping', async () => {
     t.write('a.md', '# a\n');
     await t.run(['open', 'a.md', '--json']);

@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { rm, rmdir } from 'node:fs/promises';
+import { rmdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { IPC_PROTOCOL_VERSION, VdeError, type DaemonStatus, type Warning } from '@vde-open/shared';
@@ -25,6 +25,7 @@ import { startIpcServer, type IpcServer } from '../server/ipc-server.ts';
 import { createSessionService } from '../server/session-service.ts';
 import { createWatchService, type WatchService } from '../watch/watch-service.ts';
 import { measureHeap } from '../diagnostics/heap.ts';
+import { removeWithRetry } from '../persistence/fs-retry.ts';
 import { createParseService, type ParseService } from '../workers/parse-service.ts';
 import {
   acquireLock,
@@ -173,14 +174,21 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     await step('search', () => search?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
     await step('ipc', () => ipc?.close());
     // When the lock is lost, do not touch runtime files that may belong to a successor daemon.
-    await step('release', async () => {
-      if (!(await holdsLock(stateRoot, DAEMON_LOCK_NAME, daemonId))) return;
-      if (owned.socket && !isWindows) await rm(location.socketPath, { force: true });
-      if (owned.key) await rm(location.keyPath, { force: true });
-      if (owned.runtimeDir) await rmdir(location.runtimeDir).catch(() => undefined);
-      await removePointer(stateRoot, daemonId);
-      await releaseLock(stateRoot, DAEMON_LOCK_NAME, daemonId);
+    let ownsLock = false;
+    await step('release-check', async () => {
+      ownsLock = await holdsLock(stateRoot, DAEMON_LOCK_NAME, daemonId);
     });
+    if (ownsLock) {
+      await step('release-socket', async () => {
+        if (owned.socket && !isWindows) await removeWithRetry(location.socketPath);
+      });
+      await step('release-key', async () => {
+        if (owned.key) await removeWithRetry(location.keyPath);
+      });
+      if (owned.runtimeDir) await rmdir(location.runtimeDir).catch(() => undefined);
+      await step('release-pointer', () => removePointer(stateRoot, daemonId));
+      await step('release-lock', () => releaseLock(stateRoot, DAEMON_LOCK_NAME, daemonId));
+    }
     logger.log('daemon.shutdown', durations);
   };
 
@@ -207,7 +215,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     await ensurePrivateDirectory(location.runtimeDir, secure);
     owned.runtimeDir = true;
     // The lock is acquired and the directory is inspected. Any remaining socket belongs to a stopped daemon.
-    if (!isWindows) await rm(location.socketPath, { force: true });
+    if (!isWindows) await removeWithRetry(location.socketPath);
     const key = await createIpcKey(location.keyPath);
     owned.key = true;
 

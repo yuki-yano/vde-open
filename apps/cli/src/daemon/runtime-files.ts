@@ -1,9 +1,10 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { z } from 'zod';
 
+import { removeWithRetry, renameWithRetry } from '../persistence/fs-retry.ts';
 import { IPC_KEY_BYTES } from '../server/ipc-auth.ts';
 
 // Prefix of the lock file name. The actual file is `<name>.<generation>` (lock.ts).
@@ -39,17 +40,17 @@ export async function writePointer(stateRoot: string, pointer: RuntimePointer): 
   const target = join(stateRoot, POINTER_FILE);
   const temp = `${target}.${randomUUID()}.tmp`;
   await writeFile(temp, `${JSON.stringify(pointer)}\n`, { mode: 0o600 });
-  await rename(temp, target);
+  await renameWithRetry(temp, target);
 }
 
 export async function removePointer(stateRoot: string, daemonId: string): Promise<void> {
   const current = await readPointer(stateRoot);
-  if (current?.daemonId === daemonId) await rm(join(stateRoot, POINTER_FILE), { force: true });
+  if (current?.daemonId === daemonId) await removeWithRetry(join(stateRoot, POINTER_FILE));
 }
 
 export async function createIpcKey(keyPath: string): Promise<Buffer> {
   const key = randomBytes(IPC_KEY_BYTES);
-  await rm(keyPath, { force: true });
+  await removeWithRetry(keyPath);
   await writeFile(keyPath, key, { mode: 0o600, flag: 'wx' });
   return key;
 }

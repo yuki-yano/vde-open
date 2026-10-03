@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
@@ -22,6 +22,7 @@ import {
 } from '../daemon/lock.ts';
 import { DAEMON_LOCK_NAME, POINTER_FILE, readPointer } from '../daemon/runtime-files.ts';
 import { inspectPrivateDirectory } from '../daemon/secure-dir.ts';
+import { removeWithRetry, renameWithRetry } from '../persistence/fs-retry.ts';
 import { resolveRuntimeLocation, type PathEnvironment } from '../persistence/paths.ts';
 import { referencedBlobs } from '../persistence/state-schema.ts';
 import { decodeStateFile } from '../persistence/state-store.ts';
@@ -248,7 +249,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
       const pointer = await readPointer(stateRoot);
       let removed = false;
       if (pointer) {
-        await rm(join(stateRoot, POINTER_FILE), { force: true });
+        await removeWithRetry(join(stateRoot, POINTER_FILE));
         removed = true;
       }
       if ((await inspectPrivateDirectory(location.runtimeDir, secure)) === 'ok') {
@@ -257,7 +258,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
           location.keyPath,
         ]) {
           if ((await lstat(path).catch(() => null)) !== null) {
-            await rm(path, { force: true });
+            await removeWithRetry(path);
             removed = true;
           }
         }
@@ -270,11 +271,14 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
         const statePath = join(stateRoot, 'state.json');
         // Set the unreadable state aside instead of deleting it.
         if (state.status !== 'missing') {
-          await rename(statePath, join(stateRoot, `state.json.corrupt-${Date.now().toString()}`));
+          await renameWithRetry(
+            statePath,
+            join(stateRoot, `state.json.corrupt-${Date.now().toString()}`),
+          );
         }
         const temp = join(stateRoot, `.tmp-repair-${randomUUID()}`);
         await writeFile(temp, await readFile(join(stateRoot, 'state.prev.json')), { mode: 0o600 });
-        await rename(temp, statePath);
+        await renameWithRetry(temp, statePath);
         repairs.push('state-restored-from-backup');
         warnings.push({
           code: 'W_STATE_ROLLED_BACK',

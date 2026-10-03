@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { link, open, readdir, readFile, rename, rm } from 'node:fs/promises';
+import { link, open, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { z } from 'zod';
+
+import { removeWithRetry, renameWithRetry } from '../persistence/fs-retry.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -165,7 +167,7 @@ async function createExclusive(
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
     throw error;
   } finally {
-    await rm(temp, { force: true });
+    await removeWithRetry(temp);
   }
 }
 
@@ -220,12 +222,12 @@ export async function acquireLock(
     // If this is not the highest generation, acquisition did not complete. Delete the created file and decide again.
     const latest = (await listGenerations(directory, name)).at(-1);
     if (latest !== generation) {
-      await rm(join(directory, fileNameOf(name, generation)), { force: true });
+      await removeWithRetry(join(directory, fileNameOf(name, generation)));
       continue;
     }
     // Generations older than ours are no longer referenced.
     for (const older of await listGenerations(directory, name)) {
-      if (older < generation) await rm(join(directory, fileNameOf(name, older)), { force: true });
+      if (older < generation) await removeWithRetry(join(directory, fileNameOf(name, older)));
     }
     return { acquired: true, info };
   }
@@ -255,5 +257,5 @@ export async function releaseLock(directory: string, name: string, ownerId: stri
   } finally {
     await handle.close();
   }
-  await rename(temp, join(directory, fileNameOf(name, current.generation)));
+  await renameWithRetry(temp, join(directory, fileNameOf(name, current.generation)));
 }
