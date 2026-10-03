@@ -16,6 +16,7 @@ import {
 import { StateStore } from '../persistence/state-store.ts';
 import { nodeStoreFs, type StoreFs } from '../persistence/store-fs.ts';
 import { createRenderService } from '../render/render-service.ts';
+import { createSearchService, type SearchService } from '../search/search-service.ts';
 import { createEventHub } from '../server/event-hub.ts';
 import { startManagementServer, type ManagementServer } from '../server/http/management.ts';
 import { startPreviewServer, type PreviewServer } from '../server/http/preview.ts';
@@ -101,6 +102,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   let preview: PreviewServer | null = null;
   let watcher: WatchService | null = null;
   let parse: ParseService | null = null;
+  let search: SearchService | null = null;
   let announceStopping: () => void = () => undefined;
   let lockTimer: NodeJS.Timeout | null = null;
   let stopping: Promise<void> | null = null;
@@ -122,6 +124,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     await preview?.close();
     await store?.close();
     await parse?.close();
+    await search?.close();
     await ipc?.close();
     // lockを失っているときは、後継のdaemonのものかもしれないruntime fileに触れない。
     if (await holdsLock(stateRoot, DAEMON_LOCK_NAME, daemonId)) {
@@ -168,12 +171,24 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     };
     // 文書を閉じたら、その文書の表示の権限をすぐに失効させる。
     let pruneGrants: () => void = () => undefined;
+    const cursors = createCursorCodec(randomBytes(32));
+    // 検索のindexは、別のthreadに置く。保存はせず、起動のたびに作り直す。
+    // 文書の解析は、解析用のworkerで行う（検索のworkerを、重い解析で塞がない）。
+    search = createSearchService({
+      store: openedStore,
+      cursors,
+      analyze: (format, text) => parser.analyze(format, text),
+    });
+    const searching = search;
     const documents = new DocumentService({
       store: openedStore,
-      cursors: createCursorCodec(randomBytes(32)),
+      cursors,
+      searchStateOf: (documentId) => searching.stateOf(documentId),
       analyze: (format, text) => parser.analyze(format, text),
       scan: (kind, text) => parser.scan(kind, text),
       emit: (event) => {
+        // 開いている文書、公開している版、読めるかどうかが変わったら、indexを合わせる。
+        if (event.type !== 'focus-requested') searching.sync();
         events.publish(event);
         // 開いている文書が変わったら、監視するdirectoryと、表示の権限も合わせる。
         if (event.type === 'catalog-changed') {
@@ -218,6 +233,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sessions,
         events,
         render,
+        search: searching,
         previewOrigin,
         webRoot: webRootPath(),
         devOrigin,
@@ -234,6 +250,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     });
     const watching = watcher;
     watching.sync();
+    // 保存済みの文書を、indexへ入れ始める。
+    searching.sync();
 
     const methods: Record<string, (params: unknown) => Promise<MethodResult> | MethodResult> = {
       'daemon.status': (): MethodResult => {
@@ -263,6 +281,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       },
       'documents.list': (params) => documents.list(params),
       'documents.read': (params) => documents.read(params),
+      'documents.search': (params) => searching.search(params),
       'documents.close': async (params) => {
         const result = await documents.close(params);
         watching.sync();

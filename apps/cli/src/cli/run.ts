@@ -17,6 +17,7 @@ import {
   type OpenResult,
   type ReadResult,
   type RefreshResult,
+  type SearchResult,
   type Warning,
   type WatchListResult,
 } from '@vde-open/shared';
@@ -176,7 +177,22 @@ interface OpenOptions {
   json: boolean;
 }
 
+interface SearchOptions {
+  mode?: 'text' | 'exact' | 'path';
+  limit?: number;
+  document: string[];
+  maxBytes?: number;
+  cursor?: string;
+  json: boolean;
+}
+
+function parseSearchMode(value: string): 'text' | 'exact' | 'path' {
+  if (value === 'text' || value === 'exact' || value === 'path') return value;
+  throw new InvalidArgumentError('--modeはtext、exact、pathのいずれかです。');
+}
+
 interface ReadOptions {
+  section?: string;
   lines?: { start: number; end: number };
   revision?: string;
   maxBytes?: number;
@@ -425,10 +441,78 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     });
 
   program
+    .command('search')
+    .description('開いている文書を検索する。対象は、開いている文書だけ')
+    .argument('<query>', '検索する語。文字として扱い、正規表現としては解釈しない')
+    .option(
+      '--mode <mode>',
+      'text（語の一致。既定）、exact（連続した文字列だけ）、path（file名とpathだけ）',
+      parseSearchMode,
+    )
+    .option(
+      '--limit <n>',
+      `件数（既定${String(LIMITS.searchLimitDefault)}、最大${String(LIMITS.searchLimitMax)}）`,
+      parseInteger('--limit', 1, LIMITS.searchLimitMax),
+    )
+    .option(
+      '--document <documentId>',
+      '対象を絞る文書ID。複数回指定できる',
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .option(
+      '--max-bytes <n>',
+      `結果の上限byte数（既定${String(LIMITS.readMaxBytesDefault)}）`,
+      parseInteger('--max-bytes', 1, Number.MAX_SAFE_INTEGER),
+    )
+    .option('--cursor <cursor>', '前回の結果のnextCursor')
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (query: string, options: SearchOptions) => {
+      await execute<SearchResult>(
+        'search',
+        options.json,
+        () => {
+          if (
+            options.maxBytes !== undefined &&
+            (options.maxBytes < LIMITS.readMaxBytesMin || options.maxBytes > LIMITS.readMaxBytesMax)
+          ) {
+            throw new VdeError(
+              'E_INVALID_ARGUMENT',
+              `--max-bytesは${String(LIMITS.readMaxBytesMin)}〜${String(LIMITS.readMaxBytesMax)}で指定してください。`,
+              { min: LIMITS.readMaxBytesMin, max: LIMITS.readMaxBytesMax },
+            );
+          }
+          return viaDaemon('documents.search', {
+            query,
+            documents: options.document,
+            ...(options.mode === undefined ? {} : { mode: options.mode }),
+            ...(options.limit === undefined ? {} : { limit: options.limit }),
+            ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          });
+        },
+        (data) =>
+          [
+            ...data.hits.map(
+              (hit) =>
+                `${hit.documentId}  ${hit.sectionId}  ${escapeForTerminal(hit.title)}${hit.headingPath.length > 0 ? `  ＞ ${escapeForTerminal(hit.headingPath.join(' ＞ '))}` : ''}\n    ${escapeForTerminal(hit.excerpt)}`,
+            ),
+            `${String(data.hits.length)}件／検索した文書 ${String(data.searchedDocuments)}件（開いている文書 ${String(data.registeredDocuments)}件）${data.truncated ? '　続きがあります' : ''}`,
+            ...(data.incomplete
+              ? [
+                  `一部の文書は検索できていません（準備中 ${String(data.indexingDocuments.length)}件、失敗 ${String(data.failedDocuments.length)}件）`,
+                ]
+              : []),
+          ].join('\n'),
+      );
+    });
+
+  program
     .command('read')
-    .description('開いている文書の原文または見出しの構造を取得する')
+    .description('開いている文書の原文、見出しの構造、または1つの節の本文を取得する')
     .argument('<documentId>', '文書ID')
     .option('--outline', '見出しの構造を取得する', false)
+    .option('--section <sectionId>', '1つの節の、抽出した本文を取得する（例: sec_0002）')
     .option('--lines <A:B>', '原文の行範囲（1始まり、両端を含む）', parseLines)
     .option('--revision <revision>', '取得する版。保持されていなければerror')
     .option(
@@ -453,15 +537,28 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
               { min: LIMITS.readMaxBytesMin, max: LIMITS.readMaxBytesMax },
             );
           }
-          if (options.outline && (options.lines !== undefined || options.cursor !== undefined)) {
+          const selectors = [
+            options.outline,
+            options.section !== undefined,
+            options.lines !== undefined,
+          ].filter(Boolean).length;
+          if (selectors > 1) {
             throw new VdeError(
               'E_INVALID_ARGUMENT',
-              '--outlineと--lines／--cursorは併用できません。',
+              '--outline、--section、--linesは、どれか1つだけ指定できます。',
+            );
+          }
+          // cursorは、発行したときの版と取得の種類で続きを取る。範囲や版は変えられない。
+          if (options.cursor !== undefined && (selectors > 0 || options.revision !== undefined)) {
+            throw new VdeError(
+              'E_INVALID_ARGUMENT',
+              '--cursorと、--revision・--outline・--section・--linesは併用できません。',
             );
           }
           return viaDaemon('documents.read', {
             documentId,
             outline: options.outline,
+            ...(options.section === undefined ? {} : { section: options.section }),
             ...(options.lines === undefined ? {} : { lines: options.lines }),
             ...(options.revision === undefined ? {} : { revision: options.revision }),
             ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),

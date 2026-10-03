@@ -31,6 +31,7 @@ import {
   type LinkOpenResult,
   type ListResult,
   type OpenResult,
+  type OutlineItem,
   type ReadResult,
   type RefreshResult,
   type SourceState,
@@ -84,6 +85,8 @@ export interface DocumentServiceOptions {
   readSource?: (path: string) => Promise<LoadedSource>;
   // 文書やCSSが参照するlocal fileの候補を集める。daemonではworkerへ出す。
   scan?: (kind: ScanKind, text: string) => Promise<ScannedReference[]>;
+  // 一覧に出す、文書ごとの検索の状態。指定がなければ、検索の対象外として扱う。
+  searchStateOf?: (documentId: string) => DocumentSummary['searchState'];
 }
 
 // fileを読み直した結果。signatureは、読み取った内容に対応するfileの状態。読めなかったらnull。
@@ -173,6 +176,10 @@ interface UpsertOutcome {
   revisionChanged: boolean;
 }
 
+// 解析結果を保持する上限。
+const ANALYSIS_CACHE_ENTRIES = 32;
+const ANALYSIS_CACHE_BYTES = 32 * 1024 * 1024;
+
 // 一時的に消えているfileを待つ上限（仕様8.5）。
 const MISSING_RETRY_MS = 1000;
 const MISSING_RETRY_INTERVAL_MS = 100;
@@ -181,7 +188,11 @@ function profileOf(format: DocumentFormat): string {
   return format === 'markdown' ? MARKDOWN_PARSER_PROFILE : HTML_STATIC_PARSER_PROFILE;
 }
 
-export function toSummary(record: DocumentRecord, order: number): DocumentSummary {
+export function toSummary(
+  record: DocumentRecord,
+  order: number,
+  searchState: DocumentSummary['searchState'] = 'excluded',
+): DocumentSummary {
   return {
     documentId: record.documentId,
     key: record.key,
@@ -192,8 +203,7 @@ export function toSummary(record: DocumentRecord, order: number): DocumentSummar
     pathSegments: record.pathSegments,
     revision: record.currentRevision,
     sourceState: record.sourceState,
-    // 検索indexはP4で実装する。それまでは検索対象に入らない。
-    searchState: 'excluded',
+    searchState,
     openedAt: record.openedAt,
     updatedAt: record.updatedAt,
     order,
@@ -273,8 +283,11 @@ export class DocumentService {
   readonly #analyze: ((format: DocumentFormat, text: string) => Promise<DocumentAnalysis>) | null;
   readonly #readSource: (path: string) => Promise<LoadedSource>;
   // revisionごとの解析結果。古い版の遅い結果を、新しい版の結果として使わないためにrevisionで引く。
-  readonly #analysisCache = new Map<string, DocumentAnalysis>();
+  // 節の本文を含むので、件数と、元の文書の大きさの合計の両方で上限を設ける。
+  readonly #analysisCache = new Map<string, { analysis: DocumentAnalysis; bytes: number }>();
+  #analysisCacheBytes = 0;
   readonly #scan: (kind: ScanKind, text: string) => Promise<ScannedReference[]>;
+  readonly #searchStateOf: (documentId: string) => DocumentSummary['searchState'];
   // canonical pathごとの、公開済みの内容に対応するfileの状態と、文書のほかに変更を追うfile。
   // 読めなかったときのsignatureはnull。
   readonly #signatures = new Map<string, { signature: string | null; files: string[] }>();
@@ -292,6 +305,7 @@ export class DocumentService {
     this.#analyze = options.analyze ?? null;
     this.#readSource = options.readSource ?? readSourceFile;
     this.#scan = options.scan ?? ((kind, text) => Promise.resolve(scanReferences(kind, text)));
+    this.#searchStateOf = options.searchStateOf ?? (() => 'excluded');
   }
 
   // fileを読んでから公開するまでを、同じfileについては1件ずつ行う。
@@ -658,6 +672,7 @@ export class DocumentService {
             toSummary(
               state.documents[documentId] as DocumentRecord,
               state.openOrder.indexOf(documentId),
+              this.#searchStateOf(documentId),
             ),
           ),
           watchRules: structuredClone(rules),
@@ -981,7 +996,11 @@ export class DocumentService {
     return {
       data: {
         documents: page.map((documentId, index) =>
-          toSummary(state.documents[documentId] as DocumentRecord, offset + index),
+          toSummary(
+            state.documents[documentId] as DocumentRecord,
+            offset + index,
+            this.#searchStateOf(documentId),
+          ),
         ),
         totalDocuments: state.openOrder.length,
         nextCursor:
@@ -1014,20 +1033,30 @@ export class DocumentService {
     const params = readParamsSchema.parse(rawParams);
     const state = this.#store.payload;
     const record = this.#requireOpen(params.documentId);
-
-    if (params.outline) {
-      if (params.lines !== undefined || params.cursor !== undefined) {
-        throw new VdeError('E_INVALID_ARGUMENT', '--outlineと--lines／--cursorは併用できません。');
-      }
-      return this.#readOutline(record, params.revision);
+    const selectors = [params.outline, params.section !== undefined, params.lines !== undefined];
+    if (selectors.filter(Boolean).length > 1) {
+      throw new VdeError(
+        'E_INVALID_ARGUMENT',
+        '--outline、--section、--linesは、どれか1つだけ指定できます。',
+      );
     }
 
+    let mode: ReadResult['mode'] = params.outline
+      ? 'outline'
+      : params.section !== undefined
+        ? 'section'
+        : 'source';
     let revision = params.revision ?? record.currentRevision;
-    let startByte: number | null = null;
+    let sectionId = params.section;
+    let offset: number | null = null;
     let endByteExclusive: number | null = null;
     if (params.cursor !== undefined) {
-      if (params.revision !== undefined || params.lines !== undefined) {
-        throw new VdeError('E_INVALID_ARGUMENT', 'cursorと--revision／--linesは併用できません。');
+      // cursorは、発行したときの版と取得の種類に固定される。範囲や版を、後から変えられない。
+      if (params.revision !== undefined || selectors.some(Boolean)) {
+        throw new VdeError(
+          'E_INVALID_ARGUMENT',
+          'cursorと、--revision・--outline・--section・--linesは併用できません。',
+        );
       }
       const payload = this.#cursors.decode(params.cursor, 'read');
       if (payload['documentId'] !== params.documentId) {
@@ -1035,15 +1064,23 @@ export class DocumentService {
           reason: 'document',
         });
       }
+      mode = payload['mode'] as ReadResult['mode'];
       revision = payload['revision'] as string;
-      startByte = payload['offset'] as number;
-      endByteExclusive = payload['end'] as number;
+      offset = payload['offset'] as number;
+      endByteExclusive = (payload['end'] as number | undefined) ?? null;
+      sectionId = payload['sectionId'] as string | undefined;
     }
 
+    // 保持していない版を、現在の版で代用しない。cursorでの続きでも、そのたびに確かめる。
     const entry = this.#requireRevision(record, revision);
+    if (mode === 'outline') return this.#readOutline(record, entry, params.maxBytes, offset ?? 0);
+    if (mode === 'section') {
+      return this.#readSection(record, entry, sectionId ?? '', params.maxBytes, offset ?? 0);
+    }
+
     const source = await this.#store.readBlob(entry.sourceSha256);
     const index = buildLineIndex(source);
-
+    let startByte = offset;
     if (startByte === null || endByteExclusive === null) {
       if (params.lines) {
         const range = byteRangeOfLines(index, params.lines.start, params.lines.end);
@@ -1080,6 +1117,7 @@ export class DocumentService {
         nextCursor: truncated
           ? this.#cursors.encode({
               op: 'read',
+              mode: 'source',
               documentId: record.documentId,
               revision: entry.revision,
               offset: cut,
@@ -1104,24 +1142,104 @@ export class DocumentService {
     return entry;
   }
 
+  // 見出しの一覧。要素は分割せず、配列のJSON表現が予算に収まるところまで返す（仕様5.4）。
   async #readOutline(
     record: DocumentRecord,
-    requestedRevision: string | undefined,
+    entry: RevisionRecord,
+    maxBytes: number,
+    offset: number,
   ): Promise<ServiceResult<ReadResult>> {
-    const entry = this.#requireRevision(record, requestedRevision ?? record.currentRevision);
     // 解析の条件は、版を作ったときの形式で決める。文書の現在の形式では決めない。
     const analysis = await this.#analysisOf(entry);
+    const outline: OutlineItem[] = [];
+    let bytes = 2;
+    for (const item of analysis.outline.slice(offset)) {
+      const size = Buffer.byteLength(JSON.stringify(item), 'utf8') + (outline.length > 0 ? 1 : 0);
+      if (bytes + size > maxBytes) {
+        if (outline.length === 0) {
+          // 空の配列と続きのcursorを返すと、位置が進まない。必要な大きさを伝える。
+          throw new VdeError(
+            'E_MAX_BYTES_TOO_SMALL',
+            '--max-bytesが小さく、1件目の見出しを返せません。',
+            { requiredBytes: bytes + size },
+          );
+        }
+        break;
+      }
+      outline.push(item);
+      bytes += size;
+    }
+    const next = offset + outline.length;
+    const truncated = next < analysis.outline.length;
     return {
       data: {
         documentId: record.documentId,
         revision: entry.revision,
         mode: 'outline',
-        outline: analysis.outline,
+        outline,
         // 原文の位置を正確に得られないので、推測した行番号は返さない（仕様8.3）。
         sourceRange: null,
         extraction: entry.format === 'markdown' ? 'markdown' : 'static-html',
-        truncated: false,
-        nextCursor: null,
+        truncated,
+        nextCursor: truncated
+          ? this.#cursors.encode({
+              op: 'read',
+              mode: 'outline',
+              documentId: record.documentId,
+              revision: entry.revision,
+              offset: next,
+            })
+          : null,
+      },
+      catalogVersion: this.#store.payload.catalogVersion,
+      warnings: [],
+    };
+  }
+
+  // 1つの節の、抽出した本文。見出しと本文を返す。原文そのものではない。
+  async #readSection(
+    record: DocumentRecord,
+    entry: RevisionRecord,
+    sectionId: string,
+    maxBytes: number,
+    offset: number,
+  ): Promise<ServiceResult<ReadResult>> {
+    const analysis = await this.#analysisOf(entry);
+    const section = analysis.sections.find((candidate) => candidate.sectionId === sectionId);
+    if (!section) {
+      // 節のIDは、版の中でだけ決まる。別の版のIDは使えない。
+      throw new VdeError('E_SECTION_NOT_FOUND', '節が見つかりません。', {
+        documentId: record.documentId,
+        revision: entry.revision,
+        sectionId,
+      });
+    }
+    const content = Buffer.from(
+      [section.title, section.text].filter((part) => part !== '').join('\n\n'),
+      'utf8',
+    );
+    const cut = truncateAtCodePoint(content, offset, content.byteLength, maxBytes);
+    const truncated = cut < content.byteLength;
+    return {
+      data: {
+        documentId: record.documentId,
+        revision: entry.revision,
+        mode: 'section',
+        sectionId,
+        content: content.subarray(offset, cut).toString('utf8'),
+        sourceRange: null,
+        extraction: entry.format === 'markdown' ? 'markdown' : 'static-html',
+        truncated,
+        nextCursor: truncated
+          ? this.#cursors.encode({
+              op: 'read',
+              mode: 'section',
+              documentId: record.documentId,
+              revision: entry.revision,
+              sectionId,
+              offset: cut,
+            })
+          : null,
       },
       catalogVersion: this.#store.payload.catalogVersion,
       warnings: [],
@@ -1130,17 +1248,25 @@ export class DocumentService {
 
   async #analysisOf(entry: RevisionRecord): Promise<DocumentAnalysis> {
     const cached = this.#analysisCache.get(entry.revision);
-    if (cached) return cached;
+    if (cached) return cached.analysis;
     if (!this.#analyze) {
       throw new VdeError('E_INTERNAL', '文書の解析が利用できません。');
     }
     const source = await this.#store.readBlob(entry.sourceSha256);
     const analysis = await this.#analyze(entry.format, source.toString('utf8'));
     // 結果は解析した版にだけ結び付ける。別の版の結果として返ることはない。
-    this.#analysisCache.set(entry.revision, analysis);
-    while (this.#analysisCache.size > 64) {
+    if (!this.#analysisCache.has(entry.revision)) {
+      this.#analysisCache.set(entry.revision, { analysis, bytes: entry.byteLength });
+      this.#analysisCacheBytes += entry.byteLength;
+    }
+    while (
+      this.#analysisCache.size > 1 &&
+      (this.#analysisCache.size > ANALYSIS_CACHE_ENTRIES ||
+        this.#analysisCacheBytes > ANALYSIS_CACHE_BYTES)
+    ) {
       const oldest = this.#analysisCache.keys().next().value;
       if (oldest === undefined) break;
+      this.#analysisCacheBytes -= this.#analysisCache.get(oldest)?.bytes ?? 0;
       this.#analysisCache.delete(oldest);
     }
     return analysis;
@@ -1383,7 +1509,15 @@ export class DocumentService {
       data: {
         documents: targets.flatMap((documentId) => {
           const record = state.documents[documentId];
-          return record?.isOpen ? [toSummary(record, state.openOrder.indexOf(documentId))] : [];
+          return record?.isOpen
+            ? [
+                toSummary(
+                  record,
+                  state.openOrder.indexOf(documentId),
+                  this.#searchStateOf(documentId),
+                ),
+              ]
+            : [];
         }),
         changed,
       },

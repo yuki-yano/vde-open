@@ -144,3 +144,18 @@ test('一覧から外しても、fileは残る', async ({ page }) => {
   const { join } = await import('node:path');
   expect(existsSync(join(t.work, 'a.md'))).toBe(true);
 });
+
+test('見出しの一覧が1回の応答に収まらない文書でも、すべての見出しを表示する', async ({ page }) => {
+  // 見出しの一覧のJSONが、1回の応答の上限（1MiB）を超える文書。
+  const headings = Array.from(
+    { length: 1500 },
+    (_, index) => `## 見出し${String(index).padStart(4, '0')} ${'x'.repeat(380)}\n\n本文。\n`,
+  );
+  t.write('many.md', `# 多くの見出し\n\n${headings.join('\n')}`);
+  await t.json(['open', 'many.md']);
+  await page.goto(await t.bootstrapUrl());
+  const outline = page.getByRole('complementary', { name: '見出し' });
+  await expect(outline.getByRole('listitem')).toHaveCount(1501);
+  await expect(outline.getByRole('listitem').last()).toContainText('見出し1499');
+  await expect(outline.getByRole('alert')).toHaveCount(0);
+});

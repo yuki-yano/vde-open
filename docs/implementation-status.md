@@ -16,7 +16,7 @@
 | P1 | 完了報告済み | restart復元、crash/disk error、同時起動テスト |
 | P2 | 完了報告済み | 文書追加とatomic saveが実UIへ反映。raw HTMLが動かない。未認証では管理APIを読めない |
 | P3 | 完了報告済み | security fixture、path traversal、他文書/API遮断 |
-| P4 | 未着手 | Agent検索benchmark fixtureと閉じた文書除外 |
+| P4 | 完了報告済み | Agent検索benchmark fixtureと閉じた文書除外 |
 | P5 | 未着手 | 保存前成功なし、タイムアウト・restart・二重送信テスト |
 | P6 | 未着手 | HTML回答案→本体確認→CLI取得、偽submit拒否 |
 | P7 | 未着手 | 全必須受け入れ項目、最終実行結果、制約の説明 |
@@ -156,7 +156,7 @@ P2時点の制約:
 
 ## P3の記録
 
-レビュー: 1往復目でmust-fix 5件とshould-fix 3件、2往復目でmust-fix 2件とshould-fix 2件、3〜5往復目でmust-fix各1件。すべて修正した。5往復目の指摘への対応は、レビューの往復の上限（5回）に達したため、再レビューを受けていない。P4のレビューで合わせて確認する。以下は1往復目から順に、各往復の内容。
+レビュー: 1往復目でmust-fix 5件とshould-fix 3件、2往復目でmust-fix 2件とshould-fix 2件、3〜5往復目でmust-fix各1件。すべて修正した。5往復目の指摘への対応は、往復の上限（5回）に達した後、P3のcommit（`9cf2aab`）の後に再レビューを受け、指摘なしだった（StrictMode、版の切り替え後の取得失敗、表示する版の消失、差し替えの反映前のunmountも、レビュー側で確かめた）。以下は1往復目から順に、各往復の内容。
 
 - 画像などの名前を付けたsymlinkで、assets-rootの中の秘密のfile（`.env`など）を登録できた → 登録できるかの検査を、symlinkを解決した後の実体にも適用した。
 - 表示用の変換を待つ間に文書が閉じられると、閉じた後から表示の権限が発行された → 権限を、発行時点の「文書を閉じた回数」に結び付け、変換の後に確かめ直すようにした。
@@ -212,6 +212,61 @@ P3時点の制約:
 - stdinから開いた文書のassetは、開いた時点の内容で固定される（監視しない）。
 - e2eはChromiumだけ。FirefoxとWebKitでは実行していない（NOT RUN）。Windowsは未検証。
 
+## P4の記録
+
+レビュー: 1往復目でmust-fix 5件とshould-fix 4件、2往復目でmust-fix 4件、3往復目でmust-fix 1件とshould-fix 3件、4往復目でshould-fix 2件。すべて修正し、5往復目は指摘なし。以下は1往復目から順に、各往復の内容。
+
+- 検索のcursorが一覧の版と位置だけを持ち、indexへの反映が進んで並びが変わっても続きを返した（同じhitが2回出た） → cursorを、全hitの並び（文書・版・節）のdigestにも固定した。
+- 続きの検索を待っている間に一覧が変わっても、古い位置を新しい一覧へ当てはめた → 続きの検索では、検索の後にも一覧の版を確かめ、変わっていればやり直さずに`E_CURSOR_STALE`にした。
+- 本文を変えずにtitleだけを変えると、検索とhitのtitleが古いままだった → title・path・順番の変化もindexへ反映するようにした（本文は入れ直さない）。
+- indexを作っている間、検索がworkerの処理の後ろで待ち、反映を待つ上限（2秒）を超えた → 文書の解析を解析用のworkerへ移し、indexへは本文を小さく分けて入れるようにした。長い節は重ねながら分ける。
+- 見出しの一覧を分けて返すようにしたのに、管理UIが最初の分しか取得せず、見出しが欠けた → UIが続きをcursorで最後まで取得するようにした。取得できなかったときは、空の一覧にせず、そのことを表示する。
+- （should-fix）対象の文書がすべて解析できなくても、0件の成功として返した → 1件も検索できなければ`E_INDEX_NOT_READY`にし、内訳を返す。
+- （should-fix）空の文書のhitの節を取得できなかった → 空の文書も空の序文（`sec_0000`）を持つようにした。
+- （should-fix）綴りのゆらぎが語の長さに比例して2文字以上の違いを許し、1文字の英数が語の途中に一致した → ゆらぎは1文字まで、語の途中への一致は2文字以上だけにした。
+- （should-fix）queryの連続した空白をそろえていたので、`exact`と`path`で空白を含む文字列を探せなかった → `exact`と`path`は指定どおりの文字列で照合する。
+- （2往復目）長い節を分けて入れたことで、語の一致の判定が分けた部分ごとになり、離れた部分にある語の組み合わせを取りこぼした → 語ごとに一致を引き、節の単位で、すべての語が現れるかを判定するようにした。
+- （2往復目）登録の途中でやめた版へ戻ると、「登録中」の記録が残ったまま入れ直されず、ずっと検索できなかった → やめた登録の記録を消し、残っている「登録中」の記録は終わらなかった登録として入れ直すようにした。
+- （2往復目）titleの反映を待っている文書を、検索済みとして数え、一覧でも検索できる状態として示していた → 待機の判定、集計、一覧で、版と属性の両方を見る同じ判定を使うようにした。
+- （2往復目）1回に送る量を本文の長さだけで数えていて、本文のない節が多い文書（長い見出しの下に多くの見出し）では、一度に全部を送ってworkerを塞いだ → 見出しを含めた長さと、部分の数で区切るようにした。長い見出しも分けて入れる。
+- （3往復目）登録を中断したときに登録の記録を消したので、workerに残った前の確定済みの内容が、文書を閉じた後も消えなかった（検索が常に不完全になり、続きも取れなかった） → workerが内容を持ちうる文書を、登録の記録とは別に覚え、閉じた文書には必ず削除を送るようにした。
+- （3往復目、should-fix）節の形（見出しの全文と上位の見出しの全文）を毎回送り、上限を超えてから区切っていたので、1回分が上限を大きく超えた → 見出しの全文はworkerが分けた部分から組み立て、上位の見出しは親の節の番号で持つようにした。上限は、超える前に区切る。
+- （3往復目、should-fix）上位の見出しの先頭1Ki文字だけを文脈にしていたので、長い上位の見出しがあると、直近の上位の見出しの語で探せなかった → 上位の見出しを複製せず、上位の見出しにある語を配下の節の一致として数えるようにした。
+- （3往復目、should-fix）見出しと本文に分かれて一致した節の抜粋が、見出しに一致した部分から取られ、本文の一致した位置を含まなかった → 本文に一致した部分を優先して抜粋に使うようにした。
+- （4往復目、should-fix）見出しの連続した一致で一致の種類を上げるときに、抜粋に使う部分も見出しの部分へ置き換えていた → 抜粋に使う部分を一致の種類とは別に選び、本文に一致した部分を置き換えないようにした。
+- （4往復目、should-fix）配下の節へ引き継ぐscoreに、上位の節のtitle・path・本文への一致の点数が混ざり、文書のtitleで順位が変わった → 見出しのfieldだけで引き直したscoreを引き継ぐようにした。
+
+実行環境: macOS（Darwin 25.6.0、arm64）、Node.js 24.21.0、pnpm 12.8.1、Chromium（Playwright 1.63.0同梱のChrome Headless Shell 153）。
+
+| command | 結果 |
+|---|---|
+| `pnpm format:check` | exit 0 |
+| `pnpm lint` | exit 0 |
+| `pnpm typecheck` | exit 0 |
+| `pnpm test` | exit 0（44 files、394 tests） |
+| `pnpm build` | exit 0（`dist/workers/search-worker.js`を追加） |
+| `pnpm test:pack` | exit 0（手順6に、導入先だけで検索のworkerが動くことの確認を追加） |
+| `pnpm test:e2e` | exit 0（Chromiumで18件。見出しの一覧を分けて返す文書の表示を追加） |
+
+実装したもの:
+
+- 節の抽出（`packages/document/src/analysis.ts`）。Markdownはroot直下の見出しで、HTMLは見出し要素で区切る。序文は`sec_0000`。
+- 検索（`apps/cli/src/search/`）。語への分割（`Intl.Segmenter`と英数identifier）、MiniSearchでの語の一致、正規化した本文への連続した文字列の一致、順位付け（ADR-0010）。indexは別のthread（`apps/cli/src/workers/search-worker.ts`）に置く。
+- 検索と公開済みの版の対応（`apps/cli/src/search/search-service.ts`）。indexの反映を最大2秒待ち、返す前に、開いていて版・title・pathが一致するhitだけに絞る。検索できない文書はIDを示す。文書の解析は解析用のworkerで行い、indexへは本文を小さく分けて入れる。
+- CLI。`search <query>`（`--mode text|exact|path`、`--limit`、`--document`、`--max-bytes`、`--cursor`）、`read --section <sectionId>`。見出しの一覧と検索結果は、`--max-bytes`の予算で要素を分割せずに返し、続きをcursorで取得できる。
+- 管理API。`GET /search`、`GET /documents/:id/content`の`section`。一覧の`searchState`。
+- `docs/agent-usage.md`（Agentからの使い方）。
+- 検索用のfixture（`tests/fixtures/search/`）。
+
+P4時点の制約:
+
+- 管理UIの検索（`Cmd/Ctrl+K`）は未実装。P7で、この検索APIを使って実装する。
+- 意味の近さでの検索はしない。綴りのゆらぎは、英数の4文字以上の語で1文字違いまで。
+- 節の原文での位置（`sourceRange`）は返さない。原文の行は`read --lines`で取得する。
+- HTMLの抽出は静的な解析。scriptが作る内容と、CSSでの表示の有無は反映しない。
+- 100文書・1,000文書での所要時間とmemoryは、P7で測る。
+- Windowsは未検証。
+
 ## 受け入れテストの対応
 
 状態は「未着手／PASS／FAIL／NOT RUN」。担当は、そのIDが最後に必要とする機能がそろうフェーズ。IDをPASSにするのは担当フェーズで全条件を検証したときだけで、先行フェーズで一部だけ検証したものは備考に部分検証として書く。
@@ -261,27 +316,27 @@ P3時点の制約:
 | DOC-009 | P2 | PASS | `tests/integration/watch.test.ts`、`tests/e2e/viewer.spec.ts` |  |
 | DOC-010 | P2 | PASS | `apps/cli/src/documents/service-analysis.test.ts` |  |
 | DOC-011 | P3 | PASS | `tests/integration/preview.test.ts` |  |
-| DOC-012 | P4 | 未着手 |  |  |
+| DOC-012 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
 | DOC-013 | P2 | PASS | `tests/e2e/workspace.spec.ts` |  |
 | DOC-014 | P2 | PASS | `tests/e2e/workspace.spec.ts`、`tests/e2e/viewer.spec.ts` |  |
 | DOC-015 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | DOC-016 | P5 | 未着手 |  | P1・P2で部分検証済み（close --allで文書と監視ruleをすべて外す）。回答履歴はP5 |
-| SRCH-001 | P4 | 未着手 |  |  |
-| SRCH-002 | P4 | 未着手 |  |  |
-| SRCH-003 | P4 | 未着手 |  |  |
-| SRCH-004 | P4 | 未着手 |  |  |
-| SRCH-005 | P4 | 未着手 |  |  |
-| SRCH-006 | P4 | 未着手 |  |  |
-| SRCH-007 | P4 | 未着手 |  |  |
-| SRCH-008 | P4 | 未着手 |  |  |
-| SRCH-009 | P4 | 未着手 |  |  |
-| SRCH-010 | P4 | 未着手 |  |  |
-| SRCH-011 | P4 | 未着手 |  |  |
-| SRCH-012 | P4 | 未着手 |  |  |
-| SRCH-013 | P4 | 未着手 |  |  |
-| SRCH-014 | P4 | 未着手 |  |  |
-| SRCH-015 | P4 | 未着手 |  |  |
-| SRCH-016 | P4 | 未着手 |  |  |
+| SRCH-001 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-index.test.ts` |  |
+| SRCH-002 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-index.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
+| SRCH-003 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`、`apps/cli/src/search/tokenize.test.ts`、`tests/integration/search.test.ts` |  |
+| SRCH-004 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`、`tests/integration/search.test.ts` |  |
+| SRCH-005 | P4 | PASS | `apps/cli/src/search/search-index.test.ts` |  |
+| SRCH-006 | P4 | PASS | `apps/cli/src/search/search-index.test.ts` |  |
+| SRCH-007 | P4 | PASS | `tests/integration/search.test.ts` |  |
+| SRCH-008 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
+| SRCH-009 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/documents/cursor.test.ts` |  |
+| SRCH-010 | P4 | PASS | `tests/integration/search.test.ts` |  |
+| SRCH-011 | P4 | PASS | `tests/integration/search.test.ts`、`packages/document/src/source-lines.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
+| SRCH-012 | P4 | PASS | `tests/integration/search.test.ts` |  |
+| SRCH-013 | P4 | PASS | `tests/integration/search.test.ts`、`packages/document/src/analysis.test.ts` |  |
+| SRCH-014 | P4 | PASS | `packages/document/src/analysis.test.ts`、`tests/integration/search.test.ts` |  |
+| SRCH-015 | P4 | PASS | `apps/cli/src/search/search-service.test.ts`、`tests/integration/search.test.ts` |  |
+| SRCH-016 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`、`tests/integration/search.test.ts` |  |
 | MD-001 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
 | MD-002 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
 | MD-003 | P2 | PASS | `packages/document/tests/react.test.tsx`、`tests/e2e/viewer.spec.ts` |  |
@@ -302,7 +357,7 @@ P3時点の制約:
 | SEC-012 | P3 | PASS | `packages/document/src/css-transform.test.ts`、`tests/integration/preview.test.ts` | 外部への通信は、応答のpolicy（CSP）でも止める。変換は、それに頼らずに取り除く |
 | SEC-013 | P6 | 未着手 |  | module importの実行にはinteractiveが必要。P3で部分検証済み（`tests/integration/preview.test.ts`: 登録していないpathは404で、同じdirectoryのfileも公開されない） |
 | SEC-014 | P3 | PASS | `tests/integration/preview.test.ts` |  |
-| SEC-015 | P3 | PASS | `tests/integration/preview.test.ts`、`apps/cli/src/render/render-service.test.ts`、`apps/web/src/lib/use-render-grant.dom.test.tsx`、`tests/e2e/html.spec.ts` | UIが権限を返す順序についての最後の修正は、再レビューを受けていない |
+| SEC-015 | P3 | PASS | `tests/integration/preview.test.ts`、`apps/cli/src/render/render-service.test.ts`、`apps/web/src/lib/use-render-grant.dom.test.tsx`、`tests/e2e/html.spec.ts` | UIが権限を返す順序についての最後の修正は、commit後の再レビューで指摘なし |
 | SEC-016 | P3 | PASS | `tests/integration/preview.test.ts` |  |
 | SEC-017 | P3 | PASS | `tests/integration/preview.test.ts` |  |
 | SEC-018 | P5 | 未着手 |  | P1〜P3で部分検証済み（`tests/integration/daemon.test.ts`: logに本文・title・path・keyがない。`tests/integration/preview.test.ts`: 表示の権限と表示用URLのpathがない）。回答とdraftを含む操作はP5 |
@@ -346,10 +401,9 @@ P3時点の制約:
 
 ## 引継ぎ事項
 
-- 次はP4（検索、section、read cursor、revision整合）。文書の構造の解析は`packages/document/src/analysis.ts`、解析workerは`apps/cli/src/workers/`、文書の操作は`apps/cli/src/documents/service.ts`。
+- 次はP5（質問schema、draft、submit／wait／ack、pin）。文書の操作は`apps/cli/src/documents/service.ts`、検索は`apps/cli/src/search/`、解析と検索のworkerは`apps/cli/src/workers/`。
 - 管理HTTPは`apps/cli/src/server/http/management.ts`、表示用のlistenerは`apps/cli/src/server/http/preview.ts`、UIは`apps/web/src/`、Markdownの描画は`packages/document/src/react.tsx`、HTMLの静的変換は`packages/document/src/html-static.ts`。
 - stateの形式に項目を足した（版ごとのassetと文書の位置、文書ごとのassets-root）。P2までの開発用state（`.dev-home`）は読めないので、消して作り直す。
-- P3のレビュー5往復目の指摘への対応（`apps/web/src/lib/use-render-grant.ts`、`apps/web/src/lib/use-render-grant.dom.test.tsx`）は、再レビューを受けていない。P4のレビュー依頼に含める。
 - 画面部品のhookは、happy-domの上で実際のReact DOMを動かしてテストできる（file先頭に`// @vitest-environment happy-dom`）。
 - 未解決の不具合: なし。
 - 未実行のtest: 上の表で「未着手」のもの。e2eのFirefox／WebKit。

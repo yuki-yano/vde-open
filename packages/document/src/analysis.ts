@@ -34,9 +34,23 @@ export interface OutlineItem {
   anchor: string;
 }
 
+// 検索と部分取得の単位（仕様8.3）。見出しから、次の見出しの直前までの本文。
+// 下位の見出しの本文は、上位の節へ重ねて入れない。祖先の見出しはheadingPathで渡す。
+export interface Section {
+  // 見出しの節はoutlineと同じ番号。sec_0000は、最初の見出しより前の序文。
+  sectionId: string;
+  // 見出しの深さ。序文は0。
+  level: number;
+  title: string;
+  headingPath: string[];
+  // 抽出した本文（見出しの文字は含まない）。原文ではなく、表示される文字を取り出したもの。
+  text: string;
+}
+
 export interface DocumentAnalysis {
   title: string | null;
   outline: OutlineItem[];
+  sections: Section[];
 }
 
 // 見出しのanchor。parserに任せると日本語の見出しがすべて同じslugになるので、
@@ -173,50 +187,176 @@ function buildOutline(
   return outline;
 }
 
+function blockText(node: BlockNode): string {
+  switch (node.type) {
+    case 'heading':
+    case 'paragraph':
+      return collapse(inlineText(node.children));
+    case 'code':
+      return node.value;
+    case 'html':
+      // 生HTMLは実行せず、文字として表示している。検索でも、書かれた文字として扱う。
+      return node.value;
+    case 'blockquote':
+    case 'component':
+      return blocksText(node.children);
+    case 'callout':
+      return [collapse(node.title), blocksText(node.children)]
+        .filter((part) => part !== '')
+        .join('\n');
+    case 'list':
+    case 'footnotes':
+      return node.items
+        .map((item) => blocksText(item.children))
+        .filter((part) => part !== '')
+        .join('\n');
+    case 'table':
+      return [node.header, ...node.rows]
+        .map((row) => row.map((cell) => collapse(inlineText(cell.children))).join(' '))
+        .join('\n');
+    default:
+      return '';
+  }
+}
+
+// 構造の深さは、解析の時点で上限（64段）を確かめている。
+function blocksText(nodes: BlockNode[]): string {
+  return nodes
+    .map(blockText)
+    .filter((part) => part !== '')
+    .join('\n\n');
+}
+
+function buildSections(outline: OutlineItem[], preamble: string, texts: string[]): Section[] {
+  const sections: Section[] = [];
+  // 見出しも本文もない文書も、空の序文を1つ持つ。検索で見つけた節を、同じIDで取得できるようにする。
+  if (preamble !== '' || outline.length === 0) {
+    sections.push({
+      sectionId: sectionIdOf(0),
+      level: 0,
+      title: '',
+      headingPath: [],
+      text: preamble,
+    });
+  }
+  for (const [index, item] of outline.entries()) {
+    sections.push({
+      sectionId: item.sectionId,
+      level: item.level,
+      title: item.title,
+      headingPath: item.headingPath,
+      text: texts[index] ?? '',
+    });
+  }
+  return sections;
+}
+
 // root直下の見出しを文書順に扱う（仕様8.3）。引用や箇条書きの中の見出しは節にしない。
 export function analyzeMarkdown(source: string): DocumentAnalysis {
   const document = parseMarkdownDocument(source);
   const headings: Array<{ level: number; title: string; anchor: string }> = [];
+  // 見出しごとの本文。先頭は、最初の見出しより前の序文。
+  const bodies: BlockNode[][] = [[]];
   for (const node of document.children) {
-    if (node.type !== 'heading') continue;
-    headings.push({
-      level: node.depth,
-      title: collapse(inlineText(node.children)),
-      anchor: node.id ?? '',
-    });
+    if (node.type === 'heading') {
+      headings.push({
+        level: node.depth,
+        title: collapse(inlineText(node.children)),
+        anchor: node.id ?? '',
+      });
+      bodies.push([]);
+    } else (bodies.at(-1) as BlockNode[]).push(node);
   }
   const outline = buildOutline(headings);
-  return { title: outline.find((item) => item.title !== '')?.title ?? null, outline };
+  const [preamble, ...texts] = bodies.map(blocksText);
+  return {
+    title: outline.find((item) => item.title !== '')?.title ?? null,
+    outline,
+    sections: buildSections(outline, preamble ?? '', texts),
+  };
 }
 
 type HtmlNode = DefaultTreeAdapterMap['node'];
 
+// 実行される内容、表示されない内容、入力欄の値は、文字として拾わない（仕様8.4）。
+const HTML_SKIPPED = new Set(['script', 'style', 'template', 'textarea', 'select', 'title']);
+// 前後で行を分ける要素。
+const HTML_BLOCKS = new Set([
+  'address',
+  'article',
+  'aside',
+  'blockquote',
+  'br',
+  'dd',
+  'details',
+  'div',
+  'dl',
+  'dt',
+  'fieldset',
+  'figcaption',
+  'figure',
+  'footer',
+  'form',
+  'header',
+  'hr',
+  'li',
+  'main',
+  'nav',
+  'ol',
+  'p',
+  'pre',
+  'section',
+  'summary',
+  'table',
+  'tr',
+  'ul',
+]);
+const HTML_CELLS = new Set(['td', 'th']);
+
+// 要素の中の文字。実行される内容や表示されない内容を持つ子は辿らない。
 function htmlText(node: HtmlNode): string {
   if (node.nodeName === '#text' && 'value' in node) return node.value;
   if (!('childNodes' in node)) return '';
-  // 実行される内容や表示されない内容は、見出しの文字として拾わない。
-  if (node.nodeName === 'script' || node.nodeName === 'style' || node.nodeName === 'template')
-    return '';
   let text = '';
-  for (const child of node.childNodes) text += htmlText(child);
+  for (const child of node.childNodes) {
+    if (!HTML_SKIPPED.has(child.nodeName)) text += htmlText(child);
+  }
   return text;
 }
 
+// 行ごとに空白をまとめ、空の行を除く。
+function tidy(text: string): string {
+  return text
+    .split('\n')
+    .map(collapse)
+    .filter((line) => line !== '')
+    .join('\n');
+}
+
 // HTMLは静的に解析するだけで、scriptは実行しない（仕様8.4）。
+// 取り出すのは、titleと見出しと、本文・codeの文字。CSSでの表示の有無や、scriptが後から作る内容は再現しない。
 export function analyzeHtml(source: string): DocumentAnalysis {
   const headings: Array<{ level: number; title: string; anchor: string }> = [];
+  // 見出しごとの本文。先頭は、最初の見出しより前の序文。
+  const bodies: string[] = [''];
   let title: string | null = null;
   let visited = 0;
+  const append = (text: string) => {
+    bodies[bodies.length - 1] += text;
+  };
   const walk = (node: HtmlNode, depth: number): void => {
     visited += 1;
     if (visited > PARSER_LIMITS.maxNodes) throw new ParseLimitError('nodes');
-    if (node.nodeName === 'script' || node.nodeName === 'style' || node.nodeName === 'template')
+    if (node.nodeName === '#text' && 'value' in node) {
+      append(node.value);
       return;
+    }
     if ('tagName' in node) {
       if (node.tagName === 'title' && title === null) {
         const text = collapse(htmlText(node));
         if (text !== '') title = text;
       }
+      if (HTML_SKIPPED.has(node.tagName)) return;
       const match = /^h([1-6])$/.exec(node.tagName);
       if (match) {
         const id = node.attrs.find((attribute) => attribute.name === 'id')?.value;
@@ -225,16 +365,29 @@ export function analyzeHtml(source: string): DocumentAnalysis {
           title: collapse(htmlText(node)),
           anchor: id ?? `h${String(headings.length + 1)}`,
         });
+        // 見出しの文字は、本文には入れない。ここから次の見出しまでが、この節の本文。
+        bodies.push('');
+        return;
       }
     }
     if ('childNodes' in node) {
       // HTMLの入れ子は深くなりやすい。構造の上限ではなく、再帰の安全のために打ち切る。
       if (depth > 512) throw new ParseLimitError('depth');
+      const separator = HTML_BLOCKS.has(node.nodeName)
+        ? '\n'
+        : HTML_CELLS.has(node.nodeName)
+          ? ' '
+          : '';
+      append(separator);
       for (const child of node.childNodes) walk(child, depth + 1);
+      append(separator);
     }
   };
-  walk(parse(source), 0);
-  return { title, outline: buildOutline(headings) };
+  // scriptは動かさない前提で解析する。noscriptの中身も、表示される文字として拾う。
+  walk(parse(source, { scriptingEnabled: false }), 0);
+  const outline = buildOutline(headings);
+  const [preamble, ...texts] = bodies.map(tidy);
+  return { title, outline, sections: buildSections(outline, preamble ?? '', texts) };
 }
 
 export function analyzeDocument(source: string, format: 'markdown' | 'html'): DocumentAnalysis {

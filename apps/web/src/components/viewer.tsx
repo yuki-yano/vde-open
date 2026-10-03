@@ -45,6 +45,8 @@ interface Loaded {
   revision: string;
   text: string | null;
   outline: OutlineItem[];
+  // 見出しの一覧を取得できなかった理由。本文の表示は続ける。
+  outlineError: string | null;
   error: string | null;
 }
 
@@ -79,11 +81,24 @@ export function Viewer({ api, document }: ViewerProps) {
     savedScroll.current = scroller.current?.scrollTop ?? 0;
     void Promise.all([
       api.content(document.documentId, shownRevision),
-      api.outline(document.documentId, shownRevision).catch(() => [] as OutlineItem[]),
+      // 見出しの一覧を取得できなくても、本文は表示する。取得できなかったことは、一覧の位置に示す。
+      api.outline(document.documentId, shownRevision).then(
+        (items) => ({ items, error: null }),
+        (reason: unknown) => ({
+          items: [] as OutlineItem[],
+          error: reason instanceof Error ? reason.message : '取得できませんでした。',
+        }),
+      ),
     ]).then(
-      ([content, items]) => {
+      ([content, outline]) => {
         if (!cancelled)
-          setLoaded({ revision: shownRevision, text: content, outline: items, error: null });
+          setLoaded({
+            revision: shownRevision,
+            text: content,
+            outline: outline.items,
+            outlineError: outline.error,
+            error: null,
+          });
       },
       (reason: unknown) => {
         if (cancelled) return;
@@ -91,6 +106,7 @@ export function Viewer({ api, document }: ViewerProps) {
           revision: shownRevision,
           text: current?.text ?? null,
           outline: current?.outline ?? [],
+          outlineError: current?.outlineError ?? null,
           error: reason instanceof Error ? reason.message : '読み込めませんでした。',
         }));
       },
@@ -103,6 +119,7 @@ export function Viewer({ api, document }: ViewerProps) {
   // 次の版を読み込んでいる間は、直前の内容を表示し続ける。
   const text = loaded?.text ?? null;
   const outline = loaded?.outline ?? [];
+  const outlineError = loaded?.outlineError ?? null;
   const error = loaded?.error ?? null;
 
   const isMarkdown = document.format === 'markdown';
@@ -348,12 +365,17 @@ export function Viewer({ api, document }: ViewerProps) {
             )}
           </div>
         )}
-        {outline.length > 0 && (
+        {(outline.length > 0 || outlineError !== null) && (
           <aside
             className="hidden w-60 shrink-0 overflow-y-auto border-l px-3 py-4 lg:block"
             aria-label="見出し"
           >
             <h2 className="mb-2 text-xs font-medium text-muted-foreground">見出し</h2>
+            {outlineError !== null && (
+              <p className="text-xs text-destructive" role="alert">
+                見出しの一覧を取得できませんでした（{outlineError}）。
+              </p>
+            )}
             <ul className="flex flex-col gap-0.5 text-sm">
               {outline.map((item) => (
                 <li

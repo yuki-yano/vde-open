@@ -52,6 +52,7 @@
 | @playwright/test | 1.63.0 | root | Chromiumでe2e 17件 |
 | parse5 | 8.0.1 | packages/document | HTMLの静的な表示への変換と、参照の収集。配布物へbundle |
 | css-tree | 3.2.1 | packages/document | CSSの参照の検査。単体entryを使い、配布物へbundle（`source-map-js`を含む） |
+| minisearch | 7.2.0 | apps/cli | 節の単位の検索index。別のthreadで使い、配布物へbundle |
 | happy-dom | 20.14.5 | root（devDependencies） | 画面部品のhookを、実際のReact DOMで動かすテストの環境。配布物には含まれない |
 
 shadcnのCLIが`package.json`へ書くrange指定（`^`）は、導入後に完全版番号へ直した。

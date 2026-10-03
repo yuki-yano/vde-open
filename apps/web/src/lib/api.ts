@@ -2,6 +2,7 @@ import type {
   DocumentSummary,
   LinkOpenResult,
   ListResult,
+  OutlineItem,
   ReadResult,
   RenderGrantResult,
   ServerEvent,
@@ -154,10 +155,21 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
       return text;
     },
     async outline(documentId, revision) {
-      const { data } = await request<ReadResult>(
-        `/documents/${documentId}/outline?revision=${revision}`,
-      );
-      return data.outline ?? [];
+      // 見出しが多い文書は、何回かに分けて返る。最後まで取得する。
+      const items: OutlineItem[] = [];
+      let cursor: string | null = null;
+      do {
+        const query: string =
+          cursor === null
+            ? `?revision=${revision}&maxBytes=${String(READ_PAGE_BYTES)}`
+            : `?maxBytes=${String(READ_PAGE_BYTES)}&cursor=${encodeURIComponent(cursor)}`;
+        const page: EnvelopeBody<ReadResult> = await request<ReadResult>(
+          `/documents/${documentId}/outline${query}`,
+        );
+        items.push(...(page.data.outline ?? []));
+        cursor = page.data.nextCursor;
+      } while (cursor !== null);
+      return items;
     },
     async close(documentId) {
       await request(`/documents/${documentId}`, { method: 'DELETE' });

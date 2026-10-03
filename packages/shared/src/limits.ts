@@ -31,4 +31,15 @@ export const LIMITS = {
   documentAssets: 500,
   cssReferenceDepth: 8,
   renderGrantsPerSession: 64,
+  searchLimitDefault: 5,
+  searchLimitMax: 50,
+  // queryの長さ（Unicode code points）と、検索語の数。
+  searchQueryCodePoints: 512,
+  searchTerms: 32,
+  // 検索結果の抜粋の長さ（Unicode code points）。
+  searchExcerptCodePoints: 240,
+  // 1文書から返すhitの数。大きい文書が候補を占めないようにする。
+  searchHitsPerDocument: 2,
+  // 検索が、indexへの反映を待つ上限。
+  searchIndexWaitMs: 2000,
 } as const;

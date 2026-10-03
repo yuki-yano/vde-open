@@ -135,6 +135,11 @@ export const readParamsSchema = z.strictObject({
     .default(LIMITS.readMaxBytesDefault),
   cursor: z.string().min(1).optional(),
   outline: z.boolean().default(false),
+  // 抽出した節の本文を取得する。outline・linesとは同時に指定できない。
+  section: z
+    .string()
+    .regex(/^sec_\d{4,}$/)
+    .optional(),
 });
 export type ReadParams = z.input<typeof readParamsSchema>;
 
@@ -147,13 +152,14 @@ export const outlineItemSchema = z.strictObject({
 });
 export type OutlineItem = z.infer<typeof outlineItemSchema>;
 
-// 仕様9.5。sectionの取得はP4で足す。
+// 仕様9.5。
 export const readResultSchema = z.strictObject({
   documentId: documentIdSchema,
   revision: revisionSchema,
-  mode: z.enum(['source', 'outline']),
+  mode: z.enum(['source', 'section', 'outline']),
   content: z.string().optional(),
   outline: z.array(outlineItemSchema).optional(),
+  sectionId: z.string().optional(),
   sourceRange: sourceRangeSchema.nullable(),
   extraction: z.enum(['source', 'markdown', 'static-html']),
   truncated: z.boolean(),
@@ -310,3 +316,59 @@ export const linkOpenResultSchema = z.strictObject({
   documentId: documentIdSchema,
 });
 export type LinkOpenResult = z.infer<typeof linkOpenResultSchema>;
+
+export const searchModeSchema = z.enum(['text', 'exact', 'path']);
+export type SearchMode = z.infer<typeof searchModeSchema>;
+
+export const searchParamsSchema = z.strictObject({
+  query: z.string().min(1),
+  // text: 語の一致。exact: 連続した文字列の一致だけ。path: file名とpathだけ。
+  mode: searchModeSchema.default('text'),
+  limit: z.number().int().min(1).max(LIMITS.searchLimitMax).default(LIMITS.searchLimitDefault),
+  // 対象を絞る文書ID。指定がなければ、開いている文書のすべて。
+  documents: z.array(documentIdSchema).max(LIMITS.openDocuments).default([]),
+  maxBytes: z
+    .number()
+    .int()
+    .min(LIMITS.readMaxBytesMin)
+    .max(LIMITS.readMaxBytesMax)
+    .default(LIMITS.readMaxBytesDefault),
+  cursor: z.string().min(1).optional(),
+});
+export type SearchParams = z.input<typeof searchParamsSchema>;
+
+export const searchHitSchema = z.strictObject({
+  documentId: documentIdSchema,
+  revision: revisionSchema,
+  title: z.string(),
+  displayPath: z.string().nullable(),
+  sectionId: z.string(),
+  headingPath: z.array(z.string()),
+  // 抽出した本文の実際の抜粋。要約や言い換えではない。
+  excerpt: z.string(),
+  matchKind: z.enum(['path-exact', 'phrase', 'text', 'prefix', 'fuzzy']),
+  // 検索engineの中での相対的な値。確率や、意味の近さの精度ではない。
+  score: z.number(),
+  sourceRange: sourceRangeSchema.nullable(),
+  extraction: z.enum(['markdown', 'static-html']),
+});
+export type SearchHit = z.infer<typeof searchHitSchema>;
+
+// 仕様9.4。検索は、公開済みの内容に対するもの。
+export const searchResultSchema = z.strictObject({
+  query: z.string(),
+  mode: searchModeSchema,
+  catalogVersion: z.number().int().nonnegative(),
+  // 開いている文書の数と、そのうち検索できた文書の数。
+  registeredDocuments: z.number().int().nonnegative(),
+  searchedDocuments: z.number().int().nonnegative(),
+  indexedAt: z.string(),
+  // 検索できなかった文書がある。全件を検索した結果ではない。
+  incomplete: z.boolean(),
+  failedDocuments: z.array(z.strictObject({ documentId: documentIdSchema, code: z.string() })),
+  indexingDocuments: z.array(documentIdSchema),
+  hits: z.array(searchHitSchema),
+  truncated: z.boolean(),
+  nextCursor: z.string().nullable(),
+});
+export type SearchResult = z.infer<typeof searchResultSchema>;

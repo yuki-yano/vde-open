@@ -133,6 +133,15 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     if ((await fetch(new URL('a.md', uiUrl))).status !== 404)
       fail('cwdのfileがUIのoriginから配信されています');
 
+    // 手順6の続き: 導入先だけで、検索のworker（同梱のMiniSearch）が動く。
+    const found = runJson<{ hits: Array<{ documentId: string }>; incomplete: boolean }>('vo', [
+      'search',
+      'pack検証',
+    ]);
+    if (found.incomplete || found.hits[0]?.documentId !== openedId) {
+      fail('同梱の検索workerで、開いた文書を検索できません');
+    }
+
     // 手順6の続き: 導入先だけで、HTMLの静的変換（同梱のparse5とcss-tree）と表示用のlistenerが動く。
     mkdirSync(join(installDir, 'site'));
     writeFileSync(

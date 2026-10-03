@@ -19,6 +19,7 @@ export const ERROR_SPECS = {
   E_DOCUMENT_NOT_OPEN: { exit: ExitCode.notFound, retryable: false },
   E_WATCH_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   E_LINK_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
+  E_SECTION_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   // 競合・版不整合
   E_KEY_CONFLICT: { exit: ExitCode.conflict, retryable: false },
   E_REVISION_UNAVAILABLE: { exit: ExitCode.conflict, retryable: false },
@@ -41,6 +42,7 @@ export const ERROR_SPECS = {
   E_DAEMON_STOPPING: { exit: ExitCode.daemon, retryable: true },
   E_PROTOCOL_MISMATCH: { exit: ExitCode.daemon, retryable: false },
   E_UNKNOWN_METHOD: { exit: ExitCode.daemon, retryable: false },
+  E_INDEX_NOT_READY: { exit: ExitCode.daemon, retryable: true },
   // I/O・状態破損・内部
   E_IO: { exit: ExitCode.internal, retryable: false },
   E_STORAGE_WRITE_FAILED: { exit: ExitCode.internal, retryable: true },

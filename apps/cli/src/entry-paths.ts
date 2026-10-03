@@ -20,6 +20,15 @@ export function parseWorkerPath(): string {
   );
 }
 
+export function searchWorkerPath(): string {
+  return fileURLToPath(
+    new URL(
+      isSourceRun ? './workers/search-worker.ts' : './workers/search-worker.js',
+      import.meta.url,
+    ),
+  );
+}
+
 // ビルド済みのWeb UI。配布物ではdist/web。sourceから実行するときは、ビルド済みのdist/webがあれば使う。
 export function webRootPath(): string | null {
   const candidate = fileURLToPath(new URL(isSourceRun ? '../dist/web' : './web', import.meta.url));

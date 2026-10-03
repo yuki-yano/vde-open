@@ -24,6 +24,7 @@ import { z, ZodError } from 'zod';
 
 import type { DocumentService, ServiceResult } from '../../documents/service.ts';
 import type { RenderService } from '../../render/render-service.ts';
+import type { SearchService } from '../../search/search-service.ts';
 import type { EventHub } from '../event-hub.ts';
 import type { SessionService } from '../session-service.ts';
 
@@ -68,6 +69,7 @@ export interface ManagementDeps {
   sessions: SessionService;
   events: EventHub;
   render: RenderService;
+  search: SearchService;
   // 文書を表示するlistenerのorigin。
   previewOrigin: string;
   // ビルド済みUIのdirectory。無ければUIは配信しない。
@@ -320,13 +322,14 @@ export async function startManagementServer(
   });
 
   api.get('/documents/:id/content', async (c) => {
-    const { revision, lines, maxBytes, cursor } = c.req.query();
+    const { revision, lines, section, maxBytes, cursor } = c.req.query();
     return ok(
       c,
       'documents.read',
       await deps.documents.read({
         documentId: c.req.param('id'),
         ...(revision === undefined ? {} : { revision }),
+        ...(section === undefined ? {} : { section }),
         ...(lines === undefined ? {} : { lines: linesQuerySchema.parse(lines) }),
         ...(maxBytes === undefined ? {} : { maxBytes: integerQuery.parse(maxBytes) }),
         ...(cursor === undefined ? {} : { cursor }),
@@ -335,16 +338,20 @@ export async function startManagementServer(
   });
 
   api.get('/documents/:id/outline', async (c) => {
-    const revision = c.req.query('revision');
-    return ok(
-      c,
-      'documents.outline',
-      await deps.documents.read({
-        documentId: c.req.param('id'),
-        outline: true,
-        ...(revision === undefined ? {} : { revision }),
-      }),
-    );
+    const { revision, maxBytes, cursor } = c.req.query();
+    const result = await deps.documents.read({
+      documentId: c.req.param('id'),
+      // 続きは、cursorだけで取得する（cursorは、発行したときの版と取得の種類に固定されている）。
+      ...(cursor === undefined ? { outline: true } : { cursor }),
+      ...(revision === undefined ? {} : { revision }),
+      ...(maxBytes === undefined ? {} : { maxBytes: integerQuery.parse(maxBytes) }),
+    });
+    if (result.data.mode !== 'outline') {
+      throw new VdeError('E_INVALID_CURSOR', 'cursorが見出しの一覧のものではありません。', {
+        reason: 'mode',
+      });
+    }
+    return ok(c, 'documents.outline', result);
   });
 
   api.put('/documents/order', async (c) =>
@@ -367,6 +374,24 @@ export async function startManagementServer(
   api.post('/documents/:id/refresh', async (c) =>
     ok(c, 'documents.refresh', await deps.documents.refresh({ documentId: c.req.param('id') })),
   );
+
+  // 開いている文書の検索。指定できる項目は、CLIと同じ（仕様12.2）。
+  api.get('/search', async (c) => {
+    const { query, mode, limit, maxBytes, cursor } = c.req.query();
+    const documents = c.req.queries('document') ?? [];
+    return ok(
+      c,
+      'documents.search',
+      await deps.search.search({
+        query,
+        documents,
+        ...(mode === undefined ? {} : { mode }),
+        ...(limit === undefined ? {} : { limit: integerQuery.parse(limit) }),
+        ...(maxBytes === undefined ? {} : { maxBytes: integerQuery.parse(maxBytes) }),
+        ...(cursor === undefined ? {} : { cursor }),
+      }),
+    );
+  });
 
   // 文書の1つの版を表示するための、限定された権限を発行する。権限は発行したsessionに結び付く。
   api.post('/documents/:id/render-grants', async (c) => {

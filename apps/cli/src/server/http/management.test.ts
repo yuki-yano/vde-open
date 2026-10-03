@@ -11,6 +11,7 @@ import { DocumentService } from '../../documents/service.ts';
 import { StateStore } from '../../persistence/state-store.ts';
 import { nodeStoreFs } from '../../persistence/store-fs.ts';
 import { createRenderService } from '../../render/render-service.ts';
+import { createSearchService } from '../../search/search-service.ts';
 import { createParseService } from '../../workers/parse-service.ts';
 import { createEventHub } from '../event-hub.ts';
 import { createSessionService } from '../session-service.ts';
@@ -42,7 +43,8 @@ interface Fixture {
 async function connect(heartbeatMs: number): Promise<Fixture> {
   let now = 1_000_000;
   const store = await StateStore.open({ root: join(base, 'home'), fs: nodeStoreFs });
-  const documents = new DocumentService({ store, cursors: createCursorCodec(randomBytes(32)) });
+  const cursors = createCursorCodec(randomBytes(32));
+  const documents = new DocumentService({ store, cursors });
   const sessions = createSessionService(() => now);
   const events = createEventHub('daemon_test', () => store.payload.catalogVersion);
   server = await startManagementServer({
@@ -58,6 +60,7 @@ async function connect(heartbeatMs: number): Promise<Fixture> {
       parse: createParseService(),
       previewOrigin: () => 'http://127.0.0.1:1',
     }),
+    search: createSearchService({ store, cursors }),
     previewOrigin: 'http://127.0.0.1:1',
     webRoot: null,
     devOrigin: null,
