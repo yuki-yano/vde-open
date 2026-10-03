@@ -38,6 +38,8 @@ import { createIpcKey, DAEMON_LOCK_NAME, removePointer, writePointer } from './r
 import { ensurePrivateDirectory } from './secure-dir.ts';
 
 const LOCK_CHECK_INTERVAL_MS = 2000;
+// Upper bound for shutdown steps that only close resources (not for draining work or saving state).
+const SHUTDOWN_CLOSE_TIMEOUT_MS = 5000;
 
 const diagnosticsParamsSchema = z.strictObject({ collectGarbage: z.boolean().default(false) });
 
@@ -121,30 +123,65 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   });
 
   const shutdown = async () => {
+    // Run every step even if an earlier one fails, so the lock is released and the process can exit.
+    // Each step's duration and any failure are logged (names and error codes only).
+    const durations: Record<string, number> = {};
+    // With a timeout, stop waiting for the step after that long and continue with the next one.
+    const step = async (name: string, run: () => unknown, timeoutMs?: number): Promise<void> => {
+      const startedAt = Date.now();
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        const work = Promise.resolve().then(run);
+        await (timeoutMs === undefined
+          ? work
+          : Promise.race([
+              work,
+              new Promise((_resolve, reject) => {
+                timer = setTimeout(
+                  () => reject(Object.assign(new Error('timeout'), { code: 'timeout' })),
+                  timeoutMs,
+                );
+              }),
+            ]));
+      } catch (error) {
+        logger.log('daemon.shutdown_failed', {
+          step: name,
+          code:
+            error instanceof VdeError
+              ? error.code
+              : ((error as NodeJS.ErrnoException | undefined)?.code ?? 'unknown'),
+        });
+      } finally {
+        clearTimeout(timer);
+        durations[name] = Date.now() - startedAt;
+      }
+    };
     // Among accepted work, first end the waits that need not finish (such as diagnostics waiting for index sync).
     stopRequested.abort();
     if (lockTimer) clearInterval(lockTimer);
     // Keep holding the lock until accepted work and commits finish.
     // Releasing early would overlap with the next daemon's writes.
-    await watcher?.close();
+    await step('watcher', () => watcher?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
     // Requests waiting for an answer never finish and would block the drain, so end them first (the question state is unchanged).
-    feedback?.close();
-    await ipc?.drain();
+    await step('feedback', () => feedback?.close());
+    await step('drain', () => ipc?.drain());
     announceStopping();
-    await management?.close();
-    await preview?.close();
-    await store?.close();
-    await parse?.close();
-    await search?.close();
-    await ipc?.close();
+    await step('management', () => management?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
+    await step('preview', () => preview?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
+    await step('store', () => store?.close());
+    await step('parse', () => parse?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
+    await step('search', () => search?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
+    await step('ipc', () => ipc?.close());
     // When the lock is lost, do not touch runtime files that may belong to a successor daemon.
-    if (await holdsLock(stateRoot, DAEMON_LOCK_NAME, daemonId)) {
+    await step('release', async () => {
+      if (!(await holdsLock(stateRoot, DAEMON_LOCK_NAME, daemonId))) return;
       if (owned.socket && !isWindows) await rm(location.socketPath, { force: true });
       if (owned.key) await rm(location.keyPath, { force: true });
       if (owned.runtimeDir) await rmdir(location.runtimeDir).catch(() => undefined);
       await removePointer(stateRoot, daemonId);
       await releaseLock(stateRoot, DAEMON_LOCK_NAME, daemonId);
-    }
+    });
+    logger.log('daemon.shutdown', durations);
   };
 
   const stop = (reason: string): Promise<void> => {

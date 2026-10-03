@@ -243,6 +243,7 @@ describe('SRCH-008 / SRCH-009 search cursor', () => {
 });
 
 describe('SRCH-010 --max-bytes', () => {
+  // Runs the CLI once per page (about 80 times), which takes longer on slow CI runners.
   it('splits a long single line without cutting a character, and joined, it reproduces the original', async () => {
     const line = `${'認証の有効期限を延ばす😀'.repeat(200)}`;
     t.write('long.md', `# ${'長い見出し'.repeat(80)}\n\n${line}\n`);
@@ -301,7 +302,7 @@ describe('SRCH-010 --max-bytes', () => {
     expect(tooSmall.json().error.code).toBe('E_MAX_BYTES_TOO_SMALL');
     const needed = tooSmall.json().error.details['requiredBytes'] as number;
     expect((await search('延ばす', '--max-bytes', String(needed))).data.hits).toHaveLength(1);
-  });
+  }, 120_000);
 
   it('the outline and search results continue with a cursor without splitting elements', async () => {
     const headings = Array.from(

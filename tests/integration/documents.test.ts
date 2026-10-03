@@ -543,7 +543,11 @@ describe('read and close', () => {
       .documents[0] as Summary;
     renameSync(t.write('a.tmp', '# 版2\n'), path);
     const second = (await t.run(['open', 'a.md', '--json'])).json<OpenData>();
-    expect(second.data).toMatchObject({ updated: 1 });
+    // The watcher may publish the new revision before this open does (seen on slower CI runners),
+    // so check the resulting revision rather than which of them updated it.
+    const reopened = second.data.documents[0] as Summary;
+    expect(reopened.documentId).toBe(first.documentId);
+    expect(reopened.revision).not.toBe(first.revision);
 
     const old = (
       await t.run(['read', first.documentId, '--revision', first.revision, '--json'])

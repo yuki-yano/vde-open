@@ -219,6 +219,32 @@ describe('diagnostics overlapping with stop', () => {
   });
 });
 
+describe('a failing shutdown step', () => {
+  it.each([
+    ['throws', () => Promise.reject(new Error('close failed'))],
+    ['never finishes', () => new Promise<void>(() => undefined)],
+  ] as const)(
+    'when closing the parse worker %s, the daemon still stops and releases its lock',
+    async (_name, close) => {
+      const real = createParseService();
+      daemon = await startDaemon({
+        environment,
+        version: 'test',
+        parse: { ...real, close: () => real.close().then(close) },
+      });
+      const home = resolveStateRoot(environment);
+      expect(await holdsLock(home, 'daemon.lock', daemon.daemonId)).toBe(true);
+      await daemon.stop('test');
+      expect(await holdsLock(home, 'daemon.lock', daemon.daemonId)).toBe(false);
+      const log = await readFile(join(home, 'logs', 'daemon.jsonl'), 'utf8');
+      expect(log).toContain('"event":"daemon.shutdown_failed"');
+      expect(log).toContain('"step":"parse"');
+      expect(log).toContain('"event":"daemon.shutdown"');
+    },
+    15_000,
+  );
+});
+
 describe('unknown method and invalid arguments', () => {
   it('responds with an error code and the daemon keeps running', async () => {
     daemon = await startDaemon({ environment, version: 'test' });

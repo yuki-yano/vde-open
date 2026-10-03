@@ -180,7 +180,9 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
   const runBin = (name: string, args: string[]): string => {
     const result = captureInstalledBin(binDir, name, args, { cwd: installDir, env });
     if (result.status !== 0) {
-      fail(`${name} ${args.join(' ')} exited with ${String(result.status)}: ${result.stderr}`);
+      fail(
+        `${name} ${args.join(' ')} exited with ${String(result.status)}: ${result.stderr}${result.stdout}`,
+      );
     }
     return result.stdout;
   };
@@ -404,6 +406,14 @@ async function main(): Promise<void> {
   const installDir = mkdtempSync(join(tmpdir(), 'vde-open pack 検証-'));
   try {
     await verifyInstalled(tarball, installDir);
+  } catch (error) {
+    // Show the end of the daemon log to diagnose failures on CI runners (no secrets are logged).
+    const log = join(installDir, 'state home', 'logs', 'daemon.jsonl');
+    if (existsSync(log)) {
+      console.error('pack-smoke: daemon log (last 40 lines):');
+      console.error(readFileSync(log, 'utf8').trimEnd().split('\n').slice(-40).join('\n'));
+    }
+    throw error;
   } finally {
     rmSync(installDir, { recursive: true, force: true });
   }

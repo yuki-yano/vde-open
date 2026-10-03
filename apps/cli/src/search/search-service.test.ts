@@ -204,7 +204,9 @@ describe('SRCH-015 search while the index has not caught up', () => {
       store,
       cursors: createCursorCodec(randomBytes(32)),
       workerPath: fakeWorker({ neverBegin: 'SLOW' }),
-      timeoutMs: 300,
+      // Shorter than the search's wait for the index (2 seconds), but long enough to start a worker
+      // and answer a search on slow CI runners.
+      timeoutMs: 1000,
     });
     const found = await search.search({ query: '本文' });
     expect(found.data.failedDocuments).toEqual([{ documentId: slow, code: 'E_INDEX_NOT_READY' }]);
