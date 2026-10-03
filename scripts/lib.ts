@@ -111,14 +111,23 @@ function runInvocation(invocation: Invocation, options: RunOptions): void {
   }
 }
 
+// Upper bound for one captured command. A command that does not finish fails with its name,
+// instead of hanging the whole run (for example on CI runners).
+const CAPTURE_TIMEOUT_MS = 120_000;
+
 function captureInvocation(invocation: Invocation, options: RunOptions): CaptureResult {
   const result = spawnSync(invocation.command, invocation.args, {
     cwd: options.cwd,
     env: options.env ?? process.env,
     encoding: 'utf8',
+    timeout: CAPTURE_TIMEOUT_MS,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
   });
-  if (result.error) throw result.error;
+  if (result.error) {
+    throw new Error(`${describe(invocation)} did not finish: ${result.error.message}`, {
+      cause: result.error,
+    });
+  }
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
@@ -177,13 +186,36 @@ export function captureInstalledBinAsync(
     });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const finish = (status: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ status, stdout, stderr });
+    };
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       stdout += chunk;
     });
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
       stderr += chunk;
     });
-    child.on('error', reject);
-    child.on('close', (status) => resolve({ status, stdout, stderr }));
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      reject(
+        new Error(`${describe(invocation)} did not finish in ${String(CAPTURE_TIMEOUT_MS)} ms`),
+      );
+    }, CAPTURE_TIMEOUT_MS);
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('close', finish);
+    // A process it started (such as the daemon on Windows) can keep the output pipes open after it
+    // exits. Then 'close' never comes, so finish shortly after 'exit' with the output read so far.
+    child.on('exit', (status) => setTimeout(() => finish(status), 1000));
   });
 }

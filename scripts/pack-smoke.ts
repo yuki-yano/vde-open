@@ -25,6 +25,11 @@ import {
 
 class SmokeFailure extends Error {}
 
+// Show which step is running, so that a step that hangs on a CI runner can be found in the log.
+function progress(step: string): void {
+  console.log(`pack-smoke: ${step}`);
+}
+
 function fail(message: string): never {
   throw new SmokeFailure(message);
 }
@@ -109,7 +114,7 @@ function packTarball(): string {
 }
 
 async function verifyInstalled(tarball: string, installDir: string): Promise<void> {
-  // Step 2: install only the tarball into an empty directory. Do not query the registry.
+  progress('Step 2: install only the tarball into an empty directory. Do not query the registry.');
   writeFileSync(join(installDir, 'package.json'), '{"private":true}\n');
   // CLI-014: installation does not change shell config files or an existing, different `vo`.
   // Install with a test HOME (holding existing shell config files) and compare the contents before and after.
@@ -187,7 +192,7 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     return result.stdout;
   };
 
-  // Step 3 (CLI-002): version and help match between both names.
+  progress('Step 3 (CLI-002): version and help match between both names.');
   for (const args of [['--version'], ['--help']]) {
     const long = runBin('vde-open', args);
     const short = runBin('vo', args);
@@ -208,7 +213,9 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
   type Status = { state: string; daemonId: string | null };
 
   try {
-    // Step 4 (CLI-003): a document opened with the long name can be listed and closed with the short name.
+    progress(
+      'Step 4 (CLI-003): a document opened with the long name can be listed and closed with the short name.',
+    );
     writeFileSync(join(installDir, 'a.md'), '# pack検証\n');
     const opened = runJson<Documents>('vde-open', ['open', 'a.md']);
     const listed = runJson<Documents>('vo', ['list']);
@@ -220,7 +227,9 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     if (runJson<Status>('vde-open', ['daemon', 'status']).daemonId !== daemonId) {
       fail('vde-open and vo use different daemons');
     }
-    // Step 6: from a cwd outside the repo, the bundled UI and parse worker work. Files in cwd are not served.
+    progress(
+      'Step 6: from a cwd outside the repo, the bundled UI and parse worker work. Files in cwd are not served.',
+    );
     const outline = runJson<{ outline: unknown[] }>('vo', ['read', openedId, '--outline']);
     if (outline.outline.length !== 1) fail('cannot get headings with the bundled parse worker');
     const uiUrl = runJson<{ uiUrl: string }>('vde-open', ['daemon', 'status']).uiUrl;
@@ -242,7 +251,9 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
       }
     }
 
-    // Step 6, continued: the search worker (bundled MiniSearch) works with only the install target.
+    progress(
+      'Step 6, continued: the search worker (bundled MiniSearch) works with only the install target.',
+    );
     const found = runJson<{ hits: Array<{ documentId: string }>; incomplete: boolean }>('vo', [
       'search',
       'pack検証',
@@ -251,7 +262,9 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
       fail('cannot search the opened document with the bundled search worker');
     }
 
-    // Step 6, continued: creating a question and fetching it for the Agent (without draft answers) work with only the install target.
+    progress(
+      'Step 6, continued: creating a question and fetching it for the Agent (without draft answers) work with only the install target.',
+    );
     writeFileSync(
       join(installDir, 'q.json'),
       JSON.stringify({
@@ -278,7 +291,9 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     }
     runJson('vo', ['feedback', 'cancel', asked.requestId]);
 
-    // Step 6, continued: static HTML conversion (bundled parse5 and css-tree) and the preview listener work with only the install target.
+    progress(
+      'Step 6, continued: static HTML conversion (bundled parse5 and css-tree) and the preview listener work with only the install target.',
+    );
     mkdirSync(join(installDir, 'site'));
     writeFileSync(
       join(installDir, 'site', 'site.css'),
@@ -323,7 +338,9 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     }
     if (htmlId) runJson('vo', ['close', htmlId]);
 
-    // Step 6, continued: the interactive view and injecting the bundled SDK into HTML work with only the install target.
+    progress(
+      'Step 6, continued: the interactive view and injecting the bundled SDK into HTML work with only the install target.',
+    );
     writeFileSync(join(installDir, 'site', 'app.html'), '<script>document.title="app"</script>');
     const interactiveAsk = runJson<{ request: { requestId: string; documentId: string } }>('vo', [
       'ask',
@@ -356,13 +373,17 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
       fail('close from vo is not reflected in the vde-open list');
     }
 
-    // Step 7, first half: a daemon started with either name can be stopped with the other name.
+    progress(
+      'Step 7, first half: a daemon started with either name can be stopped with the other name.',
+    );
     runJson('vo', ['daemon', 'stop']);
     if (runJson<Status>('vde-open', ['daemon', 'status']).state !== 'stopped') {
       fail('daemon stop from vo did not stop the daemon');
     }
 
-    // Step 5 (CLI-004): opening 20 times concurrently from both names still gives one daemon.
+    progress(
+      'Step 5 (CLI-004): opening 20 times concurrently from both names still gives one daemon.',
+    );
     const results = await Promise.all(
       Array.from({ length: 20 }, (_, index) =>
         captureInstalledBinAsync(
@@ -392,7 +413,7 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     // Once in step 4 and once in the concurrent open. No multiple daemons must have started during the concurrent open.
     if (started.length !== 2) fail(`unexpected number of daemon starts: ${String(started.length)}`);
   } finally {
-    // Step 7: always stop the daemon started by the verification.
+    progress('Step 7: always stop the daemon started by the verification.');
     captureInstalledBin(binDir, 'vde-open', ['daemon', 'stop'], { cwd: installDir, env });
   }
   if (runJson<Status>('vo', ['daemon', 'status']).state !== 'stopped') {
