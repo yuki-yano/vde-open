@@ -13,6 +13,7 @@ import {
 } from '@vde-open/shared';
 
 import type { WorkerDiagnostics } from '../diagnostics/heap.ts';
+import { createWorkerCollect } from '../diagnostics/idle-collect.ts';
 import { untilAborted } from '../diagnostics/until-aborted.ts';
 import type { CursorCodec } from '../documents/cursor.ts';
 import type { ServiceResult } from '../documents/service.ts';
@@ -79,8 +80,6 @@ type Work = SearchWorkerRequest extends infer Request
   : never;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
-// After requests to the worker pause this long, ask it to collect garbage once.
-const COLLECT_AFTER_IDLE_MS = 2000;
 
 const WAIT_STEP_MS = 20;
 // Amount indexed per request. Kept small so search requests can interleave.
@@ -160,17 +159,16 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
   let syncing: Promise<void> | null = null;
   // Indexing and searching leave a lot of garbage in the worker, and an idle worker does not collect it
   // on its own (about half of its heap after indexing many documents). Once requests pause, ask it to
-  // collect once.
-  let collectTimer: NodeJS.Timeout | null = null;
-  const scheduleCollect = () => {
-    if (collectTimer) clearTimeout(collectTimer);
-    collectTimer = setTimeout(() => {
-      collectTimer = null;
-      if (closed || worker === null || pending.size > 0) return;
-      void request({ op: 'collect' }).catch(() => undefined);
-    }, COLLECT_AFTER_IDLE_MS);
-    collectTimer.unref();
-  };
+  // collect once (requests made meanwhile wait and keep their full time limit).
+  const collector = createWorkerCollect({
+    worker: () => worker,
+    busy: () => pending.size > 0,
+    nextId: () => {
+      const id = nextId;
+      nextId += 1;
+      return id;
+    },
+  });
   let syncRequested = false;
 
   const failAll = (error: Error) => {
@@ -195,6 +193,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     const created = new Worker(workerPath);
     created.unref();
     created.on('message', (reply: WorkerReply) => {
+      if (collector.settle(reply.id)) return;
       const waiter = pending.get(reply.id);
       if (!waiter) return;
       pending.delete(reply.id);
@@ -210,6 +209,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     created.on('error', () => {
       if (worker === created) discardWorker();
       failAll(new VdeError('E_INDEX_NOT_READY', 'The search index is not available.'));
+      collector.reset();
     });
     worker = created;
     return created;
@@ -218,24 +218,27 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
   const request = <T>(work: Work): Promise<T> => {
     if (closed) return Promise.reject(new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));
     const result = new Promise<T>((resolve, reject) => {
-      const id = nextId;
-      nextId += 1;
-      const timer = setTimeout(() => {
-        // A request that never finishes is reclaimed by stopping the whole worker.
-        pending.delete(id);
-        discardWorker();
-        failAll(new VdeError('E_INDEX_NOT_READY', 'The search index is not available.'));
-        reject(
-          new VdeError('E_INDEX_NOT_READY', 'The search index operation did not finish in time.', {
-            reason: 'timeout',
-          }),
-        );
-      }, timeoutMs);
-      pending.set(id, { resolve: resolve as (result: unknown) => void, reject, timer });
-      ensureWorker().postMessage({ id, ...work });
+      collector.dispatch(() => {
+        const id = nextId;
+        nextId += 1;
+        const timer = setTimeout(() => {
+          // A request that never finishes is reclaimed by stopping the whole worker.
+          pending.delete(id);
+          discardWorker();
+          failAll(new VdeError('E_INDEX_NOT_READY', 'The search index is not available.'));
+          reject(
+            new VdeError(
+              'E_INDEX_NOT_READY',
+              'The search index operation did not finish in time.',
+              { reason: 'timeout' },
+            ),
+          );
+        }, timeoutMs);
+        pending.set(id, { resolve: resolve as (result: unknown) => void, reject, timer });
+        ensureWorker().postMessage({ id, ...work });
+      }, reject);
     });
-    if (work.op !== 'collect' && work.op !== 'diagnostics')
-      void result.then(scheduleCollect, scheduleCollect);
+    if (work.op !== 'diagnostics') void result.then(collector.touch, collector.touch);
     return result;
   };
 
@@ -601,7 +604,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
 
     async close() {
       closed = true;
-      if (collectTimer) clearTimeout(collectTimer);
+      collector.close(new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));
       failAll(new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));
       const current = worker;
       worker = null;

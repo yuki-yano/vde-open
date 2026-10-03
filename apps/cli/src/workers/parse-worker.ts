@@ -9,18 +9,24 @@ import {
   type ScanKind,
 } from '@vde-open/document/render';
 
-import { measureHeap } from '../diagnostics/heap.ts';
+import { collectGarbage, measureHeap } from '../diagnostics/heap.ts';
 
 export type ParseRequest =
   | { id: number; op: 'analyze'; format: 'markdown' | 'html'; text: string }
   | { id: number; op: 'scan'; kind: ScanKind; text: string }
   | { id: number; op: 'render'; input: RenderInput }
-  | { id: number; op: 'diagnostics'; collectGarbage: boolean };
+  | { id: number; op: 'diagnostics'; collectGarbage: boolean }
+  | { id: number; op: 'collect' };
 
 function run(request: ParseRequest): unknown {
   // The parse worker keeps no state between requests. Returns only the heap.
   if (request.op === 'diagnostics') {
     return { heapUsedBytes: measureHeap(request.collectGarbage), retained: {} };
+  }
+  // Parsing leaves garbage, and an idle worker does not collect it on its own.
+  if (request.op === 'collect') {
+    collectGarbage();
+    return null;
   }
   if (request.op === 'analyze') return analyzeDocument(request.text, request.format);
   if (request.op === 'scan') return scanReferences(request.kind, request.text);

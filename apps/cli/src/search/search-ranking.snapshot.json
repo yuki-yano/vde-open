@@ -1,0 +1,802 @@
+{
+  "text:retry": [
+    "site/handbook.html#sec_0002 phrase 25.529 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/repeated.md#sec_0002 phrase 1.69 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.69 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 phrase 1.552 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/guide.md#sec_0002 phrase 1.413 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/typos.md#sec_0002 prefix 2.12 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/guide.md#sec_0005 prefix 1.679 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/typos.md#sec_0003 fuzzy 2.372 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "text:retr": [
+    "site/handbook.html#sec_0002 prefix 9.031 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/typos.md#sec_0002 prefix 2.023 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/guide.md#sec_0005 prefix 1.624 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/guide.md#sec_0004 prefix 1.616 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts.",
+    "docs/repeated.md#sec_0002 prefix 0.598 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 prefix 0.598 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 prefix 0.549 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/typos.md#sec_0003 prefix 0 [Typos > Joined] aretry 日記 の例。",
+    "docs/mixed.md#sec_0004 fuzzy 1.743 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "text:re": [
+    "docs/repeated.md#sec_0001 prefix 21.206 [Repeated] Repeated",
+    "site/handbook.html#sec_0002 prefix 9.622 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/guide.md#sec_0005 prefix 5.916 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/guide.md#sec_0002 prefix 3.455 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 prefix 2.348 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "docs/typos.md#sec_0002 prefix 1.855 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/repeated.md#sec_0002 prefix 1.82 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/mixed.md#sec_0004 prefix 1.477 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。",
+    "docs/long.md#sec_0003 prefix 0.493 [Long notes > After] Short section after the long one with retry and cache.",
+    "design-notes.md#sec_0002 prefix 0 [設計メモ > 方式の比較] 認証の方式として、session cookieとBearer tokenを比べた。管理画面ではBearer tokenを採る。",
+    "docs/long.md#sec_0002 prefix 0 [Long notes > Boundary] lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem",
+    "site/handbook.html#sec_0001 prefix 0 [HTML handbook] Static pages are shown without scripts.",
+    "docs/typos.md#sec_0003 prefix 0 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "text:r": [],
+  "text:retyr": [
+    "docs/mixed.md#sec_0004 phrase 4.649 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "text:retries": [
+    "docs/guide.md#sec_0004 phrase 4.862 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts."
+  ],
+  "text:token": [
+    "docs/guide.md#sec_0003 phrase 22.962 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme.",
+    "design-notes.md#sec_0002 phrase 3.301 [設計メモ > 方式の比較] 認証の方式として、session cookieとBearer tokenを比べた。管理画面ではBearer tokenを採る。",
+    "site/handbook.html#sec_0002 phrase 3.296 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/guide.md#sec_0002 phrase 2.67 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 phrase 2.055 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "text:tok": [
+    "docs/guide.md#sec_0003 prefix 10.804 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme.",
+    "docs/typos.md#sec_0002 prefix 1.987 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/guide.md#sec_0004 prefix 1.715 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts.",
+    "design-notes.md#sec_0002 prefix 1.105 [設計メモ > 方式の比較] 認証の方式として、session cookieとBearer tokenを比べた。管理画面ではBearer tokenを採る。",
+    "site/handbook.html#sec_0002 prefix 1.103 [HTML handbook > Retry] Retry the request after the token expires.",
+    "auth.md#sec_0002 prefix 0.688 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "text:refresh token": [
+    "docs/guide.md#sec_0002 text 6.63 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 text 5.103 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "text:refreshToken": [
+    "docs/guide.md#sec_0002 phrase 12.574 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 fuzzy 8.619 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "text:refresh_token": [
+    "auth.md#sec_0002 phrase 9.808 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "text:token_store": [
+    "docs/guide.md#sec_0003 phrase 32.83 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "text:parse http response": [
+    "docs/guide.md#sec_0003 text 12.898 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "text:authentication": [
+    "docs/guide.md#sec_0002 phrase 23.785 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0003 text 5.946 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "text:auth": [
+    "auth.md#sec_0001 phrase 14.379 [認証仕様] この文書は、管理画面の認証の流れを定める。",
+    "auth.md#sec_0003 phrase 4.225 [認証仕様 > 失敗時の扱い] 認証に3回続けて失敗したら、5分間は受け付けない。AUTH_LOCKED を返す。",
+    "docs/guide.md#sec_0002 prefix 7.345 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0003 prefix 1.836 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "text:authorization bearer": [
+    "docs/guide.md#sec_0003 text 7.961 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "text:rotation key": [
+    "docs/guide.md#sec_0004 text 28.647 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts."
+  ],
+  "text:daemon state": [
+    "docs/guide.md#sec_0006 phrase 50.284 [Client guide > Caching > Daemon state] The daemon keeps one canonical state and serializes commits. See SHA-256 digests."
+  ],
+  "text:cache revision": [
+    "docs/guide.md#sec_0005 text 6.889 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache."
+  ],
+  "text:session cache": [
+    "docs/mixed.md#sec_0003 phrase 2.905 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "docs/repeated.md#sec_0002 text 3.379 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 text 3.379 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/typos.md#sec_0002 fuzzy 4.515 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne."
+  ],
+  "text:SHA-256": [
+    "docs/guide.md#sec_0006 phrase 16.539 [Client guide > Caching > Daemon state] aemon keeps one canonical state and serializes commits. See SHA-256 digests."
+  ],
+  "text:boundary phrase crosses": [
+    "docs/long.md#sec_0002 phrase 35.926 [Long notes > Boundary] す。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor boundary phrase crosses h"
+  ],
+  "text:boundary lateterm": [
+    "docs/long.md#sec_0002 text 32.385 [Long notes > Boundary] す。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor boundary phrase crosses h"
+  ],
+  "text:lateterm": [
+    "docs/long.md#sec_0002 phrase 4.553 [Long notes > Boundary] et 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem lateterm appears only near the end lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑"
+  ],
+  "text:lorem": [
+    "docs/long.md#sec_0002 phrase 6.993 [Long notes > Boundary] lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem"
+  ],
+  "text:認証": [
+    "auth.md#sec_0001 phrase 39.837 [認証仕様] この文書は、管理画面の認証の流れを定める。",
+    "auth.md#sec_0003 phrase 5.123 [認証仕様 > 失敗時の扱い] 認証に3回続けて失敗したら、5分間は受け付けない。AUTH_LOCKED を返す。",
+    "design-notes.md#sec_0002 phrase 3.04 [設計メモ > 方式の比較] 認証の方式として、session cookieとBearer tokenを比べた。管理画面ではBearer tokenを採る。"
+  ],
+  "text:認": [
+    "auth.md#sec_0001 phrase 0 [認証仕様] この文書は、管理画面の認証の流れを定める。",
+    "auth.md#sec_0003 phrase 0 [認証仕様 > 失敗時の扱い] 認証に3回続けて失敗したら、5分間は受け付けない。AUTH_LOCKED を返す。",
+    "design-notes.md#sec_0002 phrase 0 [設計メモ > 方式の比較] 認証の方式として、session cookieとBearer tokenを比べた。管理画面ではBearer tokenを採る。"
+  ],
+  "text:有効期限": [
+    "auth.md#sec_0002 phrase 39.103 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "ops/runbook.md#sec_0002 phrase 8.284 [運用手順 > 証明書の更新] TLS証明書の有効期限は90日。期限の14日前に、更新の作業を始める。"
+  ],
+  "text:検索の設計": [
+    "docs/mixed.md#sec_0002 phrase 52.388 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "text:検索 設計": [
+    "docs/mixed.md#sec_0002 text 42.438 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "text:セッション": [
+    "docs/mixed.md#sec_0003 phrase 20.258 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "auth.md#sec_0002 phrase 17.784 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "docs/mixed.md#sec_0004 text 5.064 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "text:abc": [
+    "docs/mixed.md#sec_0002 phrase 6.324 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "text:カタカナ": [
+    "docs/mixed.md#sec_0002 phrase 4.299 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "text:日本語 Intl.Segmenter": [
+    "docs/mixed.md#sec_0002 text 18.467 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "text:回答": [
+    "docs/mixed.md#sec_0004 phrase 28.434 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "text:users": [
+    "api/users.md#sec_0001 phrase 12.788 [ユーザーAPI] ユーザーAPI",
+    "api/users.md#sec_0002 phrase 4.817 [ユーザーAPI > 一覧の取得] GET /api/v2/users は、登録済みのユーザーを返す。pageSize の既定は50。"
+  ],
+  "text:users.md": [
+    "api/users.md#sec_0001 path-exact 31.14 [ユーザーAPI] ユーザーAPI"
+  ],
+  "text:api/users.md": [
+    "api/users.md#sec_0001 path-exact 110.211 [ユーザーAPI] ユーザーAPI"
+  ],
+  "text:runbook": [
+    "ops/runbook.md#sec_0001 phrase 12.788 [運用手順] 運用手順"
+  ],
+  "text:handbook": [
+    "site/handbook.html#sec_0001 phrase 49.146 [HTML handbook] Static pages are shown without scripts.",
+    "site/handbook.html#sec_0002 text 5.123 [HTML handbook > Retry] Retry the request after the token expires."
+  ],
+  "text:scripts": [
+    "site/handbook.html#sec_0001 phrase 5.739 [HTML handbook] Static pages are shown without scripts."
+  ],
+  "text:nothing-matches-this": [],
+  "text:cache": [
+    "docs/guide.md#sec_0005 phrase 1.908 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/repeated.md#sec_0002 phrase 1.69 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.69 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 phrase 1.552 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/mixed.md#sec_0003 phrase 1.262 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "docs/typos.md#sec_0002 fuzzy 2.225 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne."
+  ],
+  "text:session": [
+    "docs/repeated.md#sec_0002 phrase 1.69 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.69 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/mixed.md#sec_0003 phrase 1.642 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "docs/guide.md#sec_0002 phrase 1.413 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "design-notes.md#sec_0002 phrase 1.356 [設計メモ > 方式の比較] 認証の方式として、session cookieとBearer tokenを比べた。管理画面ではBearer tokenを採る。",
+    "docs/typos.md#sec_0002 fuzzy 2.289 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne."
+  ],
+  "text:retry 日記": [
+    "docs/typos.md#sec_0003 phrase 8.523 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "text:aretry": [
+    "docs/typos.md#sec_0003 phrase 6.151 [Typos > Joined] aretry 日記 の例。",
+    "site/handbook.html#sec_0002 fuzzy 9.573 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/repeated.md#sec_0002 fuzzy 0.634 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 fuzzy 0.634 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 fuzzy 0.582 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/guide.md#sec_0002 fuzzy 0.53 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter."
+  ],
+  "exact:retry policy": [
+    "docs/guide.md#sec_0002 phrase 0 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/repeated.md#sec_0002 phrase 0 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 0 [Repeated > Part 1] The retry policy and the cache. session 1"
+  ],
+  "exact:Retry": [
+    "docs/guide.md#sec_0002 phrase 0 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0005 phrase 0 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/long.md#sec_0003 phrase 0 [Long notes > After] Short section after the long one with retry and cache.",
+    "site/handbook.html#sec_0002 phrase 0 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/repeated.md#sec_0002 phrase 0 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 0 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/typos.md#sec_0002 phrase 0 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/typos.md#sec_0003 phrase 0 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "exact:セッションの": [
+    "auth.md#sec_0002 phrase 0 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "exact:re": [
+    "auth.md#sec_0002 phrase 0 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "design-notes.md#sec_0002 phrase 0 [設計メモ > 方式の比較] 認証の方式として、session cookieとBearer tokenを比べた。管理画面ではBearer tokenを採る。",
+    "docs/guide.md#sec_0002 phrase 0 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0003 phrase 0 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme.",
+    "docs/long.md#sec_0002 phrase 0 [Long notes > Boundary] lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem",
+    "docs/long.md#sec_0003 phrase 0 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/mixed.md#sec_0004 phrase 0 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。",
+    "site/handbook.html#sec_0001 phrase 0 [HTML handbook] Static pages are shown without scripts.",
+    "site/handbook.html#sec_0002 phrase 0 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/repeated.md#sec_0001 phrase 0 [Repeated] Repeated",
+    "docs/repeated.md#sec_0002 phrase 0 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/typos.md#sec_0002 phrase 0 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/typos.md#sec_0003 phrase 0 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "path:api": [
+    "api/users.md#sec_0001 phrase 0 [ユーザーAPI] ユーザーAPI"
+  ],
+  "path:users.md": [
+    "api/users.md#sec_0001 path-exact 0 [ユーザーAPI] ユーザーAPI"
+  ],
+  "path:docs/": [
+    "docs/guide.md#sec_0001 phrase 0 [Client guide] Overview of the client library.",
+    "docs/long.md#sec_0001 phrase 0 [Long notes] Long notes",
+    "docs/mixed.md#sec_0001 phrase 0 [混在した文書] 混在した文書",
+    "docs/repeated.md#sec_0001 phrase 0 [Repeated] Repeated",
+    "docs/typos.md#sec_0001 phrase 0 [Typos] Typos"
+  ],
+  "text:retry [4,5,8]": [
+    "docs/repeated.md#sec_0002 phrase 1.69 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.69 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 phrase 1.552 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/guide.md#sec_0002 phrase 1.413 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0005 prefix 1.679 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache."
+  ],
+  "text:session [6,8]": [
+    "docs/repeated.md#sec_0002 phrase 1.69 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.69 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/mixed.md#sec_0003 phrase 1.642 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。"
+  ],
+  "text:token [7]": [
+    "site/handbook.html#sec_0002 phrase 3.296 [HTML handbook > Retry] Retry the request after the token expires."
+  ],
+  "before cleanup, first: text:retry": [
+    "site/handbook.html#sec_0002 phrase 24.807 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/mixed.md#sec_0005 phrase 1.582 [混在した文書 > 追記] retry cache の追記。",
+    "docs/repeated.md#sec_0002 phrase 1.428 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.428 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 phrase 1.311 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/guide.md#sec_0002 phrase 1.192 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/typos.md#sec_0002 prefix 2.085 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/guide.md#sec_0005 prefix 1.648 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/typos.md#sec_0003 fuzzy 2.335 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "before cleanup, first: text:retr": [
+    "site/handbook.html#sec_0002 prefix 8.809 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/typos.md#sec_0002 prefix 1.99 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/guide.md#sec_0005 prefix 1.594 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/guide.md#sec_0004 prefix 1.586 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts.",
+    "docs/mixed.md#sec_0005 prefix 0.595 [混在した文書 > 追記] retry cache の追記。",
+    "docs/repeated.md#sec_0002 prefix 0.537 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 prefix 0.537 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 prefix 0.493 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/typos.md#sec_0003 prefix 0 [Typos > Joined] aretry 日記 の例。",
+    "docs/mixed.md#sec_0004 fuzzy 1.71 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "before cleanup, first: text:re": [
+    "docs/repeated.md#sec_0001 prefix 20.621 [Repeated] Repeated",
+    "site/handbook.html#sec_0002 prefix 9.394 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/guide.md#sec_0005 prefix 5.804 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/guide.md#sec_0002 prefix 3.351 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 prefix 2.3 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "docs/typos.md#sec_0002 prefix 1.824 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/repeated.md#sec_0002 prefix 1.786 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/mixed.md#sec_0004 prefix 1.449 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。",
+    "docs/mixed.md#sec_0005 prefix 0.534 [混在した文書 > 追記] retry cache の追記。",
+    "docs/long.md#sec_0003 prefix 0.443 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/long.md#sec_0002 prefix 0 [Long notes > Boundary] lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem",
+    "site/handbook.html#sec_0001 prefix 0 [HTML handbook] Static pages are shown without scripts.",
+    "docs/typos.md#sec_0003 prefix 0 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "before cleanup, first: text:r": [],
+  "before cleanup, first: text:retyr": [
+    "docs/mixed.md#sec_0004 phrase 4.561 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "before cleanup, first: text:retries": [
+    "docs/guide.md#sec_0004 phrase 4.772 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts."
+  ],
+  "before cleanup, first: text:token": [
+    "docs/guide.md#sec_0003 phrase 22.436 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme.",
+    "site/handbook.html#sec_0002 phrase 3.21 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/guide.md#sec_0002 phrase 2.595 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 phrase 1.848 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, first: text:tok": [
+    "docs/guide.md#sec_0003 prefix 10.639 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme.",
+    "docs/typos.md#sec_0002 prefix 1.955 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/guide.md#sec_0004 prefix 1.677 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts.",
+    "site/handbook.html#sec_0002 prefix 1.168 [HTML handbook > Retry] Retry the request after the token expires.",
+    "auth.md#sec_0002 prefix 0.726 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, first: text:refresh token": [
+    "docs/guide.md#sec_0002 text 6.695 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 text 5.148 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, first: text:refreshToken": [
+    "docs/guide.md#sec_0002 phrase 12.534 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 fuzzy 8.594 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, first: text:refresh_token": [
+    "auth.md#sec_0002 phrase 9.76 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, first: text:token_store": [
+    "docs/guide.md#sec_0003 phrase 32.325 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "before cleanup, first: text:parse http response": [
+    "docs/guide.md#sec_0003 text 12.648 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "before cleanup, first: text:authentication": [
+    "docs/guide.md#sec_0002 phrase 23.332 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0003 text 5.833 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "before cleanup, first: text:auth": [
+    "auth.md#sec_0001 phrase 13.944 [認証仕様] この文書は、管理画面の認証の流れを定める。",
+    "auth.md#sec_0003 phrase 4.142 [認証仕様 > 失敗時の扱い] 認証に3回続けて失敗したら、5分間は受け付けない。AUTH_LOCKED を返す。",
+    "docs/guide.md#sec_0002 prefix 7.205 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0003 prefix 1.801 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "before cleanup, first: text:authorization bearer": [
+    "docs/guide.md#sec_0003 text 8.432 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "before cleanup, first: text:rotation key": [
+    "docs/guide.md#sec_0004 text 28.104 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts."
+  ],
+  "before cleanup, first: text:daemon state": [
+    "docs/guide.md#sec_0006 phrase 49.197 [Client guide > Caching > Daemon state] The daemon keeps one canonical state and serializes commits. See SHA-256 digests."
+  ],
+  "before cleanup, first: text:cache revision": [
+    "docs/guide.md#sec_0005 text 6.502 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache."
+  ],
+  "before cleanup, first: text:session cache": [
+    "docs/mixed.md#sec_0003 phrase 2.695 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "docs/repeated.md#sec_0002 text 3.129 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 text 3.129 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/typos.md#sec_0002 fuzzy 4.441 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne."
+  ],
+  "before cleanup, first: text:SHA-256": [
+    "docs/guide.md#sec_0006 phrase 16.24 [Client guide > Caching > Daemon state] aemon keeps one canonical state and serializes commits. See SHA-256 digests."
+  ],
+  "before cleanup, first: text:boundary phrase crosses": [
+    "docs/long.md#sec_0002 phrase 35.219 [Long notes > Boundary] す。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor boundary phrase crosses h"
+  ],
+  "before cleanup, first: text:boundary lateterm": [
+    "docs/long.md#sec_0002 text 31.76 [Long notes > Boundary] す。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor boundary phrase crosses h"
+  ],
+  "before cleanup, first: text:lateterm": [
+    "docs/long.md#sec_0002 phrase 4.466 [Long notes > Boundary] et 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem lateterm appears only near the end lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑"
+  ],
+  "before cleanup, first: text:lorem": [
+    "docs/long.md#sec_0002 phrase 6.875 [Long notes > Boundary] lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem"
+  ],
+  "before cleanup, first: text:認証": [
+    "auth.md#sec_0001 phrase 38.78 [認証仕様] この文書は、管理画面の認証の流れを定める。",
+    "auth.md#sec_0003 phrase 5.009 [認証仕様 > 失敗時の扱い] 認証に3回続けて失敗したら、5分間は受け付けない。AUTH_LOCKED を返す。"
+  ],
+  "before cleanup, first: text:認": [
+    "auth.md#sec_0001 phrase 0 [認証仕様] この文書は、管理画面の認証の流れを定める。",
+    "auth.md#sec_0003 phrase 0 [認証仕様 > 失敗時の扱い] 認証に3回続けて失敗したら、5分間は受け付けない。AUTH_LOCKED を返す。"
+  ],
+  "before cleanup, first: text:有効期限": [
+    "auth.md#sec_0002 phrase 37.886 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "ops/runbook.md#sec_0002 phrase 7.681 [運用手順 > 証明書の更新] TLS証明書の有効期限は90日。期限の14日前に、更新の作業を始める。"
+  ],
+  "before cleanup, first: text:検索の設計": [
+    "docs/mixed.md#sec_0002 phrase 55.093 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "before cleanup, first: text:検索 設計": [
+    "docs/mixed.md#sec_0002 text 44.108 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "before cleanup, first: text:セッション": [
+    "docs/mixed.md#sec_0003 phrase 19.828 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "auth.md#sec_0002 phrase 15.721 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "docs/mixed.md#sec_0004 text 4.957 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "before cleanup, first: text:abc": [
+    "docs/mixed.md#sec_0002 phrase 6.213 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "before cleanup, first: text:カタカナ": [
+    "docs/mixed.md#sec_0002 phrase 4.216 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "before cleanup, first: text:日本語 Intl.Segmenter": [
+    "docs/mixed.md#sec_0002 text 18.114 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "before cleanup, first: text:回答": [
+    "docs/mixed.md#sec_0004 phrase 27.893 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "before cleanup, first: text:users": [
+    "api/users.md#sec_0001 phrase 12.385 [ユーザーAPI] ユーザーAPI",
+    "api/users.md#sec_0002 phrase 4.719 [ユーザーAPI > 一覧の取得] GET /api/v2/users は、登録済みのユーザーを返す。pageSize の既定は50。"
+  ],
+  "before cleanup, first: text:users.md": [
+    "api/users.md#sec_0001 path-exact 29.737 [ユーザーAPI] ユーザーAPI"
+  ],
+  "before cleanup, first: text:api/users.md": [
+    "api/users.md#sec_0001 path-exact 107.388 [ユーザーAPI] ユーザーAPI"
+  ],
+  "before cleanup, first: text:runbook": [
+    "ops/runbook.md#sec_0001 phrase 12.385 [運用手順] 運用手順"
+  ],
+  "before cleanup, first: text:handbook": [
+    "site/handbook.html#sec_0001 phrase 47.769 [HTML handbook] Static pages are shown without scripts.",
+    "site/handbook.html#sec_0002 text 5.009 [HTML handbook > Retry] Retry the request after the token expires."
+  ],
+  "before cleanup, first: text:scripts": [
+    "site/handbook.html#sec_0001 phrase 5.642 [HTML handbook] Static pages are shown without scripts."
+  ],
+  "before cleanup, first: text:nothing-matches-this": [],
+  "before cleanup, first: text:cache": [
+    "docs/guide.md#sec_0005 phrase 1.714 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/mixed.md#sec_0005 phrase 1.681 [混在した文書 > 追記] retry cache の追記。",
+    "docs/repeated.md#sec_0002 phrase 1.517 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.517 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 phrase 1.393 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/mixed.md#sec_0003 phrase 1.131 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "docs/typos.md#sec_0002 fuzzy 2.189 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne."
+  ],
+  "before cleanup, first: text:session": [
+    "docs/repeated.md#sec_0002 phrase 1.712 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.712 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/mixed.md#sec_0003 phrase 1.662 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "docs/guide.md#sec_0002 phrase 1.429 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/typos.md#sec_0002 fuzzy 2.252 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne."
+  ],
+  "before cleanup, first: text:retry 日記": [
+    "docs/typos.md#sec_0003 phrase 8.389 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "before cleanup, first: text:aretry": [
+    "docs/typos.md#sec_0003 phrase 6.054 [Typos > Joined] aretry 日記 の例。",
+    "site/handbook.html#sec_0002 fuzzy 9.337 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/mixed.md#sec_0005 fuzzy 0.63 [混在した文書 > 追記] retry cache の追記。",
+    "docs/repeated.md#sec_0002 fuzzy 0.569 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 fuzzy 0.569 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 fuzzy 0.522 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/guide.md#sec_0002 fuzzy 0.475 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter."
+  ],
+  "before cleanup, first: exact:retry policy": [
+    "docs/guide.md#sec_0002 phrase 0 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/repeated.md#sec_0002 phrase 0 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 0 [Repeated > Part 1] The retry policy and the cache. session 1"
+  ],
+  "before cleanup, first: exact:Retry": [
+    "docs/guide.md#sec_0002 phrase 0 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0005 phrase 0 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/long.md#sec_0003 phrase 0 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/mixed.md#sec_0005 phrase 0 [混在した文書 > 追記] retry cache の追記。",
+    "site/handbook.html#sec_0002 phrase 0 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/repeated.md#sec_0002 phrase 0 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 0 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/typos.md#sec_0002 phrase 0 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/typos.md#sec_0003 phrase 0 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "before cleanup, first: exact:セッションの": [
+    "auth.md#sec_0002 phrase 0 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, first: exact:re": [
+    "auth.md#sec_0002 phrase 0 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "docs/guide.md#sec_0002 phrase 0 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0003 phrase 0 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme.",
+    "docs/long.md#sec_0002 phrase 0 [Long notes > Boundary] lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem",
+    "docs/long.md#sec_0003 phrase 0 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/mixed.md#sec_0004 phrase 0 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。",
+    "docs/mixed.md#sec_0005 phrase 0 [混在した文書 > 追記] retry cache の追記。",
+    "site/handbook.html#sec_0001 phrase 0 [HTML handbook] Static pages are shown without scripts.",
+    "site/handbook.html#sec_0002 phrase 0 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/repeated.md#sec_0001 phrase 0 [Repeated] Repeated",
+    "docs/repeated.md#sec_0002 phrase 0 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/typos.md#sec_0002 phrase 0 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/typos.md#sec_0003 phrase 0 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "before cleanup, first: path:api": [
+    "api/users.md#sec_0001 phrase 0 [ユーザーAPI] ユーザーAPI"
+  ],
+  "before cleanup, first: path:users.md": [
+    "api/users.md#sec_0001 path-exact 0 [ユーザーAPI] ユーザーAPI"
+  ],
+  "before cleanup, first: path:docs/": [
+    "docs/guide.md#sec_0001 phrase 0 [Client guide] Overview of the client library.",
+    "docs/long.md#sec_0001 phrase 0 [Long notes] Long notes",
+    "docs/mixed.md#sec_0001 phrase 0 [混在した文書] 混在した文書",
+    "docs/repeated.md#sec_0001 phrase 0 [Repeated] Repeated",
+    "docs/typos.md#sec_0001 phrase 0 [Typos] Typos"
+  ],
+  "before cleanup, first: text:retry [4,5,8]": [
+    "docs/repeated.md#sec_0002 phrase 1.517 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.517 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 phrase 1.393 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/guide.md#sec_0002 phrase 1.267 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0005 prefix 1.648 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache."
+  ],
+  "before cleanup, first: text:session [6,8]": [
+    "docs/repeated.md#sec_0002 phrase 1.712 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.712 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/mixed.md#sec_0003 phrase 1.662 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。"
+  ],
+  "before cleanup, first: text:token [7]": [
+    "site/handbook.html#sec_0002 phrase 3.487 [HTML handbook > Retry] Retry the request after the token expires."
+  ],
+  "before cleanup, again: text:retry": [
+    "site/handbook.html#sec_0002 phrase 24.899 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/mixed.md#sec_0005 phrase 1.681 [混在した文書 > 追記] retry cache の追記。",
+    "docs/repeated.md#sec_0002 phrase 1.517 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.517 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 phrase 1.393 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/guide.md#sec_0002 phrase 1.267 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/typos.md#sec_0002 prefix 2.085 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/guide.md#sec_0005 prefix 1.648 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/typos.md#sec_0003 fuzzy 2.335 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "before cleanup, again: text:retr": [
+    "site/handbook.html#sec_0002 prefix 8.809 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/typos.md#sec_0002 prefix 1.99 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/guide.md#sec_0005 prefix 1.594 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/guide.md#sec_0004 prefix 1.586 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts.",
+    "docs/mixed.md#sec_0005 prefix 0.595 [混在した文書 > 追記] retry cache の追記。",
+    "docs/repeated.md#sec_0002 prefix 0.537 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 prefix 0.537 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 prefix 0.493 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/typos.md#sec_0003 prefix 0 [Typos > Joined] aretry 日記 の例。",
+    "docs/mixed.md#sec_0004 fuzzy 1.71 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "before cleanup, again: text:re": [
+    "docs/repeated.md#sec_0001 prefix 20.621 [Repeated] Repeated",
+    "site/handbook.html#sec_0002 prefix 9.394 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/guide.md#sec_0005 prefix 5.804 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/guide.md#sec_0002 prefix 3.351 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 prefix 2.3 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "docs/typos.md#sec_0002 prefix 1.824 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/repeated.md#sec_0002 prefix 1.786 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/mixed.md#sec_0004 prefix 1.449 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。",
+    "docs/mixed.md#sec_0005 prefix 0.534 [混在した文書 > 追記] retry cache の追記。",
+    "docs/long.md#sec_0003 prefix 0.443 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/long.md#sec_0002 prefix 0 [Long notes > Boundary] lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem",
+    "site/handbook.html#sec_0001 prefix 0 [HTML handbook] Static pages are shown without scripts.",
+    "docs/typos.md#sec_0003 prefix 0 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "before cleanup, again: text:r": [],
+  "before cleanup, again: text:retyr": [
+    "docs/mixed.md#sec_0004 phrase 4.561 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "before cleanup, again: text:retries": [
+    "docs/guide.md#sec_0004 phrase 4.772 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts."
+  ],
+  "before cleanup, again: text:token": [
+    "docs/guide.md#sec_0003 phrase 22.643 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme.",
+    "site/handbook.html#sec_0002 phrase 3.487 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/guide.md#sec_0002 phrase 2.819 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 phrase 2.168 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, again: text:tok": [
+    "docs/guide.md#sec_0003 prefix 10.639 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme.",
+    "docs/typos.md#sec_0002 prefix 1.955 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/guide.md#sec_0004 prefix 1.677 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts.",
+    "site/handbook.html#sec_0002 prefix 1.168 [HTML handbook > Retry] Retry the request after the token expires.",
+    "auth.md#sec_0002 prefix 0.726 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, again: text:refresh token": [
+    "docs/guide.md#sec_0002 text 6.695 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 text 5.148 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, again: text:refreshToken": [
+    "docs/guide.md#sec_0002 phrase 12.534 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "auth.md#sec_0002 fuzzy 8.594 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, again: text:refresh_token": [
+    "auth.md#sec_0002 phrase 9.76 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, again: text:token_store": [
+    "docs/guide.md#sec_0003 phrase 32.325 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "before cleanup, again: text:parse http response": [
+    "docs/guide.md#sec_0003 text 12.648 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "before cleanup, again: text:authentication": [
+    "docs/guide.md#sec_0002 phrase 23.332 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0003 text 5.833 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "before cleanup, again: text:auth": [
+    "auth.md#sec_0001 phrase 13.944 [認証仕様] この文書は、管理画面の認証の流れを定める。",
+    "auth.md#sec_0003 phrase 4.142 [認証仕様 > 失敗時の扱い] 認証に3回続けて失敗したら、5分間は受け付けない。AUTH_LOCKED を返す。",
+    "docs/guide.md#sec_0002 prefix 7.205 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0003 prefix 1.801 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "before cleanup, again: text:authorization bearer": [
+    "docs/guide.md#sec_0003 text 8.432 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme."
+  ],
+  "before cleanup, again: text:rotation key": [
+    "docs/guide.md#sec_0004 text 28.104 [Client guide > Authentication > Token storage > Rotation] Rotate the signing key every 90 days. Retries stop after 5 attempts."
+  ],
+  "before cleanup, again: text:daemon state": [
+    "docs/guide.md#sec_0006 phrase 49.197 [Client guide > Caching > Daemon state] The daemon keeps one canonical state and serializes commits. See SHA-256 digests."
+  ],
+  "before cleanup, again: text:cache revision": [
+    "docs/guide.md#sec_0005 text 6.603 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache."
+  ],
+  "before cleanup, again: text:session cache": [
+    "docs/mixed.md#sec_0003 phrase 2.793 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "docs/repeated.md#sec_0002 text 3.23 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 text 3.23 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/typos.md#sec_0002 fuzzy 4.441 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne."
+  ],
+  "before cleanup, again: text:SHA-256": [
+    "docs/guide.md#sec_0006 phrase 16.24 [Client guide > Caching > Daemon state] aemon keeps one canonical state and serializes commits. See SHA-256 digests."
+  ],
+  "before cleanup, again: text:boundary phrase crosses": [
+    "docs/long.md#sec_0002 phrase 35.219 [Long notes > Boundary] す。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor boundary phrase crosses h"
+  ],
+  "before cleanup, again: text:boundary lateterm": [
+    "docs/long.md#sec_0002 text 31.76 [Long notes > Boundary] す。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor boundary phrase crosses h"
+  ],
+  "before cleanup, again: text:lateterm": [
+    "docs/long.md#sec_0002 phrase 4.466 [Long notes > Boundary] et 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem lateterm appears only near the end lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑"
+  ],
+  "before cleanup, again: text:lorem": [
+    "docs/long.md#sec_0002 phrase 6.875 [Long notes > Boundary] lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem"
+  ],
+  "before cleanup, again: text:認証": [
+    "auth.md#sec_0001 phrase 39.151 [認証仕様] この文書は、管理画面の認証の流れを定める。",
+    "auth.md#sec_0003 phrase 5.009 [認証仕様 > 失敗時の扱い] 認証に3回続けて失敗したら、5分間は受け付けない。AUTH_LOCKED を返す。"
+  ],
+  "before cleanup, again: text:認": [
+    "auth.md#sec_0001 phrase 0 [認証仕様] この文書は、管理画面の認証の流れを定める。",
+    "auth.md#sec_0003 phrase 0 [認証仕様 > 失敗時の扱い] 認証に3回続けて失敗したら、5分間は受け付けない。AUTH_LOCKED を返す。"
+  ],
+  "before cleanup, again: text:有効期限": [
+    "auth.md#sec_0002 phrase 38.145 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "ops/runbook.md#sec_0002 phrase 8.105 [運用手順 > 証明書の更新] TLS証明書の有効期限は90日。期限の14日前に、更新の作業を始める。"
+  ],
+  "before cleanup, again: text:検索の設計": [
+    "docs/mixed.md#sec_0002 phrase 55.093 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "before cleanup, again: text:検索 設計": [
+    "docs/mixed.md#sec_0002 text 44.108 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "before cleanup, again: text:セッション": [
+    "docs/mixed.md#sec_0003 phrase 19.828 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "auth.md#sec_0002 phrase 17.33 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "docs/mixed.md#sec_0004 text 4.957 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "before cleanup, again: text:abc": [
+    "docs/mixed.md#sec_0002 phrase 6.213 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "before cleanup, again: text:カタカナ": [
+    "docs/mixed.md#sec_0002 phrase 4.216 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "before cleanup, again: text:日本語 Intl.Segmenter": [
+    "docs/mixed.md#sec_0002 text 18.114 [混在した文書 > 検索の設計] 検索の設計では、Intl.Segmenterで日本語を分ける。ＡＢＣ全角とｶﾀｶﾅ半角も扱う。"
+  ],
+  "before cleanup, again: text:回答": [
+    "docs/mixed.md#sec_0004 phrase 27.893 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。"
+  ],
+  "before cleanup, again: text:users": [
+    "api/users.md#sec_0001 phrase 12.385 [ユーザーAPI] ユーザーAPI",
+    "api/users.md#sec_0002 phrase 4.719 [ユーザーAPI > 一覧の取得] GET /api/v2/users は、登録済みのユーザーを返す。pageSize の既定は50。"
+  ],
+  "before cleanup, again: text:users.md": [
+    "api/users.md#sec_0001 path-exact 30.432 [ユーザーAPI] ユーザーAPI"
+  ],
+  "before cleanup, again: text:api/users.md": [
+    "api/users.md#sec_0001 path-exact 107.388 [ユーザーAPI] ユーザーAPI"
+  ],
+  "before cleanup, again: text:runbook": [
+    "ops/runbook.md#sec_0001 phrase 12.385 [運用手順] 運用手順"
+  ],
+  "before cleanup, again: text:handbook": [
+    "site/handbook.html#sec_0001 phrase 47.769 [HTML handbook] Static pages are shown without scripts.",
+    "site/handbook.html#sec_0002 text 5.009 [HTML handbook > Retry] Retry the request after the token expires."
+  ],
+  "before cleanup, again: text:scripts": [
+    "site/handbook.html#sec_0001 phrase 5.642 [HTML handbook] Static pages are shown without scripts."
+  ],
+  "before cleanup, again: text:nothing-matches-this": [],
+  "before cleanup, again: text:cache": [
+    "docs/guide.md#sec_0005 phrase 1.714 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/mixed.md#sec_0005 phrase 1.681 [混在した文書 > 追記] retry cache の追記。",
+    "docs/repeated.md#sec_0002 phrase 1.517 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.517 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 phrase 1.393 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/mixed.md#sec_0003 phrase 1.131 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "docs/typos.md#sec_0002 fuzzy 2.189 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne."
+  ],
+  "before cleanup, again: text:session": [
+    "docs/repeated.md#sec_0002 phrase 1.712 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.712 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/mixed.md#sec_0003 phrase 1.662 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。",
+    "docs/guide.md#sec_0002 phrase 1.429 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/typos.md#sec_0002 fuzzy 2.252 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne."
+  ],
+  "before cleanup, again: text:retry 日記": [
+    "docs/typos.md#sec_0003 phrase 8.389 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "before cleanup, again: text:aretry": [
+    "docs/typos.md#sec_0003 phrase 6.054 [Typos > Joined] aretry 日記 の例。",
+    "site/handbook.html#sec_0002 fuzzy 9.337 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/mixed.md#sec_0005 fuzzy 0.63 [混在した文書 > 追記] retry cache の追記。",
+    "docs/repeated.md#sec_0002 fuzzy 0.569 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 fuzzy 0.569 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 fuzzy 0.522 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/guide.md#sec_0002 fuzzy 0.475 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter."
+  ],
+  "before cleanup, again: exact:retry policy": [
+    "docs/guide.md#sec_0002 phrase 0 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/repeated.md#sec_0002 phrase 0 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 0 [Repeated > Part 1] The retry policy and the cache. session 1"
+  ],
+  "before cleanup, again: exact:Retry": [
+    "docs/guide.md#sec_0002 phrase 0 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0005 phrase 0 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache.",
+    "docs/long.md#sec_0003 phrase 0 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/mixed.md#sec_0005 phrase 0 [混在した文書 > 追記] retry cache の追記。",
+    "site/handbook.html#sec_0002 phrase 0 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/repeated.md#sec_0002 phrase 0 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 0 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/typos.md#sec_0002 phrase 0 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/typos.md#sec_0003 phrase 0 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "before cleanup, again: exact:セッションの": [
+    "auth.md#sec_0002 phrase 0 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで"
+  ],
+  "before cleanup, again: exact:re": [
+    "auth.md#sec_0002 phrase 0 [認証仕様 > セッションの有効期限] セッションは30分で失効する。操作があれば、有効期限をその時点から30分後へ延ばす。 延長は refresh_token を使う 延長できるのは、発行から12時間まで",
+    "docs/guide.md#sec_0002 phrase 0 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0003 phrase 0 [Client guide > Authentication > Token storage] Tokens are stored with token_store and parseHTTPResponse. Authorization headers use the bearer scheme.",
+    "docs/long.md#sec_0002 phrase 0 [Long notes > Boundary] lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem ipsum dolor sit amet 雑記 の 文章 です。 lorem",
+    "docs/long.md#sec_0003 phrase 0 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/mixed.md#sec_0004 phrase 0 [混在した文書 > セッション > 回答] 回答は、管理UIの送信でだけ確定する。retyr は綴り違いの例。",
+    "docs/mixed.md#sec_0005 phrase 0 [混在した文書 > 追記] retry cache の追記。",
+    "site/handbook.html#sec_0001 phrase 0 [HTML handbook] Static pages are shown without scripts.",
+    "site/handbook.html#sec_0002 phrase 0 [HTML handbook > Retry] Retry the request after the token expires.",
+    "docs/repeated.md#sec_0001 phrase 0 [Repeated] Repeated",
+    "docs/repeated.md#sec_0002 phrase 0 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/typos.md#sec_0002 phrase 0 [Typos > Misspelled] Typos: retrys, cashe, sesion, tokne.",
+    "docs/typos.md#sec_0003 phrase 0 [Typos > Joined] aretry 日記 の例。"
+  ],
+  "before cleanup, again: path:api": [
+    "api/users.md#sec_0001 phrase 0 [ユーザーAPI] ユーザーAPI"
+  ],
+  "before cleanup, again: path:users.md": [
+    "api/users.md#sec_0001 path-exact 0 [ユーザーAPI] ユーザーAPI"
+  ],
+  "before cleanup, again: path:docs/": [
+    "docs/guide.md#sec_0001 phrase 0 [Client guide] Overview of the client library.",
+    "docs/long.md#sec_0001 phrase 0 [Long notes] Long notes",
+    "docs/mixed.md#sec_0001 phrase 0 [混在した文書] 混在した文書",
+    "docs/repeated.md#sec_0001 phrase 0 [Repeated] Repeated",
+    "docs/typos.md#sec_0001 phrase 0 [Typos] Typos"
+  ],
+  "before cleanup, again: text:retry [4,5,8]": [
+    "docs/repeated.md#sec_0002 phrase 1.517 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.517 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/long.md#sec_0003 phrase 1.393 [Long notes > After] Short section after the long one with retry and cache.",
+    "docs/guide.md#sec_0002 phrase 1.267 [Client guide > Authentication] Call refreshToken before the session expires. The retry policy backs off with jitter.",
+    "docs/guide.md#sec_0005 prefix 1.648 [Client guide > Caching] The cache keeps one entry per revision. Retrying a request reuses the cache."
+  ],
+  "before cleanup, again: text:session [6,8]": [
+    "docs/repeated.md#sec_0002 phrase 1.712 [Repeated > Part 0] The retry policy and the cache. session 0",
+    "docs/repeated.md#sec_0003 phrase 1.712 [Repeated > Part 1] The retry policy and the cache. session 1",
+    "docs/mixed.md#sec_0003 phrase 1.662 [混在した文書 > セッション] sessionの期限は12時間で、操作がなければ失効する。Session cache は版ごとに持つ。"
+  ],
+  "before cleanup, again: text:token [7]": [
+    "site/handbook.html#sec_0002 phrase 3.487 [HTML handbook > Retry] Retry the request after the token expires."
+  ],
+  "removed entry, first: text:alpha beta": [
+    "notes/0.md#sec_0001 phrase 2.079",
+    "notes/1.md#sec_0001 fuzzy 0.735"
+  ],
+  "removed entry, again: text:alpha beta": [
+    "notes/0.md#sec_0001 phrase 2.079",
+    "notes/1.md#sec_0001 fuzzy 0.735"
+  ]
+}

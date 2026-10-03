@@ -1,8 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { COLLECT_AFTER_IDLE_MS } from '../diagnostics/idle-collect.ts';
 
 import { createParseService, type ParseService } from './parse-service.ts';
 
@@ -111,6 +113,56 @@ parentPort.on('message', (request) => {
       'remote-asset-blocked',
       'script-removed',
     ]);
+  });
+
+  it('asks the worker to collect garbage once after parse requests pause', async () => {
+    // A worker that reports how many times it was asked to collect as its heap.
+    const workerPath = join(dir, 'counting-worker.mjs');
+    writeFileSync(
+      workerPath,
+      `import { parentPort } from 'node:worker_threads';
+let collects = 0;
+parentPort.on('message', (request) => {
+  if (request.op === 'collect') collects += 1;
+  const result = request.op === 'diagnostics' ? { heapUsedBytes: collects, retained: {} } : { title: 't', outline: [] };
+  parentPort.postMessage({ id: request.id, ok: true, result });
+});
+`,
+    );
+    service = createParseService({ workerPath });
+    const collects = async () => (await service?.diagnostics(false))?.heapUsedBytes;
+    await service.analyze('markdown', '# a\n');
+    await service.analyze('markdown', '# b\n');
+    expect(await collects()).toBe(0);
+    await vi.waitFor(async () => expect(await collects()).toBe(1), { timeout: 5000 });
+    // Diagnostics alone do not count as activity.
+    await new Promise((resolve) => setTimeout(resolve, COLLECT_AFTER_IDLE_MS + 500));
+    expect(await collects()).toBe(1);
+  });
+
+  it('a slow collection does not count against parses sent while it runs', async () => {
+    // A worker whose collection blocks longer than the parse time limit. It marks when the collection starts.
+    const marker = join(dir, 'collecting');
+    const workerPath = join(dir, 'slow-collect-worker.mjs');
+    writeFileSync(
+      workerPath,
+      `import { writeFileSync } from 'node:fs';
+import { parentPort } from 'node:worker_threads';
+const pause = new Int32Array(new SharedArrayBuffer(4));
+parentPort.on('message', (request) => {
+  if (request.op === 'collect') {
+    writeFileSync(${JSON.stringify(marker)}, '');
+    Atomics.wait(pause, 0, 0, 800);
+  }
+  parentPort.postMessage({ id: request.id, ok: true, result: { title: 't', outline: [] } });
+});
+`,
+    );
+    service = createParseService({ timeoutMs: 500, workerPath });
+    await service.analyze('markdown', '# a\n');
+    await vi.waitFor(() => expect(existsSync(marker)).toBe(true), { timeout: 5000 });
+    // Sent during the collection: it waits for the collection, then gets its own time limit.
+    expect((await service.analyze('markdown', '# b\n')).title).toBe('t');
   });
 
   it('does not accept parses after close', async () => {

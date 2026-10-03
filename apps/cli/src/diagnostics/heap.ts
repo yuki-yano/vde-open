@@ -1,14 +1,22 @@
 import { getHeapStatistics, setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 
-// Returns the heap usage of this thread (the daemon itself, or each worker).
-// With collectGarbage, runs GC once first (so resource leak checks can compare the heap after collection).
+let gc: (() => void) | null = null;
+
+// Runs a full garbage collection on this thread (the daemon itself, or a worker).
 // Enables it here even when the daemon was started without `--expose-gc`.
-export function measureHeap(collectGarbage: boolean): number {
-  if (collectGarbage) {
+export function collectGarbage(): void {
+  if (gc === null) {
     setFlagsFromString('--expose-gc');
-    (runInNewContext('gc') as () => void)();
+    gc = runInNewContext('gc') as () => void;
   }
+  gc();
+}
+
+// Returns the heap usage of this thread (the daemon itself, or each worker).
+// With collect, runs GC once first (so resource leak checks can compare the heap after collection).
+export function measureHeap(collect: boolean): number {
+  if (collect) collectGarbage();
   return getHeapStatistics().used_heap_size;
 }
 

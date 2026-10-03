@@ -25,6 +25,7 @@ import { startIpcServer, type IpcServer } from '../server/ipc-server.ts';
 import { createSessionService } from '../server/session-service.ts';
 import { createWatchService, type WatchService } from '../watch/watch-service.ts';
 import { measureHeap } from '../diagnostics/heap.ts';
+import { startHeapWatch } from '../diagnostics/idle-collect.ts';
 import { removeWithRetry } from '../persistence/fs-retry.ts';
 import { createParseService, type ParseService } from '../workers/parse-service.ts';
 import {
@@ -113,6 +114,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   let feedback: FeedbackService | null = null;
   let announceStopping: () => void = () => undefined;
   let lockTimer: NodeJS.Timeout | null = null;
+  let heapWatch: { stop(): void } | null = null;
   let stopping: Promise<void> | null = null;
   // Aborted once stopping begins.
   const stopRequested = new AbortController();
@@ -160,6 +162,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // Among accepted work, first end the waits that need not finish (such as diagnostics waiting for index sync).
     stopRequested.abort();
     if (lockTimer) clearInterval(lockTimer);
+    heapWatch?.stop();
     // Keep holding the lock until accepted work and commits finish.
     // Releasing early would overlap with the next daemon's writes.
     await step('watcher', () => watcher?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
@@ -462,6 +465,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     };
     lockTimer = setInterval(() => void checkLock(), LOCK_CHECK_INTERVAL_MS);
     lockTimer.unref();
+    // The workers collect after their requests pause. This thread collects after it goes idle.
+    heapWatch = startHeapWatch();
 
     logger.log('daemon.started', { openDocuments: openedStore.payload.openOrder.length });
   } catch (error) {

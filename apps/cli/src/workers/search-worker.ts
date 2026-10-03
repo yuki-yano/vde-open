@@ -4,7 +4,7 @@ import { parentPort } from 'node:worker_threads';
 
 import type { SearchMode } from '@vde-open/shared';
 
-import { measureHeap, type WorkerDiagnostics } from '../diagnostics/heap.ts';
+import { collectGarbage, measureHeap, type WorkerDiagnostics } from '../diagnostics/heap.ts';
 import { SearchIndex, type IndexedMeta, type IndexPart } from '../search/search-index.ts';
 
 export type SearchWorkerRequest =
@@ -20,9 +20,9 @@ export type SearchWorkerRequest =
 
 const index = new SearchIndex();
 
-async function diagnostics(collectGarbage: boolean): Promise<WorkerDiagnostics> {
-  const retained = await index.retainedCounts(collectGarbage);
-  return { heapUsedBytes: measureHeap(collectGarbage), retained };
+async function diagnostics(collect: boolean): Promise<WorkerDiagnostics> {
+  const retained = await index.retainedCounts(collect);
+  return { heapUsedBytes: measureHeap(collect), retained };
 }
 
 function run(request: SearchWorkerRequest): unknown {
@@ -31,7 +31,7 @@ function run(request: SearchWorkerRequest): unknown {
       return diagnostics(request.collectGarbage);
     // Indexing leaves a lot of garbage, and an idle worker does not collect it on its own.
     case 'collect':
-      measureHeap(true);
+      collectGarbage();
       return null;
     case 'begin':
       index.begin(request.meta);

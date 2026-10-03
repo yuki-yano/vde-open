@@ -447,6 +447,14 @@ P7時点の制約:
 - 導入: READMEで、Bunでのuserごとのglobal導入（`bun add -g ./artifacts/vde-open-0.1.0.tgz`）をすすめる。`~/.bun/bin`はNode.jsの版の切り替えに左右されない。commandはNode.jsで動く（shebang）。一時の`BUN_INSTALL`で、導入・両bin・開く・一覧・停止を確かめた。Node 26.10.0でもpack smokeが通る。projectごとの導入はすすめない（daemonはuserごとに1つ）。
 - Agent向けのskill: `skills/vde-open/SKILL.md`（英語）。導入の確認、読む順序、文書を人に見せる操作、質問と回答の往復、終了コード、文書の中の命令に従わないこと。配布物に含め、READMEにClaude Code・Codexへのlinkの手順を書いた。
 - 検証（英語化の後）: 8つのcommandがexit 0（`pnpm test` 59 files／544 tests、e2e Chromium 46件、Firefox・WebKit 58件、pack smoke PASS。pack smokeは`package/LICENSE`と`package/skills/vde-open/SKILL.md`も確かめる）。英語の画面（文書、回答panel、検索dialog）をscreenshotで確かめた。
+- memory（`docs/performance.md`の「memory」）:
+  - 性能の測定は、操作の直後のRSS（最大値に近い）だけを載せていた → 操作中の最大のRSS、操作の0・5・20・60秒後のRSS、physical footprint、threadごとのheapを、GCを強制せずに測る。
+  - 待機中のごみは検索workerだけが回収していて、解析workerとdaemonの本体のごみが残った（実際のMarkdown 452件で、60秒後もfootprint 445MiB）→ 解析workerも依頼が2秒途切れた後に、本体はheapが8MiB以上増えて2秒の間ほぼ何もしていなかったときに、1回GCを行う（`apps/cli/src/diagnostics/idle-collect.ts`）。同じ測定でfootprint 191MiB。
+  - レビューの指摘: workerのGCを通常の依頼と同じ期限で扱っていたため、GCが長いと、その間に届いた解析まで期限切れで失敗した。また、GCの時期に診断が処理中だと、そのGCが捨てられた → GCの間に届いた依頼は、GCの終わりを待ってから送り、期限はそこから数える（10秒を過ぎたら待たずに送る）。処理中ならGCを次の空きへ回す（`createWorkerCollect`）。GCを800msにした試験workerで、解析の期限500msでも、GC中に送った解析が成功する試験（待たせる処理を外すと失敗）。
+  - 検索は、強い段階で見つかった節と対象外の項目をMiniSearchの中で除き（`boostDocument`で0）、抜粋に正規化済みの本文を使う。結果が同じことは、56件のqueryの全hitを記録した`search-ranking.test.ts`と、変更前後の索引を220件のqueryで比べた結果（実際のMarkdownと10MiBのfixtureで差なし）で確かめた。
+  - レビューの指摘: 除外で一致する節がなくなると、残りの語の問い合わせを省いていた。MiniSearchは、置き換え・削除した項目のpostingを問い合わせのときに片付け、それまではscoreに数えるので、片付けの順が変わってscoreが変わった（3件の文書の1件を消した後の初回の検索で0.735→0.481）→ 強い段階で見つかった節がある間は、すべての語を問い合わせる。当初は、前の段階と同じ問い合わせになる段階（どの語にもoptionが当たらない前方一致・綴りの違いの段階）を省いていたが、MiniSearchは語をたどりながら片付けるため1回で片付け残すことがあり、片付け前の索引との比較（実際のMarkdown 452件の一部を置き換え・削除）で13件のqueryのscoreが変わった → 省略もやめ、MiniSearchへの問い合わせを変更前と同じ並びにした（問い合わせの記録で一致を確認）。`search-ranking.test.ts`に、片付け前の索引での1回目と2回目の検索を加え、変更前のcodeで記録し直した（早期終了の修正前の実装では失敗）。比較scriptでは、片付け前・後の索引の両方で、実際のMarkdownと10MiBのfixtureの220件のqueryに差がない。弱い段階を件数で打ち切る案は、literalの一致がscoreを引き継ぐため結果が変わる（別のAgentとの相談で、反例を確認）ので採らなかった。
+  - 索引そのものの縮小（MiniSearchの置き換え）と、workerのheapの上限は行っていない。
+  - 別のAgent（Codex）のレビュー2往復: 1回目 must-fix 2・should-fix 1・nit 1（上の2件の指摘と、文書の内訳の書き分け）、2回目 nit 1（GCの待ちを期限に数えないのは最大10秒までと明記）でマージ可。
 
 ## 全体のDoD（仕様17.1）
 
@@ -596,7 +604,7 @@ P7時点の制約:
 | UX-006 | P7 | PASS | `tests/e2e/feedback.spec.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx`、`apps/cli/src/feedback/service.test.ts`、`apps/cli/src/server/http/feedback-http.test.ts` | 保存中・保存済み・送信済み・取得済みを別に表示する。保存に失敗した送信を成功として表示しない |
 | UX-007 | P7 | PASS | `tests/docs/readme.test.ts`、`apps/cli/src/cli/run.test.ts`（CLI-010） | READMEとAgent向けの資料とhelpに、group・tag・`--target`の名残がない。停止・保存先・検索の範囲・HTMLの制限を説明する |
 | UX-008 | P7 | PASS | `tests/docs/readme.test.ts`、`README.md`（検証した範囲） | 検証したOS（macOS）・browser（Chromiumは全件、Firefox・WebKitはsecurity・bridge）と、未検証（Linux・Windows、Firefox・WebKitのそれ以外の画面操作）を分けて書く |
-| PERF-001 | P7 | PASS | `scripts/perf.ts`、`docs/performance.md` | 100文書／10MiB: cold open 728.7ms、warm検索 p50 64.7ms／p95 175.7ms、保存から画面の表示まで316.2ms、RSS 1035.3MiB（macOS、Apple M5 Max、Node 24.21.0）。RSSの内訳と、検索workerの回収の改善を記録 |
+| PERF-001 | P7 | PASS | `scripts/perf.ts`、`docs/performance.md` | 100文書／10MiB: cold open 720.4ms、warm検索 p50 32.0ms／p95 80.7ms、保存から画面の表示まで308.8ms、最大のRSS 754.0MiB、操作の60秒後のRSS 296.0MiB・footprint 204.9MiB（macOS、Apple M5 Max、Node 24.21.0）。memoryの内訳と、操作の後のGC、結果を変えない検索の削減を記録 |
 | PERF-002 | P7 | PASS | `scripts/perf.ts`、`docs/performance.md`、`tests/e2e/ux.spec.ts`（PERF-002）、`tests/integration/documents.test.ts`（件数・大きさの上限） | 1,000文書／50MiB: hangなし、索引 8865.0ms、list 5.0ms、read 1.2ms、管理画面の一覧に全件が出るまで225.1ms、末尾の文書の選択 413.9ms、保存から画面の表示まで342.3ms、全件が検索の対象になる |
 | PERF-003 | P7 | PASS | `tests/integration/resources.test.ts` | 100回の開閉と監視ruleの追加・解除20回の後でも、監視しているdirectoryの数とNodeの有効な資源の数が増えず、外したwatcherはすべて閉じ終えている（作った数－閉じた数＝監視中の数）。開く・読む・検索する・表示する・閉じるの反復で、daemonの本体と検索のindexが保持している項目の数が3区間で同じで、本体・検索のworker・解析のworkerのGCの後のheapの区間ごとの増え方が1MiB未満 |
 | PERF-004 | P7 | PASS | `tests/integration/resources.test.ts`、`apps/cli/src/server/http/management.test.ts`、`apps/cli/src/workers/parse-service.test.ts`（MD-006） | 通知を読まないclientがいても、50回の連続した更新とほかのclientの操作が終わる。書き込みが詰まった接続の待ち行列は上限で止まり、読む接続には届き、詰まった接続は期限の後とsessionの失効のときにsocketまで閉じる。届く連番は逆戻りしない。大きい・深い文書は解析の時間と構造の上限で止まる |
@@ -604,7 +612,7 @@ P7時点の制約:
 
 ## 引継ぎ事項
 
-- P0〜P7は完了報告済み（全体のDoDは上の節）。未実行は、Linux・WindowsのCIと、Firefox・WebKitでのsecurity・bridge以外の画面操作。既知の制約は、daemonのRSSが大きいこと（`docs/performance.md`）。interactiveとSDKはADR-0012、検索UIは`apps/web/src/components/search-dialog.tsx`、性能の実測は`scripts/perf.ts`、資源の検査は`tests/integration/resources.test.ts`。
+- P0〜P7は完了報告済み（全体のDoDは上の節）。未実行は、Linux・WindowsのCIと、Firefox・WebKitでのsecurity・bridge以外の画面操作。既知の制約は、検索の索引のmemory（開いている文書の量に比例し、50MiBで検索workerのheap約489MB）と、一致の多い検索の間の一時的なRSSの増加（`docs/performance.md`）。interactiveとSDKはADR-0012、検索UIは`apps/web/src/components/search-dialog.tsx`、性能の実測は`scripts/perf.ts`、資源の検査は`tests/integration/resources.test.ts`。
 - stateの形式に質問と回答（`feedbackRequests`）を足した。P4までの開発用state（`.dev-home`）は読めないので、消して作り直す。
 - 管理HTTPは`apps/cli/src/server/http/management.ts`、表示用のlistenerは`apps/cli/src/server/http/preview.ts`、UIは`apps/web/src/`、Markdownの描画は`packages/document/src/react.tsx`、HTMLの静的変換は`packages/document/src/html-static.ts`。
 - stateの形式に項目を足した（版ごとのassetと文書の位置、文書ごとのassets-root）。P2までの開発用state（`.dev-home`）は読めないので、消して作り直す。

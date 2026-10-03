@@ -227,6 +227,14 @@ function excerptOf(text: string, normalized: string, needles: string[]): string 
 
 const sectionKeyOf = (entry: Entry) => `${entry.documentId}\n${String(entry.sectionIndex)}`;
 
+// Whether any matched term was found in the body field (MiniSearch's match: term -> fields).
+function matchedInBody(match: Record<string, string[]>): boolean {
+  for (const term in match) {
+    if (match[term]?.includes('body') === true) return true;
+  }
+  return false;
+}
+
 // Term matches aggregated per section.
 interface SectionMatch {
   stored: Stored;
@@ -498,11 +506,31 @@ export class SearchIndex {
       // Only sections where every term appears (in the section or its ancestor headings). Terms are never dropped to turn it into another search.
       // Long sections are split, so matching parts are looked up per term and aggregated per section.
       // Terms in ancestor headings count as matches of descendant sections (ancestor headings are not duplicated per section).
+      const restricted = input.documents !== null || this.#staging.size > 0;
       const run = (kind: MatchKind, options: { prefix: boolean; fuzzy: boolean }) => {
+        // Sections found by a stronger search are discarded from this one (see the end of run), and entries outside
+        // the searched documents are skipped below. Excluding them inside MiniSearch keeps it from building result
+        // objects for them, which is most of the garbage of a search that matches many sections.
+        // A document boost of 0 skips the entry before scoring; other entries' scores do not change.
+        const decided = new Map<Stored, Set<number>>();
+        for (const candidate of candidates.values()) {
+          const sections = decided.get(candidate.stored) ?? new Set<number>();
+          sections.add(candidate.entry.sectionIndex);
+          decided.set(candidate.stored, sections);
+        }
+        const boostDocument =
+          restricted || decided.size > 0
+            ? (id: string) => {
+                const found = this.#entries.get(id);
+                if (!found || !usable(found.stored)) return 0;
+                return decided.get(found.stored)?.has(found.entry.sectionIndex) === true ? 0 : 1;
+              }
+            : undefined;
         let matched: Map<string, SectionMatch> | null = null;
         for (const term of terms) {
           const results = this.#mini.search(term, {
             boost: BOOST,
+            ...(boostDocument ? { boostDocument } : {}),
             prefix: options.prefix ? (candidate) => candidate.length >= PREFIX_MIN_LENGTH : false,
             // At most one character difference, regardless of term length.
             fuzzy: options.fuzzy
@@ -518,14 +546,13 @@ export class SearchIndex {
             if (!found || !usable(found.stored)) continue;
             const { stored, entry } = found;
             const key = sectionKeyOf(entry);
-            const fields = new Set(Object.values(result.match).flat());
             const current = satisfied.get(key) ?? emptyMatch(stored, entry.sectionIndex);
             current.score = Math.max(current.score, result.score);
             if (result.score > current.entryScore) {
               current.entry = entry;
               current.entryScore = result.score;
             }
-            if (fields.has('body') && result.score > current.bodyScore) {
+            if (result.score > current.bodyScore && matchedInBody(result.match)) {
               current.bodyEntry = entry;
               current.bodyScore = result.score;
             }
@@ -574,7 +601,11 @@ export class SearchIndex {
               }
             }
           }
-          if (matched.size === 0) return;
+          // Stop once no section can match every term. Sections found by a stronger stage also match in this one
+          // (a weaker stage matches more), so while there are any, every term is still looked up even if they are
+          // excluded above. MiniSearch drops postings of replaced and removed entries while it looks up a term,
+          // and those still count in scores until then, so skipping lookups would change later scores.
+          if (matched.size === 0 && decided.size === 0) return;
         }
         for (const [key, value] of matched ?? []) {
           // A weaker search does not overwrite sections found by a stronger one.
@@ -585,6 +616,9 @@ export class SearchIndex {
           if (entry) offer(value.stored, entry, kind, value.score, value.bodyEntry !== null);
         }
       };
+      // A stage whose options apply to no term repeats the lookups of the stage before it. It still runs:
+      // MiniSearch drops postings of replaced and removed entries while it walks the terms, and a walk can leave
+      // some of them for the next one, so skipping it would change later scores until the index is cleaned up.
       run('text', { prefix: false, fuzzy: false });
       run('prefix', { prefix: true, fuzzy: false });
       run('fuzzy', { prefix: true, fuzzy: true });
@@ -654,7 +688,17 @@ export class SearchIndex {
       const shape = stored.sections.get(entry.sectionIndex);
       if (!shape) continue;
       perDocument.set(meta.documentId, count + 1);
-      const body = entry.body !== '' ? entry.body : entry.heading || shape.title || meta.title;
+      // The normalized text is kept for literal matches; only the title fallbacks are normalized here.
+      let body = entry.body;
+      let normalized = entry.normalizedBody;
+      if (body === '') {
+        body = entry.heading;
+        normalized = entry.normalizedHeading;
+      }
+      if (body === '') {
+        body = shape.title || meta.title;
+        normalized = normalizeForSearch(body);
+      }
       hits.push({
         documentId: meta.documentId,
         revision: meta.revision,
@@ -662,7 +706,7 @@ export class SearchIndex {
         displayPath: meta.displayPath,
         sectionId: shape.sectionId,
         headingPath: this.#headingPathOf(stored, entry.sectionIndex),
-        excerpt: excerptOf(body, normalizeForSearch(body), [query, ...terms]),
+        excerpt: excerptOf(body, normalized, [query, ...terms]),
         matchKind: kind,
         score: Math.round(score * 1000) / 1000,
         // Analysis has no source positions, so guessed line numbers are not returned (spec 8.3).

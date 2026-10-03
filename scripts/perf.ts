@@ -2,7 +2,7 @@
 // The management UI is measured with Playwright's Chromium (headless).
 // Uses the distribution (apps/cli/dist) and runs with a temporary VDE_OPEN_HOME. The real state is not touched.
 // Usage: pnpm build && pnpm perf
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -74,6 +74,47 @@ function percentile(values: number[], ratio: number): number {
 
 const round = (value: number) => Math.round(value * 10) / 10;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const mib = (bytes: number) => round(bytes / 1024 / 1024);
+// Seconds after the last operation at which the daemon's memory is recorded (no forced garbage collection).
+const SETTLE_POINTS_S = [0, 5, 20, 60];
+
+// Samples the RSS of a process every 200 ms and keeps the largest value (ps on macOS and Linux; not available on Windows).
+function sampleRss(pid: number): { peak: () => number | null; stop: () => void } {
+  let peak: number | null = null;
+  let running = process.platform !== 'win32';
+  const sample = () => {
+    if (!running) return;
+    execFile('ps', ['-o', 'rss=', '-p', String(pid)], (error, stdout) => {
+      const kib = Number(stdout.trim());
+      if (!error && Number.isFinite(kib) && kib > 0) peak = Math.max(peak ?? 0, kib * 1024);
+      if (running) setTimeout(sample, 200);
+    });
+  };
+  sample();
+  return {
+    peak: () => peak,
+    stop: () => {
+      running = false;
+    },
+  };
+}
+
+// The physical footprint of a process (what Activity Monitor shows as memory). macOS only.
+function physicalFootprint(pid: number): number | null {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const summary = execFileSync('vmmap', ['--summary', String(pid)], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const match = /Physical footprint:\s+([\d.]+)([KMG])/.exec(summary);
+    if (!match) return null;
+    const unit = { K: 1024, M: 1024 ** 2, G: 1024 ** 3 }[match[2] as 'K' | 'M' | 'G'];
+    return Number(match[1]) * unit;
+  } catch {
+    return null;
+  }
+}
 
 async function measureUi(
   url: string,
@@ -117,7 +158,7 @@ async function measureUi(
   }
 }
 
-async function measure(fixture: Fixture): Promise<Record<string, string | number>> {
+async function measure(fixture: Fixture): Promise<Record<string, unknown>> {
   const base = mkdtempSync(join(tmpdir(), 'vde-open-perf-'));
   const home = join(base, 'home');
   const work = join(base, 'work');
@@ -154,6 +195,8 @@ async function measure(fixture: Fixture): Promise<Record<string, string | number
       if (!envelope.ok) throw new Error(`${method}: ${JSON.stringify(envelope.error)}`);
       return envelope.data;
     };
+    const { pid } = await call<{ pid: number }>('daemon.status');
+    const rss = sampleRss(pid);
     try {
       // indexing: until all documents are searchable.
       const indexStarted = performance.now();
@@ -234,9 +277,29 @@ async function measure(fixture: Fixture): Promise<Record<string, string | number
         documentText(fixture.documents - 1, perDocument),
       );
 
-      const idleBefore = await call<{ cpuMicros: number }>('daemon.diagnostics');
-      await sleep(5000);
-      const idleAfter = await call<{ cpuMicros: number; rssBytes: number }>('daemon.diagnostics');
+      // Memory after the operations, as the daemon leaves it (no forced garbage collection): RSS over time, then the
+      // footprint and the heap of each thread. Idle CPU is measured over the first 5 seconds.
+      interface Diagnostics {
+        cpuMicros: number;
+        rssBytes: number;
+        heapUsedBytes: number;
+        workers: {
+          search: { heapUsedBytes: number } | null;
+          parse: { heapUsedBytes: number } | null;
+        };
+      }
+      const peakRss = rss.peak();
+      rss.stop();
+      const settleStarted = performance.now();
+      const settled: Diagnostics[] = [];
+      for (const seconds of SETTLE_POINTS_S) {
+        await sleep(Math.max(0, settleStarted + seconds * 1000 - performance.now()));
+        settled.push(await call<Diagnostics>('daemon.diagnostics'));
+      }
+      const [idleBefore, idleAfter] = settled;
+      const last = settled.at(-1);
+      if (!idleBefore || !idleAfter || !last) throw new Error('no diagnostics');
+      const footprint = physicalFootprint(pid);
 
       return {
         fixture: fixture.name,
@@ -252,9 +315,22 @@ async function measure(fixture: Fixture): Promise<Record<string, string | number
         uiSelectMs: round(ui.selectMs),
         uiUpdateReflectMs: round(ui.reflectMs),
         idleCpuPercent: round(((idleAfter.cpuMicros - idleBefore.cpuMicros) / 1000 / 5000) * 100),
-        rssMiB: round(idleAfter.rssBytes / 1024 / 1024),
+        peakRssMiB: peakRss === null ? null : mib(peakRss),
+        rssAfterMiB: Object.fromEntries(
+          SETTLE_POINTS_S.map((seconds, index) => [
+            `${String(seconds)}s`,
+            mib(settled[index]?.rssBytes ?? 0),
+          ]),
+        ),
+        footprintMiB: footprint === null ? null : mib(footprint),
+        heapMiB: {
+          main: mib(last.heapUsedBytes),
+          search: mib(last.workers.search?.heapUsedBytes ?? 0),
+          parse: mib(last.workers.parse?.heapUsedBytes ?? 0),
+        },
       };
     } finally {
+      rss.stop();
       ipc.close();
     }
   } finally {
