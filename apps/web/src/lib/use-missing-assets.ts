@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 
 import type { Api } from './api.ts';
 
-// 表示の中から読み込もうとした、登録されていないfile（仕様10.3、13.4）。
-// signal（daemonからの通知の回数）が変わるたびに取り直す。
+// Unregistered files the view tried to load (spec 10.3, 13.4).
+// Refetched whenever signal (the number of notifications from the daemon) changes.
 export function useMissingAssets(api: Api, grant: string | null, signal: number): string[] {
   const [loaded, setLoaded] = useState<{
     grant: string;
-    // 取得のきっかけになった通知の回数。
+    // The notification count that triggered the fetch.
     fetchedFor: number;
     missing: string[];
   } | null>(null);

@@ -29,15 +29,15 @@ function isInside(root: string, path: string): boolean {
   return fromRoot !== '' && !fromRoot.startsWith('..') && !fromRoot.startsWith(sep);
 }
 
-// assets-rootの中の、logical pathが指すfileの実際の位置。存在しなくても決まる。
+// The actual location of the file a logical path points to inside the assets-root. Determined even if it does not exist.
 export function assetCandidatePath(root: string, logicalPath: string): string {
   return join(root, ...logicalPath.split('/'));
 }
 
-// assets-rootの中の通常のfileだけを読む（仕様10.3）。
-// rootは、symlinkを解決済みのdirectory。symlinkを辿った先がrootの外なら読まない。
-// 解決の前後と、読み取りの前後で、同じfileを指していることを確かめる。
-// 別のprocessが同時にpathを差し替える攻撃を、完全に防ぐものではない。
+// Reads only regular files inside the assets-root (spec 10.3).
+// The root is a directory with symlinks resolved. A symlink that leads outside the root is not read.
+// Confirms the same file is pointed to before and after resolution, and before and after reading.
+// This does not fully prevent an attack where another process swaps the path concurrently.
 export async function readAssetFile(root: string, logicalPath: string): Promise<AssetReadResult> {
   if (!isValidLogicalPath(logicalPath)) return { ok: false, reason: 'invalid-path' };
   const candidate = assetCandidatePath(root, logicalPath);
@@ -45,7 +45,7 @@ export async function readAssetFile(root: string, logicalPath: string): Promise<
   for (let attempt = 0; attempt < READ_ATTEMPTS; attempt += 1) {
     let real: string;
     try {
-      // rootそのものが別の場所へ差し替えられていたら、何も読まない。
+      // If the root itself has been swapped to another location, read nothing.
       if ((await realpath(root)) !== root) return { ok: false, reason: 'outside-root' };
       real = await realpath(candidate);
     } catch (error) {
@@ -54,8 +54,8 @@ export async function readAssetFile(root: string, logicalPath: string): Promise<
       return { ok: false, reason: 'unreadable' };
     }
     if (!isInside(root, real)) return { ok: false, reason: 'outside-root' };
-    // 登録できるかの検査は、symlinkを解決した後の実体にも適用する。
-    // 画像の名前を付けたsymlinkで、`.env`や別の種類のfileを読ませない。
+    // The registration checks also apply to the real file after symlink resolution.
+    // A symlink named like an image must not let `.env` or a file of another type be read.
     const target = relative(root, real).split(sep).join('/');
     if (hasHiddenSegment(target)) return { ok: false, reason: 'hidden-target' };
     if (assetTypeOf(target)?.mime !== assetTypeOf(logicalPath)?.mime) {
@@ -67,7 +67,7 @@ export async function readAssetFile(root: string, logicalPath: string): Promise<
       const before = await lstat(real);
       if (!before.isFile()) return { ok: false, reason: 'not-a-regular-file' };
       if (before.size > LIMITS.assetBytes) return { ok: false, reason: 'too-large' };
-      // 検査の後に別の種別へ差し替えられても、待たされず、symlinkも辿らない。
+      // Even if swapped to another kind after the check, this neither blocks nor follows symlinks.
       handle = await open(real, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
@@ -86,7 +86,7 @@ export async function readAssetFile(root: string, logicalPath: string): Promise<
         opened.size === after.size &&
         opened.mtimeMs === after.mtimeMs &&
         bytes.byteLength === after.size;
-      // 読んでいる間にpathの指す先が変わっていたら、読み直す。
+      // If the path's target changed while reading, read again.
       const still = await realpath(candidate).catch(() => null);
       if (!stable || still !== real) continue;
       return { ok: true, bytes, signature: statSignature(after) };

@@ -69,7 +69,7 @@ function writeLock(owner: { pid: number; ownerId: string; startedAt: string }): 
   return path;
 }
 
-// daemonのlockが保持されているか。解放済みのfileは残る。
+// Whether the daemon lock is held. A released lock file remains.
 function lockIsHeld(): boolean {
   if (!existsSync(t.home)) return false;
   const files = readdirSync(t.home)
@@ -81,14 +81,14 @@ function lockIsHeld(): boolean {
     .released;
 }
 
-// すでに終了したprocessのpid。
+// pid of a process that has already exited.
 function deadPid(): number {
   const result = spawnSync(process.execPath, ['-e', '']);
   return result.pid;
 }
 
-describe('SYS-001 daemonが起動していないときのstatus', () => {
-  it('stoppedを返し、新しく起動しない', async () => {
+describe('SYS-001 status when the daemon is not running', () => {
+  it('returns stopped and does not start a new one', async () => {
     const result = await t.run(['daemon', 'status', '--json']);
     expect(result.exitCode).toBe(0);
     expect(result.json<Status>().data).toMatchObject({
@@ -96,7 +96,7 @@ describe('SYS-001 daemonが起動していないときのstatus', () => {
       daemonId: null,
       pid: null,
     });
-    // state rootも作らない。
+    // Does not create the state root either.
     expect(existsSync(t.home)).toBe(false);
     expect(
       (await t.run(['daemon', 'stop', '--json'])).json<{ wasRunning: boolean }>().data.wasRunning,
@@ -104,8 +104,8 @@ describe('SYS-001 daemonが起動していないときのstatus', () => {
   });
 });
 
-describe('daemonの起動と停止', () => {
-  it('必要なcommandで自動起動し、停止後はruntime fileを残さない', async () => {
+describe('starting and stopping the daemon', () => {
+  it('starts automatically for commands that need it, and leaves no runtime files after stopping', async () => {
     t.write('a.md', '# a\n');
     await t.run(['open', 'a.md', '--json']);
     const running = await status();
@@ -118,7 +118,7 @@ describe('daemonの起動と停止', () => {
     expect((await status()).state).toBe('stopped');
     expect(existsSync(location.socketPath)).toBe(false);
     expect(existsSync(location.keyPath)).toBe(false);
-    // lockは解放済みの印として残る。runtimeの位置を示すpointerは残らない。
+    // The lock remains as a released marker. The pointer to the runtime location does not.
     expect(
       readdirSync(t.home)
         .filter((name) => !/\.lock\.\d+$/.test(name))
@@ -128,7 +128,7 @@ describe('daemonの起動と停止', () => {
     expect(() => process.kill(running.pid as number, 0)).toThrow();
   });
 
-  it('SYS-003（部分検証）再起動後に文書IDと順序を復元し、daemonIdは変わる', async () => {
+  it('SYS-003 (partial) restores document IDs and order after a restart, and the daemonId changes', async () => {
     for (const name of ['a', 'b', 'c']) t.write(`${name}.md`, `# ${name}\n`);
     await t.run(['open', 'b.md', 'a.md', 'c.md', '--json']);
     const before = await listIds();
@@ -139,16 +139,16 @@ describe('daemonの起動と停止', () => {
     expect(restarted.data.daemonId).not.toBe(first.daemonId);
     expect(await listIds()).toEqual(before);
 
-    // 停止中にlistを呼ぶと、保存したstateを復元するdaemonが起動する。
+    // Calling list while stopped starts a daemon that restores the saved state.
     await t.run(['daemon', 'stop', '--json']);
     expect(await listIds()).toEqual(before);
   });
 });
 
-describe('SYS-006 lockの所有者が生きている', () => {
-  it('古いlockでも壊さず、第二のdaemonを作らない', async () => {
+describe('SYS-006 the lock owner is alive', () => {
+  it('does not break even an old lock, and does not create a second daemon', async () => {
     mkdirSync(t.home, { mode: 0o700 });
-    // このtest processを所有者にする。lockの更新時刻は1時間前だが、processは生きている。
+    // Make this test process the owner. The lock mtime is an hour ago, but the process is alive.
     const lockPath = writeLock({
       pid: process.pid,
       ownerId: 'daemon_old',
@@ -171,8 +171,8 @@ describe('SYS-006 lockの所有者が生きている', () => {
 
     const doctor = (await t.run(['doctor', '--json'])).json<Doctor>();
     expect(doctor.data.daemon).toMatchObject({ reachable: false, lock: 'owner-alive' });
-    // 所有者が生きているlockは、修復でも回収しない。
-    // 所有者が生きているlockは、修復でも引き継がない。runtimeに置かれたfileにも触れない。
+    // A lock whose owner is alive is not reclaimed even by repair.
+    // A lock whose owner is alive is not taken over even by repair. Files in the runtime are not touched either.
     const location = runtimeLocation();
     mkdirSync(location.runtimeDir, { recursive: true, mode: 0o700 });
     writeFileSync(location.keyPath, 'live-key');
@@ -188,8 +188,8 @@ describe('SYS-006 lockの所有者が生きている', () => {
   });
 });
 
-describe('SYS-007 停止済みの所有者が残したruntime', () => {
-  it('所有者の停止を確かめてから回収し、起動できる', async () => {
+describe('SYS-007 runtime left by a stopped owner', () => {
+  it('reclaims after confirming the owner has stopped, and can start', async () => {
     mkdirSync(t.home, { mode: 0o700 });
     const location = runtimeLocation();
     mkdirSync(location.runtimeDir, { recursive: true, mode: 0o700 });
@@ -219,9 +219,9 @@ describe('SYS-007 停止済みの所有者が残したruntime', () => {
     expect((await status()).state).toBe('running');
   });
 
-  it('lockのpidが別のprocessに再利用されていても、そのprocessを止めない', async () => {
+  it('does not stop a process that reused the pid in the lock', async () => {
     mkdirSync(t.home, { mode: 0o700 });
-    // lockを書いた後に起動した、無関係のprocess。
+    // An unrelated process started after the lock was written.
     const startedAt = new Date(Date.now() - 60 * 1000).toISOString();
     const unrelated = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
       stdio: 'ignore',
@@ -233,13 +233,13 @@ describe('SYS-007 停止済みの所有者が残したruntime', () => {
     expect(repair.data.repairs).toEqual(['stale-runtime-removed']);
     t.write('a.md', '# a\n');
     expect((await t.run(['open', 'a.md', '--json'])).exitCode).toBe(0);
-    // 無関係のprocessは動いたまま。
+    // The unrelated process keeps running.
     expect(() => process.kill(unrelated.pid as number, 0)).not.toThrow();
   });
 });
 
-describe.skipIf(process.platform === 'win32')('SYS-008 安全でないstate rootとruntime', () => {
-  it('state rootがsymlinkなら拒否する', async () => {
+describe.skipIf(process.platform === 'win32')('SYS-008 insecure state root and runtime', () => {
+  it('rejects a state root that is a symlink', async () => {
     const real = join(tmpdir(), `vde-open-real-${Date.now().toString()}`);
     mkdirSync(real, { mode: 0o700 });
     try {
@@ -258,7 +258,7 @@ describe.skipIf(process.platform === 'win32')('SYS-008 安全でないstate root
     }
   });
 
-  it('起動済みのdaemonへも、symlinkのstate root経由では接続しない', async () => {
+  it('does not connect even to a running daemon through a symlinked state root', async () => {
     t.write('a.md', '# a\n');
     await t.run(['open', 'a.md', '--json']);
     const link = `${t.home}-link`;
@@ -279,7 +279,7 @@ describe.skipIf(process.platform === 'win32')('SYS-008 安全でないstate root
     }
   });
 
-  it('安全でないstate rootは、doctorの修復でも変更しない', async () => {
+  it('does not modify an insecure state root even in doctor repair', async () => {
     t.write('a.md', '# a\n');
     t.write('b.md', '# b\n');
     await t.run(['open', 'a.md', '--json']);
@@ -305,7 +305,7 @@ describe.skipIf(process.platform === 'win32')('SYS-008 安全でないstate root
     }
   });
 
-  it('state rootが他者に開かれた権限なら拒否する', async () => {
+  it('rejects a state root whose permissions are open to others', async () => {
     mkdirSync(t.home, { mode: 0o755 });
     t.write('a.md', '# a\n');
     const result = await t.run(['open', 'a.md', '--json']);
@@ -313,12 +313,12 @@ describe.skipIf(process.platform === 'win32')('SYS-008 安全でないstate root
     expect(result.json().error.details['reason']).toBe('permissions');
   });
 
-  it('runtime directoryがsymlinkなら、そこにsocketを作らない', async () => {
+  it('does not create the socket in a runtime directory that is a symlink', async () => {
     const location = runtimeLocation();
     const elsewhere = join(tmpdir(), `vde-open-else-${Date.now().toString()}`);
     mkdirSync(elsewhere, { mode: 0o700 });
     mkdirSync(join(location.runtimeDir, '..'), { recursive: true, mode: 0o700 });
-    // リンク先に、runtime fileと同じ名前の無関係なfileを置いておく。
+    // Put unrelated files with the same names as the runtime files at the link target.
     writeFileSync(join(elsewhere, 'ipc.sock'), 'unrelated socket');
     writeFileSync(join(elsewhere, 'ipc.key'), 'unrelated key');
     symlinkSync(elsewhere, location.runtimeDir);
@@ -327,11 +327,11 @@ describe.skipIf(process.platform === 'win32')('SYS-008 安全でないstate root
       const result = await t.run(['open', 'a.md', '--json']);
       expect(result.exitCode).toBe(5);
       expect(result.json().error.code).toBe('E_INSECURE_PATH');
-      // 拒否した後に、リンク先のfileを消したり書き換えたりしない。
+      // After rejecting, the files at the link target are neither removed nor rewritten.
       expect(readdirSync(elsewhere).toSorted()).toEqual(['ipc.key', 'ipc.sock']);
       expect(readFileSync(join(elsewhere, 'ipc.sock'), 'utf8')).toBe('unrelated socket');
       expect(readFileSync(join(elsewhere, 'ipc.key'), 'utf8')).toBe('unrelated key');
-      // 起動に失敗したdaemonはlockを残さない。
+      // A daemon that failed to start leaves no lock.
       expect(lockIsHeld()).toBe(false);
     } finally {
       rmSync(location.runtimeDir, { force: true });
@@ -340,7 +340,7 @@ describe.skipIf(process.platform === 'win32')('SYS-008 安全でないstate root
   });
 });
 
-describe('SYS-011 / SYS-012 stateの破損と明示修復', () => {
+describe('SYS-011 / SYS-012 corrupt state and explicit repair', () => {
   async function seedTwoCommits(): Promise<string[]> {
     t.write('a.md', '# a\n');
     t.write('b.md', '# b\n');
@@ -351,7 +351,7 @@ describe('SYS-011 / SYS-012 stateの破損と明示修復', () => {
     return ids;
   }
 
-  it('破損したstateでは起動を止め、空stateで上書きせず、doctorが説明する', async () => {
+  it('stops starting on corrupt state, does not overwrite with an empty state, and doctor explains', async () => {
     await seedTwoCommits();
     const statePath = join(t.home, 'state.json');
     writeFileSync(statePath, '{"formatVersion":1,"broken"');
@@ -369,11 +369,11 @@ describe('SYS-011 / SYS-012 stateの破損と明示修復', () => {
     expect(doctor.data.problems).toEqual([
       expect.objectContaining({ code: 'E_STATE_CORRUPT', repairable: true }),
     ]);
-    // 診断だけでは何も変えない。
+    // Diagnosis alone changes nothing.
     expect(readFileSync(statePath).equals(corrupted)).toBe(true);
   });
 
-  it('未知のformatVersionでは起動を止め、修復の対象にもしない', async () => {
+  it('stops starting on an unknown formatVersion, and does not treat it as repairable', async () => {
     await seedTwoCommits();
     const statePath = join(t.home, 'state.json');
     const file = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>;
@@ -389,7 +389,7 @@ describe('SYS-011 / SYS-012 stateの破損と明示修復', () => {
     expect(readFileSync(statePath).equals(future)).toBe(true);
   });
 
-  it('--repairは--yesがなければ実行しない', async () => {
+  it('--repair does not run without --yes', async () => {
     await seedTwoCommits();
     writeFileSync(join(t.home, 'state.json'), 'broken');
     const result = await t.run(['doctor', '--repair', '--json']);
@@ -398,7 +398,7 @@ describe('SYS-011 / SYS-012 stateの破損と明示修復', () => {
     expect(readFileSync(join(t.home, 'state.json'), 'utf8')).toBe('broken');
   });
 
-  it('--repair --yesは検証済みのbackupへ戻し、巻き戻りを報告する', async () => {
+  it('--repair --yes restores the verified backup and reports the rollback', async () => {
     const ids = await seedTwoCommits();
     writeFileSync(join(t.home, 'state.json'), 'broken');
 
@@ -406,13 +406,13 @@ describe('SYS-011 / SYS-012 stateの破損と明示修復', () => {
     expect(repair.data.repairs).toEqual(['state-restored-from-backup']);
     expect(repair.warnings.map((warning) => warning.code)).toEqual(['W_STATE_ROLLED_BACK']);
     expect(repair.data.state.status).toBe('ok');
-    // 読めなかったstateは消さずに退避する。
+    // The unreadable state is set aside, not deleted.
     expect(readdirSync(t.home).some((name) => name.startsWith('state.json.corrupt-'))).toBe(true);
-    // backupは最後のcommitの直前。2件目の登録は失われている。
+    // The backup is from just before the last commit. The second registration is lost.
     expect(await listIds()).toEqual([ids[0]]);
   });
 
-  it('backupも読めなければ、修復せずにそのまま残す', async () => {
+  it('leaves everything as is without repairing when the backup is unreadable too', async () => {
     await seedTwoCommits();
     writeFileSync(join(t.home, 'state.json'), 'broken');
     writeFileSync(join(t.home, 'state.prev.json'), 'also broken');
@@ -424,7 +424,7 @@ describe('SYS-011 / SYS-012 stateの破損と明示修復', () => {
     expect(readFileSync(join(t.home, 'state.json'), 'utf8')).toBe('broken');
   });
 
-  it('daemonが動作中なら修復を拒否する', async () => {
+  it('refuses to repair while the daemon is running', async () => {
     t.write('a.md', '# a\n');
     await t.run(['open', 'a.md', '--json']);
     const result = await t.run(['doctor', '--repair', '--yes', '--json']);
@@ -432,7 +432,7 @@ describe('SYS-011 / SYS-012 stateの破損と明示修復', () => {
     expect(result.json().error.code).toBe('E_DAEMON_LOCKED');
   });
 
-  it('doctorの出力に本文やIPCのkeyを含めない', async () => {
+  it('does not include the body or the IPC key in doctor output', async () => {
     t.write('a.md', '# 秘密の見出し\n\n秘密の本文\n');
     await t.run(['open', 'a.md', '--json']);
     const key = readFileSync(runtimeLocation().keyPath);
@@ -443,8 +443,8 @@ describe('SYS-011 / SYS-012 stateの破損と明示修復', () => {
   });
 });
 
-describe('SEC-018（部分検証）daemonのlog', () => {
-  it('本文・title・path・keyを記録しない', async () => {
+describe('SEC-018 (partial) daemon log', () => {
+  it('does not record the body, title, path, or key', async () => {
     t.write('極秘の計画.md', '# 極秘の見出し\n\n極秘の本文\n');
     await t.run(['open', '極秘の計画.md', '--key', 'himitsu-key', '--json']);
     await t.run(['read', (await listIds())[0] as string, '--json']);
@@ -465,8 +465,8 @@ describe('SEC-018（部分検証）daemonのlog', () => {
   });
 });
 
-describe('SYS-016 state homeの分離', () => {
-  it('別のhomeは別のdaemonとstateを使い、互いに影響しない', async () => {
+describe('SYS-016 isolation of state homes', () => {
+  it('a different home uses a different daemon and state, without affecting each other', async () => {
     const other = createTestHome();
     try {
       t.write('a.md', '# a\n');
@@ -489,8 +489,8 @@ describe('SYS-016 state homeの分離', () => {
   });
 });
 
-describe('前景のdaemon', () => {
-  it('serveで前景に起動でき、SIGTERMで後始末して終了する', async () => {
+describe('foreground daemon', () => {
+  it('can start in the foreground with serve, and cleans up and exits on SIGTERM', async () => {
     const { cliEntry } = await import('./harness.ts');
     const child = spawn(process.execPath, [cliEntry, 'serve'], {
       cwd: t.work,
@@ -500,12 +500,12 @@ describe('前景のdaemon', () => {
     children.push(child);
     await new Promise<void>((resolve, reject) => {
       child.stderr?.once('data', () => resolve());
-      child.once('exit', () => reject(new Error('serveが起動前に終了しました')));
+      child.once('exit', () => reject(new Error('serve exited before starting')));
     });
     const running = await status();
     expect(running).toMatchObject({ state: 'running', pid: child.pid });
 
-    // すでに動いているdaemonがあるとき、2つ目の前景daemonは起動しない。
+    // When a daemon is already running, a second foreground daemon does not start.
     const second = await t.run(['serve']);
     expect(second.exitCode).toBe(8);
 

@@ -41,7 +41,7 @@ const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).di
 
 beforeEach(() => {
   t = createTestHome();
-  // 作業directoryの隣。assets-rootの外にある秘密のfile。
+  // Next to the working directory. Secret files outside the assets-root.
   outside = join(t.work, '..', 'outside');
   mkdirSync(outside);
   writeFileSync(join(outside, 'secret.png'), SECRET);
@@ -58,7 +58,7 @@ afterEach(async () => {
   await t.cleanup();
 });
 
-// 届いたrequestを記録するだけのserver。backendやbrowserが外部へ要求していないことを確かめる。
+// A server that only records incoming requests. Confirms the backend and browser make no external requests.
 async function startBeacon(): Promise<string> {
   const server = createServer((request, response) => {
     beaconHits.push(request.url ?? '');
@@ -73,7 +73,7 @@ async function startBeacon(): Promise<string> {
 async function open(args: string[]): Promise<Summary> {
   const result = await t.run(['open', ...args, '--json']);
   const envelope = result.json<{ documents: Summary[] }>();
-  if (!envelope.ok) throw new Error(`openに失敗: ${JSON.stringify(envelope.error)}`);
+  if (!envelope.ok) throw new Error(`open failed: ${JSON.stringify(envelope.error)}`);
   return envelope.data.documents[0] as Summary;
 }
 
@@ -98,7 +98,7 @@ async function waitFor<T>(read: () => Promise<T>, done: (value: T) => boolean): 
   for (;;) {
     const value = await read();
     if (done(value)) return value;
-    if (Date.now() > deadline) throw new Error(`条件を満たしません: ${JSON.stringify(value)}`);
+    if (Date.now() > deadline) throw new Error(`condition not met: ${JSON.stringify(value)}`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
@@ -116,26 +116,26 @@ async function previewGet(ui: UiClient, grant: GrantData, path: string, method =
   return rawRequest(ui.previewOrigin, `${ui.filesPath(grant)}${path}`, { method });
 }
 
-describe('DOC-011 参照しているfileと文書の版', () => {
-  it('同じ内容の再保存では版が変わらず、CSSだけの変更で版が変わる', async () => {
+describe('DOC-011 referenced files and the document revision', () => {
+  it('re-saving the same content keeps the revision, and a CSS-only change makes a new revision', async () => {
     site('<link rel="stylesheet" href="css/site.css"><img src="img/a.png"><p>本文</p>');
     const first = await open(['site/index.html']);
     expect(assetPaths(first.documentId)).toEqual(['css/site.css', 'img/a.png']);
 
-    // 本文もassetも同じ内容で保存し直す。
+    // Re-save both the body and the asset with the same content.
     writeFileSync(join(t.work, 'site/index.html'), readFileSync(join(t.work, 'site/index.html')));
     writeFileSync(join(t.work, 'site/css/site.css'), '.a{background:url(../img/a.png)}');
     await t.run(['refresh', '--json']);
     expect((await list())[0]?.revision).toBe(first.revision);
 
-    // CSSだけを変える。本文は同じでも、別の版になる。監視が追従する。
+    // Change only the CSS. Even with the same body, it becomes a different revision. The watch follows.
     writeFileSync(join(t.work, 'site/css/site.css'), '.a{color:red}');
     const changed = await waitFor(list, (documents) => documents[0]?.revision !== first.revision);
     expect(changed[0]?.documentId).toBe(first.documentId);
-    // CSSが参照しなくなった画像は、HTMLが参照しているので残る。
+    // The image the CSS no longer references remains, since the HTML references it.
     expect(assetPaths(first.documentId)).toEqual(['css/site.css', 'img/a.png']);
 
-    // 参照されているが存在しなかったfileが作られたら、取り込む。
+    // When a referenced file that did not exist is created, it is picked up.
     t.write('site/index.html', '<img src="img/a.png"><img src="img/later.png">');
     await waitFor(list, (documents) => documents[0]?.revision !== changed[0]?.revision);
     expect(assetPaths(first.documentId)).toEqual(['img/a.png']);
@@ -146,7 +146,7 @@ describe('DOC-011 参照しているfileと文書の版', () => {
     );
   });
 
-  it('前の版を指定すると、その版のassetで表示する', async () => {
+  it('renders with the assets of a previous revision when that revision is given', async () => {
     site('<link rel="stylesheet" href="css/site.css"><p>本文</p>');
     const first = await open(['site/index.html']);
     writeFileSync(join(t.work, 'site/css/site.css'), '.a{color:red}');
@@ -160,8 +160,8 @@ describe('DOC-011 参照しているfileと文書の版', () => {
   });
 });
 
-describe('SEC-009 assets-rootの外を指す参照', () => {
-  it('登録の時点で、rootの外のfileを読まない', async () => {
+describe('SEC-009 references pointing outside the assets-root', () => {
+  it('does not read files outside the root at registration', async () => {
     site(`<img src="img/a.png"><img src="../../outside/secret.png"><img src="..%2f..%2foutside%2fsecret.png">
       <img src="%252e%252e/%252e%252e/outside/secret.png"><img src="file://${join(outside, 'secret.png')}">
       <img src="${join(outside, 'secret.png')}"><img src="\\\\server\\share\\secret.png">
@@ -174,7 +174,7 @@ describe('SEC-009 assets-rootの外を指す参照', () => {
     expect(blobExists(`.x{content:"${SECRET}"}`)).toBe(false);
   });
 
-  it('--assetでも、rootの外や、解釈の分かれる指定は登録できない', async () => {
+  it('even with --asset, paths outside the root or ambiguous ones cannot be registered', async () => {
     site('<p>本文</p>');
     for (const asset of [
       '../../outside/secret.png',
@@ -190,12 +190,12 @@ describe('SEC-009 assets-rootの外を指す参照', () => {
       expect(result.exitCode, asset).toBe(5);
       expect(result.json().error.code, asset).toBe('E_ASSET_REJECTED');
     }
-    // 失敗したopenは、文書を登録していない。
+    // A failed open has not registered the document.
     expect(await list()).toEqual([]);
     expect(blobExists(SECRET)).toBe(false);
   });
 
-  it('配信の時点でも、rootの外や未登録のpathへ到達できない', async () => {
+  it('at serving time too, paths outside the root or unregistered ones are unreachable', async () => {
     site('<img src="img/a.png">');
     const document = await open(['site/index.html']);
     const ui = await connectUi(t);
@@ -225,8 +225,8 @@ describe('SEC-009 assets-rootの外を指す参照', () => {
   });
 });
 
-describe('SEC-010 assets-rootの中の、登録していないfile', () => {
-  it('存在を知らせず、directoryの一覧も返さない', async () => {
+describe('SEC-010 unregistered files inside the assets-root', () => {
+  it('does not reveal existence, and returns no directory listing', async () => {
     site('<img src="img/a.png"><img src=".env"><img src=".git/logo.png">');
     t.write('site/secret.txt', SECRET);
     t.write('site/.env', `KEY=${SECRET}`);
@@ -235,7 +235,7 @@ describe('SEC-010 assets-rootの中の、登録していないfile', () => {
     t.write('site/data.json', `{"secret":"${SECRET}"}`);
     t.write('site/app.js', `const secret = "${SECRET}";`);
     const document = await open(['site/index.html']);
-    // 文書が参照していても、`.`で始まる名前のfileは登録しない。
+    // Files whose names start with `.` are not registered even if the document references them.
     expect(assetPaths(document.documentId)).toEqual(['img/a.png']);
 
     const ui = await connectUi(t);
@@ -259,14 +259,14 @@ describe('SEC-010 assets-rootの中の、登録していないfile', () => {
       'index.html/x',
     ]) {
       const response = await previewGet(ui, grant, path);
-      // 存在するfileも、しないfileも、権限のないURLも、同じ応答になる。
+      // Existing files, missing files, and URLs without a grant all get the same response.
       expect(response.status, path).toBe(404);
       expect(response.text, path).toBe(unknownGrant.text);
       expect(response.headers['content-type'], path).toBe(unknownGrant.headers['content-type']);
     }
   });
 
-  it('個別に指定したfileだけが加わり、同じdirectoryの他のfileは公開されない', async () => {
+  it('only the individually given file is added; other files in the same directory are not exposed', async () => {
     site('<p>本文</p>');
     t.write('site/data.json', '{"ok":true}');
     t.write('site/other.json', `{"secret":"${SECRET}"}`);
@@ -279,18 +279,18 @@ describe('SEC-010 assets-rootの中の、登録していないfile', () => {
     expect(data.headers['content-type']).toBe('application/json; charset=utf-8');
     expect((await previewGet(ui, grant, 'other.json')).status).toBe(404);
 
-    // 指定なしで開き直しても、登録済みの指定は保たれる。
+    // Reopening without the option keeps the registered selection.
     await open(['site/index.html']);
     expect(assetPaths(document.documentId)).toEqual(['data.json']);
   });
 });
 
-describe('SEC-011 symlinkによるrootの外への到達', () => {
-  it('rootの外を指すsymlinkを、fileでもdirectoryでも読まない', async () => {
+describe('SEC-011 reaching outside the root via symlinks', () => {
+  it('does not read a symlink pointing outside the root, whether a file or a directory', async () => {
     site('<img src="img/a.png"><img src="link.png"><img src="linked/secret.png">');
     symlinkSync(join(outside, 'secret.png'), join(t.work, 'site/link.png'));
     symlinkSync(outside, join(t.work, 'site/linked'));
-    // rootの中を指すsymlinkは読める。
+    // A symlink pointing inside the root is readable.
     symlinkSync(join(t.work, 'site/img/a.png'), join(t.work, 'site/inner.png'));
     t.write(
       'site/index.html',
@@ -307,19 +307,19 @@ describe('SEC-011 symlinkによるrootの外への到達', () => {
     expect((await previewGet(ui, grant, 'inner.png')).status).toBe(200);
   });
 
-  it('rootの中でも、秘密のfileや別の種類のfileを指すsymlinkは読まない', async () => {
+  it('even inside the root, does not read a symlink pointing to a secret file or a file of another kind', async () => {
     t.write('site/.env', `KEY=${SECRET}`);
     t.write('site/.git/secret.png', `${SECRET}-git`);
     t.write('site/private.json', `{"secret":"${SECRET}"}`);
     t.write('site/notes.txt', `${SECRET}-text`);
     t.write('site/img/a.png', PNG);
-    // 画像やCSSの名前を付けたsymlink。指している実体は、登録してはいけないfile。
+    // Symlinks named like images or CSS. Their targets are files that must not be registered.
     symlinkSync(join(t.work, 'site/.env'), join(t.work, 'site/public.png'));
     symlinkSync(join(t.work, 'site/.git/secret.png'), join(t.work, 'site/logo.png'));
     symlinkSync(join(t.work, 'site/private.json'), join(t.work, 'site/data.png'));
     symlinkSync(join(t.work, 'site/notes.txt'), join(t.work, 'site/style.css'));
     symlinkSync(join(t.work, 'site/.git'), join(t.work, 'site/assets'));
-    // 同じ種類の、公開してよいfileを指すsymlinkは読める。
+    // A symlink pointing to a file of the same kind that may be exposed is readable.
     symlinkSync(join(t.work, 'site/img/a.png'), join(t.work, 'site/alias.png'));
     t.write(
       'site/index.html',
@@ -344,30 +344,30 @@ describe('SEC-011 symlinkによるrootの外への到達', () => {
       expect(response.text, path).not.toContain(SECRET);
     }
 
-    // 個別に指定しても、秘密のfileを指すsymlinkは登録できない。
+    // Even given individually, a symlink pointing to a secret file cannot be registered.
     for (const asset of ['public.png', 'logo.png', 'data.png']) {
       const result = await t.run(['open', 'site/index.html', '--asset', asset, '--json']);
       expect(result.exitCode, asset).toBe(5);
     }
-    // JSONは、個別に指定したときだけ登録できる。JSONを指すJSONのsymlinkも同じ。
+    // JSON can be registered only when given individually. The same for a JSON symlink pointing to JSON.
     symlinkSync(join(t.work, 'site/private.json'), join(t.work, 'site/alias.json'));
     await open(['site/index.html', '--asset', 'alias.json']);
     expect(assetPaths(document.documentId)).toEqual(['alias.json', 'alias.png']);
   });
 
-  it('登録の後でdirectoryがrootの外へ差し替えられても、外のfileを読まない', async () => {
+  it('does not read outside files even when a directory is swapped to point outside the root after registration', async () => {
     site('<img src="img/a.png">');
     const document = await open(['site/index.html']);
     writeFileSync(join(outside, 'a.png'), SECRET);
 
-    // 画像のdirectoryを、rootの外を指すsymlinkへ差し替える。
+    // Swap the image directory for a symlink pointing outside the root.
     renameSync(join(t.work, 'site/img'), join(t.work, 'site/img-original'));
     symlinkSync(outside, join(t.work, 'site/img'));
     await t.run(['refresh', '--json']);
     expect(assetPaths(document.documentId)).toEqual([]);
     expect(blobExists(SECRET)).toBe(false);
 
-    // rootそのものを差し替える。文書は読めない状態になり、差し替え先の内容は取り込まない。
+    // Swap the root itself. The document becomes unreadable, and the swapped-in content is not picked up.
     rmSync(join(t.work, 'site/img'));
     renameSync(join(t.work, 'site/img-original'), join(t.work, 'site/img'));
     await t.run(['refresh', '--json']);
@@ -385,8 +385,8 @@ describe('SEC-011 symlinkによるrootの外への到達', () => {
   });
 });
 
-describe('SEC-012 CSSの外部参照と循環', () => {
-  it('外部のURLをbackendが取得せず、変換後のCSSにも残さない', async () => {
+describe('SEC-012 external references and cycles in CSS', () => {
+  it('the backend does not fetch external URLs, and they do not remain in the converted CSS', async () => {
     const evil = await startBeacon();
     t.write(
       'site/index.html',
@@ -413,13 +413,13 @@ describe('SEC-012 CSSの外部参照と循環', () => {
     const css = (await previewGet(ui, grant, 'css/site.css')).text;
     expect(html).not.toContain(evil);
     expect(html).toContain('srcset="img/a.png 1x"');
-    // custom propertyに書いた文字列は、それだけでは取得されないので残る。
-    // その値をURLとして使う宣言（image-set(var(--image))）の側を無効化している。
+    // A string in a custom property is not fetched by itself, so it remains.
+    // The declaration that uses the value as a URL (image-set(var(--image))) is the one invalidated.
     expect(css).toContain('--image:"');
     expect(css.replace(/--image:"[^"]*"/, '')).not.toContain('127.0.0.1');
     expect(css).toContain('.a{color:red}');
     expect(css).toContain('.b{background:url(../img/a.png)}');
-    // 名前をescapeで書いた@importと宣言、変数からURLを差し込むimage-setは、無効化する。
+    // @import and declarations with escaped names, and image-set injecting a URL from a variable, are invalidated.
     expect(css).not.toContain('mport');
     expect(css).not.toContain('image-set');
     expect(css).not.toContain('escaped-property');
@@ -429,11 +429,11 @@ describe('SEC-012 CSSの外部参照と循環', () => {
     expect(grant.diagnostics.filter((entry) => entry.code === 'remote-asset-blocked').length).toBe(
       7,
     );
-    // 登録から配信までの間に、外部への要求は1件も出ていない。
+    // Not one external request was made between registration and serving.
     expect(beaconHits).toEqual([]);
   });
 
-  it('互いを読み込むCSSでも、登録が終わる', async () => {
+  it('registration finishes even with CSS files importing each other', async () => {
     t.write('site/index.html', '<link rel="stylesheet" href="a.css">');
     t.write('site/a.css', '@import "b.css"; .a{color:red}');
     t.write('site/b.css', '@import "a.css"; @import "c/c.css"; .b{color:blue}');
@@ -443,19 +443,19 @@ describe('SEC-012 CSSの外部参照と循環', () => {
     expect(assetPaths(document.documentId)).toEqual(['a.css', 'b.css', 'c/c.css', 'img/a.png']);
   });
 
-  it('CSSの読み込みの深さには上限があり、その先は登録しない', async () => {
+  it('CSS import depth has a limit, and nothing beyond it is registered', async () => {
     t.write('site/index.html', '<link rel="stylesheet" href="s0.css">');
     for (let depth = 0; depth < 12; depth += 1) {
       t.write(`site/s${String(depth)}.css`, `@import "s${String(depth + 1)}.css";`);
     }
     const document = await open(['site/index.html']);
-    // 文書から直接読むs0と、そこから8段先まで。
+    // s0 read directly from the document, plus 8 levels from there.
     expect(assetPaths(document.documentId)).toHaveLength(9);
   });
 });
 
 describe('SEC-014 SVG', () => {
-  it('画像として参照したSVGだけを登録し、scriptを動かせないheaderで配信する', async () => {
+  it('registers only SVGs referenced as images, and serves them with headers that prevent scripts', async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
     t.write('site/img.svg', svg);
     t.write('site/embedded.svg', `${svg}<!-- object -->`);
@@ -483,7 +483,7 @@ describe('SEC-014 SVG', () => {
       expect.arrayContaining(['inline-svg-removed', 'embed-removed', 'script-removed']),
     );
 
-    // 直接開いても、SVGの中のscriptは動かない（sandboxとscript禁止のpolicy）。
+    // Even opened directly, the script in the SVG does not run (sandbox and a script-forbidding policy).
     const direct = await previewGet(ui, grant, 'img.svg');
     expect(direct.status).toBe(200);
     expect(direct.headers['content-type']).toBe('image/svg+xml');
@@ -499,8 +499,8 @@ describe('SEC-014 SVG', () => {
   });
 });
 
-describe('SEC-015 表示用の権限の失効', () => {
-  it('閉じた文書、破棄したsession、再起動の後は、発行済みのURLで読めない', async () => {
+describe('SEC-015 expiry of render grants', () => {
+  it('an issued URL cannot be read after the document is closed, the session is revoked, or a restart', async () => {
     site('<img src="img/a.png">');
     t.write('other/index.html', '<p>別の文書</p>');
     const document = await open(['site/index.html']);
@@ -510,9 +510,9 @@ describe('SEC-015 表示用の権限の失効', () => {
     const otherGrant = await ui.grant(other.documentId);
     expect((await previewGet(ui, grant, 'index.html')).status).toBe(200);
 
-    // 権限は、発行した文書の中だけで使える。別の文書のfileは読めない。
+    // A grant works only within the document it was issued for. Files of another document cannot be read.
     expect((await previewGet(ui, otherGrant, 'img/a.png')).status).toBe(404);
-    // 管理APIの認証には使えない。管理のtokenを、表示用のURLとして使うこともできない。
+    // It cannot authenticate to the management API. Nor can the management token be used as a preview URL.
     const asToken = await rawRequest(ui.origin, '/_/api/v1/documents', {
       headers: { Authorization: `Bearer ${grant.grant}` },
     });
@@ -522,7 +522,7 @@ describe('SEC-015 表示用の権限の失効', () => {
     );
     expect((await rawRequest(ui.origin, `${ui.filesPath(grant)}index.html`)).status).toBe(404);
 
-    // 自分で返した権限は、すぐに使えなくなる。
+    // A grant released by its own session becomes unusable immediately.
     const released = await ui.api<{ released: number }>('/render-grants/release', {
       method: 'POST',
       body: { grants: [otherGrant.grant] },
@@ -530,7 +530,7 @@ describe('SEC-015 表示用の権限の失効', () => {
     expect(released.json.data.released).toBe(1);
     expect((await previewGet(ui, otherGrant, 'index.html')).status).toBe(404);
 
-    // 別のsessionは、他のsessionの権限を返せない。
+    // Another session cannot release a grant of a different session.
     const second = await connectUi(t);
     const stolen = await second.api<{ released: number }>('/render-grants/release', {
       method: 'POST',
@@ -539,20 +539,20 @@ describe('SEC-015 表示用の権限の失効', () => {
     expect(stolen.json.data.released).toBe(0);
     expect((await previewGet(ui, grant, 'index.html')).status).toBe(200);
 
-    // 文書を閉じると失効する。閉じている間に一度も使わなくても、開き直した後に前の権限は戻らない。
+    // Closing the document expires it. Even if never used while closed, the old grant does not return after reopening.
     const unused = await ui.grant(document.documentId);
     await t.run(['close', document.documentId, '--json']);
     await open(['site/index.html']);
     expect((await previewGet(ui, unused, 'index.html')).status).toBe(404);
     expect((await previewGet(ui, grant, 'index.html')).status).toBe(404);
 
-    // sessionを破棄すると、そのsessionが発行した権限も失効する。
+    // Revoking the session also expires the grants it issued.
     const fresh = await ui.grant(document.documentId);
     expect((await previewGet(ui, fresh, 'index.html')).status).toBe(200);
     await ui.api('/session', { method: 'DELETE' });
     expect((await previewGet(ui, fresh, 'index.html')).status).toBe(404);
 
-    // daemonを再起動すると、前の権限は使えない。
+    // After a daemon restart, the old grant is unusable.
     const third = await connectUi(t);
     const beforeRestart = await third.grant(document.documentId);
     await t.run(['daemon', 'restart', '--json']);
@@ -563,7 +563,7 @@ describe('SEC-015 表示用の権限の失効', () => {
     ).toBe(404);
   });
 
-  it('権限は、文書を表示する版に結び付く', async () => {
+  it('a grant is bound to the revision it renders', async () => {
     site('<p>版1</p>');
     const document = await open(['site/index.html']);
     const ui = await connectUi(t);
@@ -571,11 +571,11 @@ describe('SEC-015 表示用の権限の失効', () => {
     t.write('site/index.html', '<p>版2</p>');
     await t.run(['refresh', '--json']);
     const second = await ui.grant(document.documentId);
-    // 前の権限は、前の版を表示し続ける。新しい版には、新しい権限が要る。
+    // The old grant keeps rendering the old revision. The new revision needs a new grant.
     expect((await previewGet(ui, first, 'index.html')).text).toContain('版1');
     expect((await previewGet(ui, second, 'index.html')).text).toContain('版2');
 
-    // 保持していない版や、開いていない文書の権限は発行しない。
+    // No grant is issued for an unretained revision or a document that is not open.
     const unknown = await ui.api(`/documents/${document.documentId}/render-grants`, {
       method: 'POST',
       body: { revision: `rev_${'0'.repeat(64)}` },
@@ -588,7 +588,7 @@ describe('SEC-015 表示用の権限の失効', () => {
       body: {},
     });
     expect(closed.status).toBe(404);
-    // 権限の発行には、管理のsessionが要る。
+    // Issuing a grant requires a management session.
     const anonymous = await rawRequest(
       ui.origin,
       `/_/api/v1/documents/${document.documentId}/render-grants`,
@@ -602,8 +602,8 @@ describe('SEC-015 表示用の権限の失効', () => {
   });
 });
 
-describe('SEC-016 / SEC-017 表示用listenerの応答', () => {
-  it('文書には読み込みの許可を付けず、fontなどのassetにだけ付ける', async () => {
+describe('SEC-016 / SEC-017 responses of the preview listener', () => {
+  it('attaches the load allowance only to assets such as fonts, not to the document', async () => {
     t.write('site/index.html', '<link rel="stylesheet" href="s.css"><img src="a.png"><p>本文</p>');
     t.write('site/s.css', '@font-face{font-family:f;src:url(f.woff2)}');
     t.write('site/f.woff2', Buffer.from('wOF2'));
@@ -649,12 +649,12 @@ describe('SEC-016 / SEC-017 表示用listenerの応答', () => {
       expect(asset.headers['access-control-allow-credentials'], path).toBeUndefined();
       expect(asset.headers['x-content-type-options'], path).toBe('nosniff');
     }
-    // 権限のないURLと未登録のpathには、許可を付けない。
+    // No allowance for URLs without a grant or unregistered paths.
     const missing = await withOrigin('missing.woff2');
     expect(missing.status).toBe(404);
     expect(missing.headers['access-control-allow-origin']).toBeUndefined();
 
-    // `Origin: null`は、管理APIでは管理の主体として扱わず、許可も返さない。
+    // The management API does not treat `Origin: null` as a management principal, and returns no allowance.
     for (const path of ['/_/api/v1/documents', '/_/api/v1/status']) {
       const response = await rawRequest(ui.origin, path, {
         headers: { Origin: 'null', Authorization: `Bearer ${ui.token}` },
@@ -664,7 +664,7 @@ describe('SEC-016 / SEC-017 表示用listenerの応答', () => {
     }
     const uiPage = await rawRequest(ui.origin, '/', { headers: { Origin: 'null' } });
     expect(uiPage.headers['access-control-allow-origin']).toBeUndefined();
-    // 事前確認（preflight）には応じない。
+    // Does not answer preflight requests.
     const preflight = await rawRequest(ui.previewOrigin, `${ui.filesPath(grant)}f.woff2`, {
       method: 'OPTIONS',
       headers: { Origin: 'null', 'Access-Control-Request-Method': 'GET' },
@@ -673,7 +673,7 @@ describe('SEC-016 / SEC-017 表示用listenerの応答', () => {
     expect(preflight.headers['access-control-allow-origin']).toBeUndefined();
   });
 
-  it('GETとHEADだけに応じ、管理APIも、UIのHTMLも、redirectも返さない', async () => {
+  it('answers only GET and HEAD, and returns neither the management API, the UI HTML, nor redirects', async () => {
     site('<img src="img/a.png">');
     const document = await open(['site/index.html']);
     const ui = await connectUi(t);
@@ -686,7 +686,7 @@ describe('SEC-016 / SEC-017 表示用listenerの応答', () => {
     expect(head.body.byteLength).toBe(0);
     expect(head.headers['content-length']).toBe(get.headers['content-length']);
     expect(head.headers['content-security-policy']).toBe(get.headers['content-security-policy']);
-    // HEADも、GETと同じ権限の確認を通る。
+    // HEAD goes through the same grant check as GET.
     expect((await previewGet(ui, grant, 'secret.txt', 'HEAD')).status).toBe(404);
 
     for (const method of ['POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']) {
@@ -719,7 +719,7 @@ describe('SEC-016 / SEC-017 表示用listenerの応答', () => {
       expect(response.text, path).toBe('Not Found');
     }
 
-    // 別名のHostで届いたrequestには応じない。
+    // Does not answer requests arriving with an aliased Host.
     const rebound = await rawRequest(ui.previewOrigin, `${files}index.html`, {
       headers: { Host: 'attacker.example' },
     });
@@ -730,14 +730,14 @@ describe('SEC-016 / SEC-017 表示用listenerの応答', () => {
     expect(localhost.status).toBe(404);
   });
 
-  it('表示用URLの秘密と、文書のpathを、logへ残さない', async () => {
+  it('does not leave the preview URL secret or the document path in the log', async () => {
     site('<img src="img/a.png">');
     const document = await open(['site/index.html']);
     const ui = await connectUi(t);
     const grant = await ui.grant(document.documentId);
     await previewGet(ui, grant, 'index.html');
     await previewGet(ui, grant, 'secret-path-name.png');
-    // logは順に追記される。停止を待って、書き終えた内容を読む。
+    // The log is appended in order. Wait for the stop, then read the finished contents.
     await t.run(['daemon', 'stop', '--json']);
     const log = readFileSync(join(t.home, 'logs', 'daemon.jsonl'), 'utf8');
     expect(log).toContain('preview.served');
@@ -748,8 +748,8 @@ describe('SEC-016 / SEC-017 表示用listenerの応答', () => {
   });
 });
 
-describe('interactive（scriptを動かす表示）', () => {
-  it('許可した文書だけ、inlineと登録済みのscriptと、登録済みfileへの通信を許すCSPで配信する', async () => {
+describe('interactive (the interactive view)', () => {
+  it('only allowed documents are served with a CSP permitting inline and registered scripts and requests to registered files', async () => {
     t.write('site/app.html', '<script>document.title = "x"</script><p>本文</p>');
     const document = await open(['site/app.html', '--html-mode', 'interactive']);
     const ui = await connectUi(t);
@@ -780,14 +780,14 @@ describe('interactive（scriptを動かす表示）', () => {
     ]);
     expect(csp).not.toContain('allow-same-origin');
     expect(csp).not.toContain('unsafe-eval');
-    // 同じ文書でも、staticの表示はscriptを動かさない。
+    // Even for the same document, the static view does not run scripts.
     const staticGrant = await ui.grant(document.documentId);
     const staticHtml = await previewGet(ui, staticGrant, 'app.html');
     expect(staticHtml.text).not.toContain('<script');
     expect(String(staticHtml.headers['content-security-policy'])).toContain("script-src 'none'");
   });
 
-  it('許可していない文書は、interactiveの表示を発行せず、管理UIの確認なしには許可しない', async () => {
+  it('an unallowed document gets no interactive view, and is not allowed without confirmation in the management UI', async () => {
     t.write('site/app.html', '<p>本文</p>');
     const document = await open(['site/app.html']);
     const ui = await connectUi(t);
@@ -807,14 +807,14 @@ describe('interactive（scriptを動かす表示）', () => {
       { method: 'POST', body: { mode: 'interactive', confirmed: true } },
     );
     expect(enabled.json.data.interactiveAllowed).toBe(true);
-    // 再起動の後は、希望だけが残り、許可は付け直すまで外れる。
+    // After a restart, only the preference remains; the allowance is dropped until granted again.
     await t.run(['daemon', 'restart', '--json']);
     expect(await list()).toEqual([
       expect.objectContaining({ htmlMode: 'interactive', interactiveAllowed: false }),
     ]);
   });
 
-  it('登録されていないfileの読み込みは404で、その表示の権限を持つsessionだけが不足として取得できる', async () => {
+  it('loading an unregistered file is 404, and only the session holding that render grant can fetch it as missing', async () => {
     t.write('site/app.html', '<p>本文</p>');
     t.write('site/secret.json', '{"secret":true}');
     const document = await open(['site/app.html', '--html-mode', 'interactive']);
@@ -840,7 +840,7 @@ describe('interactive（scriptを動かす表示）', () => {
   });
 });
 
-describe('質問の表示とHTMLからの回答案（仕様12.2、11.7）', () => {
+describe('rendering questions and draft answers from HTML (spec 12.2, 11.7)', () => {
   const questionnaire = {
     schemaVersion: 1,
     title: '確認',
@@ -859,12 +859,12 @@ describe('質問の表示とHTMLからの回答案（仕様12.2、11.7）', () =
     return result.json<{ request: { requestId: string; revision: string } }>().data.request;
   }
 
-  it('質問の表示の権限は、質問が固定した版と表示方法で発行する', async () => {
+  it('a render grant for a question is issued with the revision and view mode the question pinned', async () => {
     t.write('site/app.html', '<p>本文</p><script>document.title = "x"</script>');
     const interactive = await ask(['--view', 'site/app.html', '--html-mode', 'interactive']);
     t.write('site/plain.html', '<p>本文</p><script>document.title = "x"</script>');
     const plain = await ask(['--view', 'site/plain.html']);
-    // staticで作った後に許可しても、質問の表示はstatic。
+    // Even if allowed after being created as static, the question view stays static.
     await open(['site/plain.html', '--html-mode', 'interactive']);
     const ui = await connectUi(t);
     const issue = (requestId: string) =>
@@ -881,7 +881,7 @@ describe('質問の表示とHTMLからの回答案（仕様12.2、11.7）', () =
     const staticPinned = (await issue(plain.requestId)).json.data;
     expect(staticPinned).toMatchObject({ mode: 'static', bridge: null });
     expect((await previewGet(ui, staticPinned, 'plain.html')).text).not.toContain('<script');
-    // 文書の表示の発行では、質問を指定できない。
+    // Issuing a document view cannot specify a question.
     const refused = await ui.api('/documents/x/render-grants', {
       method: 'POST',
       body: { requestId: interactive.requestId },
@@ -889,7 +889,7 @@ describe('質問の表示とHTMLからの回答案（仕様12.2、11.7）', () =
     expect(refused.status).toBe(400);
   });
 
-  it('HTMLからの回答案の操作は、表示の権限が有効な間だけ、発行したsessionで受け付ける', async () => {
+  it('draft answer operations from HTML are accepted only while the render grant is valid, by the issuing session', async () => {
     t.write('site/app.html', '<p>本文</p>');
     const request = await ask(['--view', 'site/app.html', '--html-mode', 'interactive']);
     const ui = await connectUi(t);
@@ -909,13 +909,13 @@ describe('質問の表示とHTMLからの回答案（仕様12.2、11.7）', () =
       body: { grant, expectedDraftVersion: 0, answers: { layout: 'B' } },
     });
     expect(saved.json.data.draftVersion).toBe(1);
-    // 古い版をもとにした置き換えは競合。
+    // A replacement based on an old version is a conflict.
     const stale = await ui.api('/render-grants/bridge/draft', {
       method: 'PUT',
       body: { grant, expectedDraftVersion: 0, answers: { layout: 'A' } },
     });
     expect(stale.json.error.code).toBe('E_DRAFT_CONFLICT');
-    // 別のsessionからは使えない。
+    // Unusable from another session.
     const other = await connectUi(t);
     const foreign = await other.api('/render-grants/bridge/ready', {
       method: 'POST',
@@ -923,7 +923,7 @@ describe('質問の表示とHTMLからの回答案（仕様12.2、11.7）', () =
     });
     expect(foreign.status).toBe(403);
     expect(foreign.json.error.code).toBe('E_RENDER_GRANT_INVALID');
-    // 返却した後は、表示もHTMLからの操作も使えない。
+    // After release, neither the view nor operations from HTML work.
     await ui.api('/render-grants/release', { method: 'POST', body: { grants: [grant] } });
     const released = await ui.api('/render-grants/bridge/draft', {
       method: 'PUT',
@@ -937,7 +937,7 @@ describe('質問の表示とHTMLからの回答案（仕様12.2、11.7）', () =
   });
 });
 
-describe('SEC-019 文書中のlinkから文書を開く', () => {
+describe('SEC-019 opening documents from links in a document', () => {
   interface LinkResult {
     status: string;
     documentId: string;
@@ -950,7 +950,7 @@ describe('SEC-019 文書中のlinkから文書を開く', () => {
       });
   const titles = async () => (await list()).map((entry) => entry.title);
 
-  it('未登録の文書は、確認があるときだけ開く', async () => {
+  it('opens an unregistered document only with confirmation', async () => {
     t.write(
       'site/index.html',
       `<a href="next.md">次の文書</a><a href="../outside-root.md">上の階層</a>
@@ -971,7 +971,7 @@ describe('SEC-019 文書中のlinkから文書を開く', () => {
     ]);
     const openLink = linkOpener(ui, document.documentId);
 
-    // 確認がなければ開かない。開く対象のpathと、確認の識別子を返すだけで、一覧は変わらない。
+    // Without confirmation it does not open. Only the target path and a confirmation identifier are returned; the list does not change.
     const unconfirmed = await openLink('lnk_0001', { revision });
     expect(unconfirmed.status).toBe(400);
     expect(unconfirmed.json.error.code).toBe('E_CONFIRMATION_REQUIRED');
@@ -980,12 +980,12 @@ describe('SEC-019 文書中のlinkから文書を開く', () => {
     const confirmation = String(unconfirmed.json.error.details['confirmation']);
     expect(await titles()).toEqual(['index.html']);
 
-    // 「確認した」と名乗るだけでは開けない。確認の識別子は、serverが発行したものだけが有効。
+    // Merely claiming "confirmed" does not open it. Only a server-issued confirmation identifier is valid.
     for (const forged of [{ confirmed: true }, { confirmation: 'true' }, { path: '/etc/hosts' }]) {
       const response = await openLink('lnk_0001', { revision, ...forged });
       expect(response.status, JSON.stringify(forged)).toBe(400);
     }
-    // 別のlinkの確認は使えない。
+    // A confirmation for another link cannot be used.
     const other = await openLink('lnk_0002', { revision });
     const otherConfirmation = String(other.json.error.details['confirmation']);
     const crossed = await openLink('lnk_0001', { revision, confirmation: otherConfirmation });
@@ -993,23 +993,23 @@ describe('SEC-019 文書中のlinkから文書を開く', () => {
     expect(crossed.json.error.details['changed']).toBe(true);
     expect(await titles()).toEqual(['index.html']);
 
-    // 発行された確認を付けると開く。
+    // With the issued confirmation, it opens.
     const confirmed = await openLink('lnk_0001', { revision, confirmation });
     expect(confirmed.json.data.status).toBe('opened');
     expect(await titles()).toEqual(['index.html', '次の文書']);
-    // すでに開いている文書は、確認なしで表示を切り替えるだけ。
+    // An already open document just gets focused, without confirmation.
     const again = await openLink('lnk_0001', { revision });
     expect(again.json.data).toEqual({
       status: 'focused',
       documentId: confirmed.json.data.documentId,
     });
-    // 確認は1回だけ使える。閉じた後に同じ確認を送っても、開かない。
+    // A confirmation can be used once. Sending the same one after closing does not open.
     await t.run(['close', confirmed.json.data.documentId, '--json']);
     const reused = await openLink('lnk_0001', { revision, confirmation });
     expect(reused.json.error.code).toBe('E_CONFIRMATION_REQUIRED');
     expect(await titles()).toEqual(['index.html']);
 
-    // 表示の切り替えで終わった場合も、渡した確認は使い終える。
+    // Even when it only focused, the given confirmation is consumed.
     const pending = String(reused.json.error.details['confirmation']);
     await open(['site/next.md']);
     const focused = await openLink('lnk_0001', { revision, confirmation: pending });
@@ -1022,11 +1022,11 @@ describe('SEC-019 文書中のlinkから文書を開く', () => {
     const unknown = await openLink('lnk_0099', { revision });
     expect(unknown.status).toBe(404);
     expect(unknown.json.error.code).toBe('E_LINK_NOT_FOUND');
-    // 文書でないlinkと、外部のlinkは、この経路では開かない。
+    // Non-document links and external links do not open through this path.
     for (const linkId of ['lnk_0003', 'lnk_0004']) {
       expect((await openLink(linkId, { revision })).status, linkId).toBe(400);
     }
-    // 存在しない文書は、確認があっても開けない。存在するかどうかは、確認の前には答えない。
+    // A missing document cannot be opened even with confirmation. Whether it exists is not revealed before confirmation.
     const missing = await openLink('lnk_0005', { revision });
     expect(missing.json.error.code).toBe('E_CONFIRMATION_REQUIRED');
     const missingConfirmed = await openLink('lnk_0005', {
@@ -1036,7 +1036,7 @@ describe('SEC-019 文書中のlinkから文書を開く', () => {
     expect(missingConfirmed.status).toBe(404);
     expect(await titles()).toEqual(['index.html']);
 
-    // assets-rootの外の文書も、確認を経れば開ける。開いても、元の文書のassetの範囲は広がらない。
+    // A document outside the assets-root can also be opened after confirmation. Opening it does not widen the asset scope of the original document.
     const above = await openLink('lnk_0002', {
       revision,
       confirmation: String(
@@ -1047,7 +1047,7 @@ describe('SEC-019 文書中のlinkから文書を開く', () => {
     expect(assetPaths(document.documentId)).toEqual([]);
   });
 
-  it('確認している間に文書が更新されて行き先が変わったら、確認し直す', async () => {
+  it('re-confirms when the document is updated and the target changes during confirmation', async () => {
     t.write('site/index.html', '<a href="first.md">link</a>');
     t.write('site/first.md', '# 最初の行き先\n');
     t.write('site/second.md', '# 変更後の行き先\n');
@@ -1059,20 +1059,20 @@ describe('SEC-019 文書中のlinkから文書を開く', () => {
     const confirmation = String(asked.json.error.details['confirmation']);
     expect(String(asked.json.error.details['path'])).toMatch(/first\.md$/);
 
-    // 確認の画面を出している間に、同じ番号のlinkの行き先が変わる。
+    // While the confirmation dialog is shown, the target of the link with the same number changes.
     t.write('site/index.html', '<a href="second.md">link</a>');
     await t.run(['refresh', '--json']);
     const after = await ui.grant(document.documentId);
     expect(after.revision).not.toBe(before.revision);
 
-    // 新しい版に対して、前の確認は使えない。新しい行き先を示して、確認し直す。
+    // The old confirmation cannot be used for the new revision. The new target is shown and confirmation is asked again.
     const stale = await openLink('lnk_0001', { revision: after.revision, confirmation });
     expect(stale.json.error.code).toBe('E_CONFIRMATION_REQUIRED');
     expect(stale.json.error.details['changed']).toBe(true);
     expect(String(stale.json.error.details['path'])).toMatch(/second\.md$/);
     expect(await titles()).toEqual(['index.html']);
 
-    // 確認した版を指定して、あらためて確認すれば、確認した行き先が開く。
+    // Giving the confirmed revision and confirming again opens the confirmed target.
     const reasked = await openLink('lnk_0001', { revision: before.revision });
     const opened = await openLink('lnk_0001', {
       revision: before.revision,
@@ -1082,8 +1082,8 @@ describe('SEC-019 文書中のlinkから文書を開く', () => {
     expect(await titles()).toEqual(['index.html', '最初の行き先']);
   });
 
-  it('確認の後でassets-rootが変わって行き先が変わったら、確認し直す', async () => {
-    // `/`で始まるlinkは、assets-rootからの指定。rootが変わると、同じ版でも行き先が変わる。
+  it('re-confirms when the assets-root changes after confirmation and the target changes', async () => {
+    // A link starting with `/` is relative to the assets-root. When the root changes, the target changes even for the same revision.
     t.write('site/index.html', '<a href="/docs/next.md">link</a>');
     t.write('site/docs/next.md', '# rootがsiteのときの行き先\n');
     t.write('docs/next.md', '# rootが上の階層のときの行き先\n');
@@ -1104,7 +1104,7 @@ describe('SEC-019 文書中のlinkから文書を開く', () => {
     expect(await titles()).toEqual(['index.html']);
   });
 
-  it('Markdownのlinkも、同じ確認を通る', async () => {
+  it('Markdown links go through the same confirmation', async () => {
     t.write(
       'docs/a.md',
       '# A\n\n[次](b.md) [外部](https://example.com/) [危険](javascript:alert(1))\n',
@@ -1126,8 +1126,8 @@ describe('SEC-019 文書中のlinkから文書を開く', () => {
   });
 });
 
-describe('Markdownの画像', () => {
-  it('登録済みのlocalの画像だけを配信し、外部の画像は取得しない', async () => {
+describe('Markdown images', () => {
+  it('serves only registered local images, and does not fetch external images', async () => {
     const evil = await startBeacon();
     t.write(
       'docs/a.md',
@@ -1142,7 +1142,7 @@ describe('Markdownの画像', () => {
     expect(grant.assets).toEqual([{ logicalPath: 'img/a.png', role: 'image' }]);
     expect(grant.documentLogicalPath).toBe('a.md');
     expect((await previewGet(ui, grant, 'img/a.png')).body.equals(PNG)).toBe(true);
-    // Markdownは本体で描画する。表示用のlistenerからは、原文も変換結果も配信しない。
+    // Markdown is rendered by the main UI. The preview listener serves neither the source nor the converted result.
     expect((await previewGet(ui, grant, 'a.md')).status).toBe(404);
     expect(grant.diagnostics.map((entry) => [entry.code, entry.target]).toSorted()).toEqual(
       [
@@ -1156,8 +1156,8 @@ describe('Markdownの画像', () => {
   });
 });
 
-describe('assets-rootの引き継ぎと、文書の位置', () => {
-  it('--watchで後から見つけた文書にも、登録時のassets-rootを使う', async () => {
+describe('inheriting the assets-root, and document location', () => {
+  it('documents found later by --watch also use the assets-root from registration', async () => {
     t.write('shared.css', '.shared{color:red}');
     const page = '<link rel="stylesheet" href="../shared.css"><p>page</p>';
     t.write('docs/first.html', page);
@@ -1168,14 +1168,14 @@ describe('assets-rootの引き継ぎと、文書の位置', () => {
     }>().data.watchRules[0];
     expect(rule?.assetsRoot).toMatch(/work$/);
 
-    // 後から追加した、同じ内容の文書。最初の文書と同じ範囲でassetを解決する。
+    // A document with the same content added later. Assets resolve within the same scope as the first document.
     t.write('docs/second.html', page);
     const added = await waitFor(list, (documents) => documents.length === 2);
     const second = added.find((entry) => entry.documentId !== first.documentId) as Summary;
     expect(assetPaths(second.documentId)).toEqual(['shared.css']);
     expect(currentRevision(second.documentId).documentLogicalPath).toBe('docs/second.html');
 
-    // 再起動の後に追加した文書も同じ。
+    // The same for a document added after a restart.
     await t.run(['daemon', 'restart', '--json']);
     t.write('docs/third.html', page);
     const afterRestart = await waitFor(list, (documents) => documents.length === 3);
@@ -1184,14 +1184,14 @@ describe('assets-rootの引き継ぎと、文書の位置', () => {
     }
   });
 
-  it('同じ内容の文書が別の位置にあるとき、それぞれの位置で表示する', async () => {
+  it('documents with the same content at different locations are rendered at their own locations', async () => {
     const page = '<img src="img/a.png"><p>同じ内容</p>';
     t.write('site/a.html', page);
     t.write('site/b.html', page);
     t.write('site/img/a.png', PNG);
     const a = await open(['site/a.html']);
     const b = await open(['site/b.html']);
-    // 版は内容で決まるので同じ。配信するpathは、文書ごとに違う。
+    // The revision is determined by content, so it is the same. The served path differs per document.
     expect(b.revision).toBe(a.revision);
     const ui = await connectUi(t);
     const grantA = await ui.grant(a.documentId);
@@ -1205,7 +1205,7 @@ describe('assets-rootの引き継ぎと、文書の位置', () => {
     expect((await previewGet(ui, grantA, 'b.html')).status).toBe(404);
   });
 
-  it('assets-rootのないstdinの文書に--assetを指定したら、errorにする', async () => {
+  it('errors when --asset is given for a stdin document without an assets-root', async () => {
     t.write('site/data.json', '{}');
     const result = await t.run(['open', '--format', 'html', '--asset', 'data.json', '--json'], {
       stdin: '<p>stdin</p>',
@@ -1221,8 +1221,8 @@ describe('assets-rootの引き継ぎと、文書の位置', () => {
   });
 });
 
-describe('assetの上限', () => {
-  it('stdinの文書は、assets-rootを指定したときだけlocal fileを使える', async () => {
+describe('asset limits', () => {
+  it('a stdin document can use local files only when an assets-root is given', async () => {
     t.write('site/img/a.png', PNG);
     const html = '<img src="img/a.png"><p>stdin</p>';
     const without = await t.run(['open', '--format', 'html', '--key', 'k', '--json'], {
@@ -1245,7 +1245,7 @@ describe('assetの上限', () => {
     });
   });
 
-  it('文書がassets-rootの外にあるとき、--html-modeがHTML以外のときは、errorにする', async () => {
+  it('errors when the document is outside the assets-root, or --html-mode is given for non-HTML', async () => {
     site('<p>本文</p>');
     t.write('elsewhere/a.html', '<p>別の場所</p>');
     t.write('docs/a.md', '# A\n');
@@ -1292,7 +1292,7 @@ describe('assetの上限', () => {
     ).toBe(0);
   });
 
-  it('1つのassetが上限を超える文書は、登録しない', async () => {
+  it('does not register a document with one asset exceeding the limit', async () => {
     t.write('site/index.html', '<img src="big.png">');
     t.write('site/big.png', Buffer.alloc(20 * 1024 * 1024 + 1));
     const result = await t.run(['open', 'site/index.html', '--json']);

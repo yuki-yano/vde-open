@@ -48,7 +48,7 @@ async function parseEnvelope<T>(response: Response): Promise<EnvelopeBody<T>> {
   if (!response.ok || !body.ok) {
     throw new ApiError(
       body.error?.code ?? 'E_INTERNAL',
-      body.error?.message ?? '操作に失敗しました。',
+      body.error?.message ?? 'The operation failed.',
       response.status,
       body.error?.details ?? {},
     );
@@ -56,8 +56,8 @@ async function parseEnvelope<T>(response: Response): Promise<EnvelopeBody<T>> {
   return body;
 }
 
-// CLIが開いたURLのfragmentからticketを取り出し、session tokenへ交換する（仕様6.4）。
-// fragmentは読んだ直後に履歴から消す。tokenはこのtabのmemoryとsessionStorageにだけ置く。
+// Take the ticket from the fragment of the URL the CLI opened and exchange it for a session token (spec 6.4).
+// The fragment is removed from history right after reading. The token lives only in this tab's memory and sessionStorage.
 export async function establishSession(): Promise<string | null> {
   const match = /^#bootstrap=([A-Za-z0-9_-]+)$/.exec(window.location.hash);
   if (match) {
@@ -72,7 +72,7 @@ export async function establishSession(): Promise<string | null> {
       window.sessionStorage.setItem(TOKEN_KEY, data.token);
       return data.token;
     } catch {
-      // 使用済み・期限切れのURL。保存済みのsessionがあれば、それを使う。
+      // A used or expired URL. Use the saved session if there is one.
     }
   }
   return window.sessionStorage.getItem(TOKEN_KEY);
@@ -95,50 +95,50 @@ export interface Api {
   reorder(order: string[], expectedCatalogVersion: number): Promise<void>;
   focus(documentId: string): Promise<void>;
   refresh(documentId: string): Promise<void>;
-  // 文書の1つの版を表示するための権限を取得する。
+  // Fetch a render grant for one revision of a document.
   renderGrant(
     documentId: string,
     revision: string,
     options?: { mode?: HtmlMode },
   ): Promise<RenderGrantResult>;
-  // 開いている文書を検索する（仕様9章）。
+  // Search open documents (spec chapter 9).
   search(query: string, limit: number): Promise<SearchResult>;
-  // 回答待ちの質問が固定した版と表示方法での表示。表示方法はdaemonが質問から決める。
+  // A view with the revision and view mode pinned by a pending question. The daemon decides the view mode from the question.
   feedbackRenderGrant(requestId: string): Promise<RenderGrantResult>;
-  // HTMLのSDKからの操作の中継。表示の権限（grant）が有効な間だけ成功する。
+  // Relay of operations from the HTML SDK. Succeeds only while the render grant is valid.
   bridgeReady(grant: string): Promise<FeedbackForUi>;
   bridgeDraft(
     grant: string,
     expectedDraftVersion: number,
     answers: Answers,
   ): Promise<{ draftVersion: number }>;
-  // 表示の中から読み込もうとした、登録されていないfile。
+  // Unregistered files the view tried to load.
   renderMissing(grant: string): Promise<string[]>;
-  // HTMLの表示方法を変える。interactiveにするときは、利用者の確認を経てから呼ぶ。
+  // Change the HTML view mode. When switching to interactive, call this only after the user confirms.
   setHtmlMode(documentId: string, mode: HtmlMode): Promise<DocumentSummary>;
-  // 表示をやめた権限を返す。
+  // Release grants whose views were dismissed.
   releaseGrants(grants: string[]): Promise<void>;
-  // 文書中のlinkが指すlocalの文書を開く。未登録の文書は、確認を求めるerrorになる。
-  // そのerrorが返す確認の識別子を付けて、もう一度呼ぶと開く。
+  // Open the local document a link in the document points to. For an unregistered document, the error asks for confirmation.
+  // Calling again with the confirmation identifier from that error opens it.
   openLink(
     documentId: string,
     revision: string,
     linkId: string,
     confirmation?: string,
   ): Promise<LinkOpenResult>;
-  // 質問（質問定義・回答案・文書の現在の版を含む）。
+  // The question (including the questionnaire, the draft answer, and the document's current revision).
   feedback(requestId: string): Promise<FeedbackForUi>;
-  // 回答案を置き換える。もとにした回答案の版を渡す。
+  // Replace the draft answer. Pass the draft version it is based on.
   saveDraft(
     requestId: string,
     expectedDraftVersion: number,
     answers: Answers,
   ): Promise<{ draftVersion: number }>;
-  // 保存済みの回答案を、回答として確定する。
+  // Finalize the saved draft answer as the answer.
   submitFeedback(requestId: string, params: FeedbackSubmitParams): Promise<FeedbackForUi>;
-  // 質問を中止する（確認した後に呼ぶ）。
+  // Cancel the question (call after the user confirms).
   cancelFeedback(requestId: string): Promise<void>;
-  // 更新通知を購読する。切断時は間隔を伸ばしながら再接続し、接続のたびにonConnectを呼ぶ。
+  // Subscribe to update notifications. On disconnect, reconnect with growing delays, and call onConnect on every connection.
   events(handlers: { onEvent: (event: ServerEvent) => void; onConnect: () => void }): EventStream;
 }
 
@@ -173,7 +173,7 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
       } while (cursor !== null);
       return { documents, catalogVersion };
     },
-    // 表示する版を指定して読む。大きい文書は、cursorで続きを取得してつなぐ。
+    // Read the given revision. For large documents, fetch the rest with the cursor and join.
     async content(documentId, revision) {
       let text = '';
       let cursor: string | null = null;
@@ -191,7 +191,7 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
       return text;
     },
     async outline(documentId, revision) {
-      // 見出しが多い文書は、何回かに分けて返る。最後まで取得する。
+      // Documents with many headings come back in several pages. Fetch to the end.
       const items: OutlineItem[] = [];
       let cursor: string | null = null;
       do {
@@ -311,10 +311,10 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
       const run = async () => {
         while (!controller.signal.aborted) {
           try {
-            // headerを付けられる素のfetchで読む。tokenをURLへ載せない。
+            // Read with plain fetch, which can carry headers. Do not put the token in the URL.
             const response = await fetch(`${API}/events`, {
               headers: { Authorization: `Bearer ${token}` },
-              // 通知のstreamは保存しない（同じURLへの接続を、browserのcacheで待たせない）。
+              // Do not cache the notification stream (so the browser cache does not make a second connection to the same URL wait).
               cache: 'no-store',
               signal: controller.signal,
             });
@@ -329,7 +329,7 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
               try {
                 onEvent(JSON.parse(message.data) as ServerEvent);
               } catch {
-                // 解釈できないeventは捨てる。次の接続時にstateを取り直す。
+                // Drop events that cannot be parsed. State is refetched on the next connection.
               }
             });
             const reader = response.body.getReader();
@@ -341,7 +341,7 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
           } catch {
             if (controller.signal.aborted) return;
           }
-          // 切断後は、間隔を伸ばしながら再接続する（上限10秒、ゆらぎ付き）。
+          // After a disconnect, reconnect with growing delays (capped at 10 seconds, with jitter).
           attempt += 1;
           const delay = Math.min(RECONNECT_MAX_MS, 250 * 2 ** attempt) * (0.5 + Math.random() / 2);
           await new Promise((resolve) => setTimeout(resolve, delay));

@@ -23,11 +23,11 @@ const isHello = (data: unknown, instanceId: string): boolean =>
   (data as Record<string, unknown>)['protocolVersion'] === BRIDGE_PROTOCOL_VERSION &&
   (data as Record<string, unknown>)['instanceId'] === instanceId;
 
-// 表示中のiframeとの通信を始める（仕様11.7）。相手は、この表示のiframe（event.sourceで確かめる）だけ。
-// iframeはoriginを持たない（null）ので、originでは確かめない。portは、1つの表示に1回だけ渡す。
-// iframeの読み直し・遷移、iframeを画面から外したとき（grantをnullにする）、表示の差し替え、
-// 表示の権限の失効、質問の終わりで、通信を終える。
-// HTMLからの操作は、表示の権限（grant）に結び付けてdaemonへ中継する。daemonも、権限が有効かを毎回確かめる。
+// Start communication with the iframe on screen (spec 11.7). The only peer is this view's iframe (checked with event.source).
+// The iframe has no origin (null), so the origin is not checked. The port is handed over once per view.
+// Communication ends when the iframe reloads or navigates, when the iframe leaves the screen (grant becomes null), when the view is replaced,
+// when the render grant expires, and when the question ends.
+// Operations from the HTML are relayed to the daemon tied to the render grant. The daemon also checks the grant is valid every time.
 export function useBridge(
   api: Api,
   frame: RefObject<HTMLIFrameElement | null>,
@@ -55,13 +55,13 @@ export function useBridge(
       if (handed) return;
       handed = true;
       const channel = new MessageChannel();
-      // 表示の権限が失効していたら、通信を終える（仕様11.7）。
+      // If the render grant has expired, end the communication (spec 11.7).
       const relay = async <T>(work: Promise<T>): Promise<T> => {
         try {
           return await work;
         } catch (reason) {
           if (reason instanceof ApiError && reason.code === 'E_RENDER_GRANT_INVALID') {
-            // 失効を伝える応答を返した後で閉じる。
+            // Close after returning the response that reports the expiry.
             setTimeout(() => host?.close('expired'), 0);
           }
           throw reason;
@@ -83,18 +83,18 @@ export function useBridge(
               answers: current.draftAnswers,
             };
           },
-          // もとにした版は、HTMLが渡した値のまま使う。別の画面が先に更新していれば、競合になる。
+          // The base version is used exactly as the HTML passed it. If another window updated first, it is a conflict.
           updateDraft: (answers, baseDraftVersion) =>
             relay(api.bridgeDraft(grantKey, baseDraftVersion, answers)),
         },
         onClose: closeWith,
       });
       hostRef.current = host;
-      // opaque originのiframeへは、targetOriginに'*'を使うしかない。このhandshakeだけに使い、秘密は送らない。
+      // For an opaque-origin iframe, targetOrigin must be '*'. It is used only for this handshake, and no secrets are sent.
       target.postMessage({ type: BRIDGE_PORT, instanceId }, '*', [channel.port2]);
       setState({ instanceId, status: { status: 'connected' } });
     };
-    // 2回目以降の読み込みは、iframeの読み直しか遷移。通信を終え、portを渡し直さない。
+    // A second or later load is an iframe reload or navigation. End the communication and do not hand over the port again.
     const onLoad = () => {
       loads += 1;
       if (loads < 2) return;
@@ -113,8 +113,8 @@ export function useBridge(
     };
   }, [api, frame, instanceId, requestId, grantKey]);
 
-  // 質問が終わったら通信を終え、別の画面による回答案の変更はHTMLへ知らせる。
-  // 知らせる回答案も、表示の権限を確かめる経路で取得する。権限が失効していれば、知らせずに通信を終える。
+  // When the question ends, end the communication; tell the HTML about draft-answer changes made by other windows.
+  // The draft to report is also fetched through the path that checks the render grant. If the grant has expired, end the communication without reporting.
   useEffect(() => {
     const host = hostRef.current;
     if (host === null || request === null || request.requestId !== requestId || grantKey === null) {

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 
-// 表示の好みはbrowserにだけ保存する。開いている文書の状態（daemon側）とは混ぜない（仕様13.3）。
-// 管理tokenはここに入れない。
+// View preferences are stored only in the browser. They are kept apart from the state of open documents (daemon side) (spec 13.3).
+// The management token never goes here.
 export function usePreference<T extends string | number>(
   key: string,
   initial: T,
@@ -22,7 +22,7 @@ export function usePreference<T extends string | number>(
       try {
         window.localStorage.setItem(storageKey, JSON.stringify(next));
       } catch {
-        // 保存できなくても、このtabの表示は切り替える。
+        // Even if saving fails, switch the view in this tab.
       }
     },
     [storageKey],

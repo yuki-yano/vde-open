@@ -11,28 +11,28 @@ function newSecret(): string {
 }
 
 export interface SessionService {
-  // browserを開くための一回限りのticket。有効期限は60秒。
+  // One-time ticket for opening the browser. Valid for 60 seconds.
   createBootstrapTicket(): string;
-  // ticketをsession tokenへ交換する。使用済み・期限切れ・未知のticketはnull。
+  // Exchanges a ticket for a session token. Used, expired, or unknown tickets yield null.
   exchange(ticket: string): string | null;
   authenticate(token: string): boolean;
-  // sessionが有効か。利用した時刻は更新しない（接続を保つだけでは期限を延ばさない）。
+  // Whether the session is active. Does not update the last-used time (keeping a connection open does not extend the expiry).
   isActive(token: string): boolean;
   revoke(token: string): void;
-  // sessionが破棄されたときに呼ばれる。開いたままの接続を閉じるために使う。戻り値で解除する。
+  // Called when the session is revoked. Used to close connections left open. The return value unsubscribes.
   onRevoke(token: string, listener: () => void): () => void;
-  // sessionを指す、秘密でない識別子。tokenを保持せずに、sessionへ権限を結び付けるために使う。
+  // Non-secret identifier for a session. Used to bind grants to a session without holding the token.
   idOf(token: string): string;
-  // 識別子が指すsessionが有効か。利用した時刻は更新しない。
+  // Whether the session the identifier refers to is active. Does not update the last-used time.
   isActiveId(sessionId: string): boolean;
-  // いずれかのsessionが破棄されたときに、その識別子とともに呼ばれる。
+  // Called with the identifier whenever any session is revoked.
   onAnyRevoke(listener: (sessionId: string) => void): void;
-  // 保持している項目の数（資源の漏れの確認に使う。daemon.diagnostics）。
+  // Number of retained entries (used to check for resource leaks. daemon.diagnostics).
   retainedCounts(): Record<string, number>;
 }
 
-// browserの管理sessionを扱う（仕様6.4）。秘密そのものは保持せず、digestで照合する。
-// memoryだけに置くので、daemonの再起動ですべて失効する。
+// Handles browser management sessions (spec 6.4). Secrets themselves are not kept; digests are compared.
+// Kept in memory only, so everything expires when the daemon restarts.
 export function createSessionService(now: () => number = Date.now): SessionService {
   const tickets = new Map<string, number>();
   const sessions = new Map<string, number>();
@@ -86,7 +86,7 @@ export function createSessionService(now: () => number = Date.now): SessionServi
       sweep();
       const key = digest(ticket);
       const expiresAt = tickets.get(key);
-      // 成否にかかわらず、同じticketは2度使えない。
+      // Whether it succeeds or not, the same ticket cannot be used twice.
       tickets.delete(key);
       if (expiresAt === undefined || expiresAt < now()) return null;
       const token = newSecret();

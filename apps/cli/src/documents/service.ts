@@ -74,7 +74,7 @@ export interface ServiceResult<T> {
   warnings: Warning[];
 }
 
-// 変更の通知。IDと版・状態だけを運ぶ（仕様6.5）。回答の内容は含めない。
+// Change notification. Carries only IDs, revisions, and statuses (spec 6.5). Never includes answer contents.
 export interface DocumentEvent {
   type:
     | 'catalog-changed'
@@ -95,19 +95,19 @@ export interface DocumentServiceOptions {
   store: StateStore;
   cursors: CursorCodec;
   now?: () => Date;
-  // commitが成功した後にだけ呼ばれる。
+  // Called only after a commit succeeds.
   emit?: (event: DocumentEvent) => void;
-  // 文書の構造を解析する。重い処理なので、daemonではworkerへ出す。
+  // Analyzes the document structure. Heavy work, so the daemon offloads it to a worker.
   analyze?: (format: DocumentFormat, text: string) => Promise<DocumentAnalysis>;
-  // fileを読む処理を差し替える（testで、読み込みの完了順を制御するために使う）。
+  // Replaces the file read (used in tests to control the order in which reads complete).
   readSource?: (path: string) => Promise<LoadedSource>;
-  // 文書やCSSが参照するlocal fileの候補を集める。daemonではworkerへ出す。
+  // Collects candidate local files referenced by the document or CSS. The daemon offloads it to a worker.
   scan?: (kind: ScanKind, text: string) => Promise<ScannedReference[]>;
-  // 一覧に出す、文書ごとの検索の状態。指定がなければ、検索の対象外として扱う。
+  // Per-document search state shown in the list. Without it, documents are treated as excluded from search.
   searchStateOf?: (documentId: string) => DocumentSummary['searchState'];
 }
 
-// fileを読み直した結果。signatureは、読み取った内容に対応するfileの状態。読めなかったらnull。
+// Result of re-reading a file. signature is the file state matching the content read; null if it could not be read.
 export interface RefreshOutcome {
   changed: boolean;
   signature: string | null;
@@ -122,20 +122,20 @@ interface Incoming {
   bytes: Buffer;
   text: string;
   fallbackTitle: string;
-  // 読み取った時点の、文書と参照先のfileの状態。stdinはnull。
+  // State of the document and referenced files at read time. null for stdin.
   signature: string | null;
   assetsRoot: string | null;
   extraAssets: string[];
-  // 文書の位置（assets-rootからの相対path）。
+  // Document location (path relative to assets-root).
   documentLogicalPath: string;
   assets: LoadedAsset[];
-  // 文書のほかに変更を追うfile（参照しているasset、参照されているが存在しないfile）。
+  // Files tracked for changes besides the document (referenced assets, and referenced files that do not exist).
   trackedFiles: string[];
-  // 参照の走査が、時間切れや構造の上限で終わらなかった。assetは集められていない。
+  // The reference scan did not finish (timeout or structure limit). No assets were collected.
   assetScanFailed: boolean;
 }
 
-// 読み込んだ文書の、assetを集める前の内容。
+// A loaded document before its assets are collected.
 type IncomingSource = Omit<
   Incoming,
   | 'assetsRoot'
@@ -146,7 +146,7 @@ type IncomingSource = Omit<
   | 'assetScanFailed'
 >;
 
-// 未登録の文書を開く確認。確認した文書・版・link・行き先に結び付ける。
+// Confirmation for opening an unregistered document. Bound to the confirmed document, revision, link, and target.
 interface LinkConfirmation {
   documentId: string;
   revision: string;
@@ -158,18 +158,18 @@ interface LinkConfirmation {
 const LINK_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
 const MAX_LINK_CONFIRMATIONS = 256;
 
-// assetの集め方。rootとexplicitは、利用者の指定がなければundefined（登録済みの値、または既定を使う）。
+// How assets are collected. root and explicit are undefined unless the user specified them (the registered value or the default is used).
 interface AssetSettings {
   root: string | undefined;
   explicit: string[] | undefined;
-  // 個別に指定したassetを読めないときに、errorにするか。
+  // Whether an unreadable explicitly specified asset is an error.
   strict: boolean;
 }
 
 const INHERITED_ASSETS: AssetSettings = { root: undefined, explicit: undefined, strict: false };
 
 interface ResolvedCandidates {
-  // canonical pathごとの候補。symlink経由や重複指定は1件にまとめてある。
+  // Candidates by canonical path. Symlinked and duplicate entries are merged into one.
   unique: Map<string, { candidate: Candidate; format: DocumentFormat }>;
   problems: Problem[];
 }
@@ -183,9 +183,9 @@ interface Problem {
 interface UpsertOptions {
   title?: string | undefined;
   key?: string | undefined;
-  // HTMLの表示方法の希望。指定がなければ、新しい文書はstatic、既存の文書は変えない。
+  // Requested HTML view mode. Without it, new documents are static and existing documents keep theirs.
   htmlMode?: HtmlMode | undefined;
-  // falseなら、閉じている文書を開き直さない（監視による更新で使う）。
+  // If false, closed documents are not reopened (used for updates driven by watch).
   reopen: boolean;
 }
 
@@ -196,11 +196,11 @@ interface UpsertOutcome {
   revisionChanged: boolean;
 }
 
-// 解析結果を保持する上限。
+// Limits on retained analysis results.
 const ANALYSIS_CACHE_ENTRIES = 32;
 const ANALYSIS_CACHE_BYTES = 32 * 1024 * 1024;
 
-// 一時的に消えているfileを待つ上限（仕様8.5）。
+// How long to wait for a file that is temporarily missing (spec 8.5).
 const MISSING_RETRY_MS = 1000;
 const MISSING_RETRY_INTERVAL_MS = 100;
 
@@ -235,7 +235,7 @@ export function toSummary(
   };
 }
 
-// 直近2版と、5分以内に作られた版と、質問が固定している版を残す（仕様4.4、11.4）。
+// Keeps the latest 2 revisions, revisions created within 5 minutes, and revisions pinned by questions (spec 4.4, 11.4).
 export function pruneRevisions(
   revisions: RevisionRecord[],
   now: number,
@@ -266,7 +266,7 @@ function isInside(root: string, path: string): boolean {
   return fromRoot !== '' && !fromRoot.startsWith('..') && !fromRoot.startsWith(sep);
 }
 
-// 文書がruleの監視範囲に入るか。globは、監視の起点より下にあるかで判定する。
+// Whether the document is within the rule's watch scope. For globs, checks whether it is under the watch base.
 function ruleCovers(rule: WatchRule, canonicalPath: string): boolean {
   const base = watchBaseOf(rule);
   if (!isInside(base.directory, canonicalPath)) return false;
@@ -276,7 +276,7 @@ function ruleCovers(rule: WatchRule, canonicalPath: string): boolean {
 function assetScanWarning(path: string): Warning {
   return {
     code: 'W_ASSET_SCAN_FAILED',
-    message: `${path} が参照するfileを調べられませんでした。画像やCSSは登録していません。refreshで調べ直せます。`,
+    message: `Could not scan the files referenced by ${path}. Images and CSS were not registered. Run refresh to scan again.`,
     details: { path },
   };
 }
@@ -284,26 +284,34 @@ function assetScanWarning(path: string): Warning {
 function assetScanError(): VdeError {
   return new VdeError(
     'E_PARSE_FAILED',
-    '文書が参照するfileを調べられなかったため、更新していません。',
+    'The document was not updated because the files it references could not be scanned.',
     { reason: 'asset-scan-failed' },
   );
 }
 
 function assertOpenLimits(state: StatePayload): void {
   if (state.openOrder.length > LIMITS.openDocuments) {
-    throw new VdeError('E_LIMIT_EXCEEDED', '開ける文書数の上限を超えます。', {
-      limit: 'openDocuments',
-      max: LIMITS.openDocuments,
-      actual: state.openOrder.length,
-    });
+    throw new VdeError(
+      'E_LIMIT_EXCEEDED',
+      'The limit on the number of open documents would be exceeded.',
+      {
+        limit: 'openDocuments',
+        max: LIMITS.openDocuments,
+        actual: state.openOrder.length,
+      },
+    );
   }
   const sourceBytes = openSourceBytes(state);
   if (sourceBytes > LIMITS.openSourceBytes) {
-    throw new VdeError('E_LIMIT_EXCEEDED', '開いている文書の合計の大きさが上限を超えます。', {
-      limit: 'openSourceBytes',
-      max: LIMITS.openSourceBytes,
-      actual: sourceBytes,
-    });
+    throw new VdeError(
+      'E_LIMIT_EXCEEDED',
+      'The total size of open documents would exceed the limit.',
+      {
+        limit: 'openSourceBytes',
+        max: LIMITS.openSourceBytes,
+        actual: sourceBytes,
+      },
+    );
   }
 }
 
@@ -314,22 +322,22 @@ export class DocumentService {
   readonly #emit: (event: DocumentEvent) => void;
   readonly #analyze: ((format: DocumentFormat, text: string) => Promise<DocumentAnalysis>) | null;
   readonly #readSource: (path: string) => Promise<LoadedSource>;
-  // revisionごとの解析結果。古い版の遅い結果を、新しい版の結果として使わないためにrevisionで引く。
-  // 節の本文を含むので、件数と、元の文書の大きさの合計の両方で上限を設ける。
+  // Analysis results by revision. Keyed by revision so a late result for an old revision is never used for a new one.
+  // They include section bodies, so both the entry count and the total source size are limited.
   readonly #analysisCache = new Map<string, { analysis: DocumentAnalysis; bytes: number }>();
   #analysisCacheBytes = 0;
   readonly #scan: (kind: ScanKind, text: string) => Promise<ScannedReference[]>;
   readonly #searchStateOf: (documentId: string) => DocumentSummary['searchState'];
-  // canonical pathごとの、公開済みの内容に対応するfileの状態と、文書のほかに変更を追うfile。
-  // 読めなかったときのsignatureはnull。
+  // By canonical path: the file state matching the published content, and files tracked besides the document.
+  // signature is null when the file could not be read.
   readonly #signatures = new Map<string, { signature: string | null; files: string[] }>();
-  // canonical pathごとの待ち行列。同じfileの「読む→公開する」を1件ずつ行う。
+  // Queue per canonical path. Runs "read then publish" for the same file one at a time.
   readonly #pathQueues = new Map<string, Promise<void>>();
-  // 文書を閉じた回数。閉じる前に始めた処理の結果を、開き直した後の文書へ結び付けないために使う。
+  // How many times each document has been closed. Keeps results of work started before a close from binding to the reopened document.
   readonly #openEpochs = new Map<string, number>();
-  // scriptを動かす表示（interactive）の実行の許可。文書IDと、許可したときの閉じた回数と、許可の世代。
-  // daemonのmemoryだけに持つ（再起動・閉じる・別sourceへの置き換えで、自動では引き継がない。仕様10.2）。
-  // 世代は許可するたびに新しくする。外した後に許可し直しても、前の許可で発行した表示は戻らない。
+  // Permission to run scripts (interactive view). Document ID, the close count when granted, and the permission generation.
+  // Held only in daemon memory (not carried over automatically across restarts, closes, or replacement by another source; spec 10.2).
+  // The generation changes on every grant. Re-granting after revocation does not revive views issued under the previous permission.
   readonly #interactive = new Map<string, { epoch: number; generation: number }>();
   #interactiveGenerations = 0;
   readonly #linkConfirmations = new Map<string, LinkConfirmation>();
@@ -345,10 +353,10 @@ export class DocumentService {
     this.#searchStateOf = options.searchStateOf ?? (() => 'excluded');
   }
 
-  // fileを読んでから公開するまでを、同じfileについては1件ずつ行う。
-  // 並行させると、先に読んだ古い内容が後から公開され、新しい内容を上書きする。
-  // 読み込みを始めた順番では新旧を決められない（先に始めた読み込みが、後から新しい内容を読むことがある）。
-  // 複数のfileを扱うときは、決まった順に取得して、互いに待ち合う状態を作らない。
+  // Runs "read then publish" one at a time for the same file.
+  // If run concurrently, old content read first could be published later and overwrite new content.
+  // The order reads start does not determine which is newer (a read started earlier may read newer content later).
+  // When handling several files, acquire them in a fixed order so they never wait on each other.
   async #withPathLocks<T>(paths: Iterable<string>, work: () => Promise<T>): Promise<T> {
     const releases: Array<() => void> = [];
     try {
@@ -375,19 +383,19 @@ export class DocumentService {
     });
   }
 
-  // stateの内容に対応するfileの状態。daemonの起動後にまだ読んでいなければnull。
+  // File state matching the content in state. null if not yet read since the daemon started.
   readSignature(documentId: string): string | null {
     const path = this.#store.payload.documents[documentId]?.canonicalPath;
     return path ? (this.#signatures.get(path)?.signature ?? null) : null;
   }
 
-  // 文書のほかに変更を追うfile。監視は、文書とこれらの状態を並べて、readSignatureと比べる。
+  // Files tracked for changes besides the document. Watch joins the states of the document and these files and compares with readSignature.
   trackedFiles(documentId: string): string[] {
     const path = this.#store.payload.documents[documentId]?.canonicalPath;
     return path ? (this.#signatures.get(path)?.files ?? []) : [];
   }
 
-  // 読み込んだ文書が参照するlocal fileを集める。
+  // Collects the local files referenced by a loaded document.
   async #withAssets(
     source: IncomingSource,
     existing: DocumentRecord | undefined,
@@ -398,9 +406,9 @@ export class DocumentService {
       settings.root ??
       (existing ? existing.assetsRoot : canonicalPath === null ? null : dirname(canonicalPath));
     const extraAssets = settings.explicit ?? existing?.extraAssets ?? [];
-    // local assetを使えない文書に、個別の指定があっても登録できない。黙って無視しない。
+    // A document that cannot use local assets cannot register explicit ones either. Do not ignore them silently.
     if (assetsRoot === null && settings.explicit !== undefined) {
-      throw new VdeError('E_INVALID_ARGUMENT', '--assetには、--assets-rootの指定が必要です。', {
+      throw new VdeError('E_INVALID_ARGUMENT', '--asset requires --assets-root.', {
         assets: settings.explicit,
       });
     }
@@ -408,14 +416,14 @@ export class DocumentService {
     if (canonicalPath !== null && assetsRoot !== null) {
       const fromRoot = relative(assetsRoot, canonicalPath);
       if (fromRoot === '' || fromRoot.startsWith('..') || isAbsolute(fromRoot)) {
-        throw new VdeError('E_INVALID_ARGUMENT', '文書がassets-rootの中にありません。', {
+        throw new VdeError('E_INVALID_ARGUMENT', 'The document is not inside assets-root.', {
           path: source.displayPath ?? canonicalPath,
           assetsRoot,
         });
       }
       documentLogicalPath = fromRoot.split(sep).join('/');
     }
-    // 走査が終わらなかったことを、参照がなかったことと区別する。
+    // Distinguish a scan that did not finish from a document with no references.
     let assetScanFailed = false;
     const manifest = await buildManifest({
       format: source.format,
@@ -437,8 +445,8 @@ export class DocumentService {
         }
       },
     });
-    // 一部だけ集めたassetは使わない。集められなかった文書として扱う。
-    // 追うfileと、照合に使う状態は、同じ結果から作る。食い違うと、変更がなくても読み直しが続く。
+    // Partially collected assets are not used. The document is treated as one whose assets could not be collected.
+    // Tracked files and the state used for comparison come from the same result. If they disagree, re-reads continue even without changes.
     const tracked = assetScanFailed ? [] : manifest.tracked;
     return {
       ...source,
@@ -455,20 +463,20 @@ export class DocumentService {
     };
   }
 
-  // 開いている文書の現在の版が、参照を調べ終えたassetを持っているか。
-  // 持っているなら、走査に失敗した結果で置き換えない（assetと、変更を追うfileを失うため）。
+  // Whether the current revision of an open document has fully scanned assets.
+  // If so, it is not replaced by a failed scan result (that would lose the assets and tracked files).
   #hasCompleteAssets(existing: DocumentRecord | undefined): boolean {
     if (!existing?.isOpen) return false;
     const current = existing.revisions.find((entry) => entry.revision === existing.currentRevision);
     return current?.assetScan === 'complete';
   }
 
-  // 文書を閉じた回数。閉じる前に始めた処理が、開き直した後の文書に対して成立しないようにする。
+  // How many times the document has been closed. Keeps work started before a close from applying to the reopened document.
   openEpoch(documentId: string): number {
     return this.#openEpochs.get(documentId) ?? 0;
   }
 
-  // HTMLの文書で、scriptを動かす表示（interactive）を、このdaemonで明示的に許可済みなら、その許可の世代。
+  // For an HTML document, the permission generation if the interactive view was explicitly allowed in this daemon.
   interactiveGeneration(documentId: string): number | null {
     const record = this.#store.payload.documents[documentId];
     const permission = this.#interactive.get(documentId);
@@ -486,7 +494,7 @@ export class DocumentService {
     return this.interactiveGeneration(documentId) !== null;
   }
 
-  // 許可を変える。許可済みのまま許可しても、世代は変えない。変わったらtrue。
+  // Changes the permission. Granting while already granted keeps the generation. Returns true if it changed.
   #setInteractive(documentId: string, allowed: boolean): boolean {
     const before = this.interactiveGeneration(documentId);
     if (!allowed) this.#interactive.delete(documentId);
@@ -500,27 +508,31 @@ export class DocumentService {
     return before !== this.interactiveGeneration(documentId);
   }
 
-  // 管理UIの明示的な操作で、HTMLの表示方法を変える。interactiveにするには確認が必要（仕様10.2）。
+  // Changes the HTML view mode by an explicit action in the management UI. Switching to interactive requires confirmation (spec 10.2).
   async setHtmlMode(rawParams: unknown): Promise<ServiceResult<DocumentSummary>> {
     const params = htmlModeChangeParamsSchema.parse(rawParams);
     if (params.mode === 'interactive' && !params.confirmed) {
       throw new VdeError(
         'E_CONFIRMATION_REQUIRED',
-        'scriptを動かす表示にするには、確認が必要です。',
+        'Switching to the interactive view requires confirmation.',
         { documentId: params.documentId },
       );
     }
     const result = await this.#store.transaction((tx) => {
       const record = tx.state.documents[params.documentId];
       if (!record?.isOpen) {
-        throw new VdeError('E_DOCUMENT_NOT_OPEN', '文書は開かれていません。', {
+        throw new VdeError('E_DOCUMENT_NOT_OPEN', 'The document is not open.', {
           documentId: params.documentId,
         });
       }
       if (record.format !== 'html') {
-        throw new VdeError('E_INVALID_ARGUMENT', '表示方法はHTMLの文書だけで選べます。', {
-          documentId: params.documentId,
-        });
+        throw new VdeError(
+          'E_INVALID_ARGUMENT',
+          'The view mode can only be chosen for HTML documents.',
+          {
+            documentId: params.documentId,
+          },
+        );
       }
       if (record.htmlMode !== params.mode) {
         record.htmlMode = params.mode;
@@ -551,7 +563,7 @@ export class DocumentService {
     );
   }
 
-  // 利用者の指定から、assetの集め方を決める。
+  // Decides how to collect assets from the user's options.
   async #assetSettings(params: ReturnType<typeof openParamsSchema.parse>): Promise<AssetSettings> {
     let root: string | undefined;
     if (params.assetsRoot !== undefined) {
@@ -560,7 +572,7 @@ export class DocumentService {
         root = await realpath(requested);
         if (!(await stat(root)).isDirectory()) throw new Error('not a directory');
       } catch {
-        throw new VdeError('E_INVALID_ARGUMENT', '--assets-rootはdirectoryを指定してください。', {
+        throw new VdeError('E_INVALID_ARGUMENT', '--assets-root must be a directory.', {
           assetsRoot: params.assetsRoot,
         });
       }
@@ -573,7 +585,7 @@ export class DocumentService {
             if (reference.kind !== 'local') {
               throw new VdeError(
                 'E_ASSET_REJECTED',
-                `${asset} はassetとして登録できません。assets-rootからの相対pathで指定してください。`,
+                `${asset} cannot be registered as an asset. Specify a path relative to assets-root.`,
                 {
                   asset,
                   reason: reference.kind === 'rejected' ? reference.reason : reference.kind,
@@ -589,7 +601,7 @@ export class DocumentService {
     return this.#store.payload;
   }
 
-  // 保持している項目の数（資源の漏れの確認に使う。daemon.diagnostics）。
+  // Counts of retained entries (used to check for resource leaks; daemon.diagnostics).
   retainedCounts(): Record<string, number> {
     return {
       analysisCache: this.#analysisCache.size,
@@ -601,30 +613,30 @@ export class DocumentService {
     };
   }
 
-  // 全候補を先に検査し、1件でも問題があれば何も登録しない（仕様5.2）。
+  // Checks all candidates first; if any has a problem, registers nothing (spec 5.2).
   async open(rawParams: unknown): Promise<ServiceResult<OpenResult>> {
     const params = openParamsSchema.parse(rawParams);
     const warnings: Warning[] = [];
 
     if (params.stdin) {
       if (params.paths.length > 0) {
-        throw new VdeError('E_INVALID_ARGUMENT', 'stdinとpathは同時に指定できません。');
+        throw new VdeError('E_INVALID_ARGUMENT', 'stdin and paths cannot be specified together.');
       }
       if (params.format === 'auto') {
-        throw new VdeError('E_INVALID_ARGUMENT', 'stdinから開くときは--formatが必要です。');
+        throw new VdeError('E_INVALID_ARGUMENT', '--format is required when opening from stdin.');
       }
       if (params.watch) {
-        throw new VdeError('E_INVALID_ARGUMENT', '--watchはdirectoryかglobに対して指定します。');
+        throw new VdeError('E_INVALID_ARGUMENT', '--watch applies to a directory or a glob.');
       }
       if (params.htmlMode !== undefined && params.format !== 'html') {
-        throw new VdeError('E_INVALID_ARGUMENT', '--html-modeはHTMLの文書に指定します。');
+        throw new VdeError('E_INVALID_ARGUMENT', '--html-mode applies to HTML documents.');
       }
       const { format, key } = params;
       const bytes = Buffer.from(params.stdin.content, 'utf8');
       const text = decodeSource(bytes, 'stdin');
       const settings = await this.#assetSettings(params);
       const openStdin = async (): Promise<ServiceResult<OpenResult>> => {
-        // 同じkeyの文書を更新するときは、指定がなければ、登録済みのassetの設定を使う。
+        // When updating a document with the same key, use the registered asset settings unless specified.
         const existing =
           key === undefined
             ? undefined
@@ -652,23 +664,23 @@ export class DocumentService {
         }
         return this.#commitOpen(params, [item], [], settings, warnings);
       };
-      // 同じkeyの更新は、走査から登録までを1件ずつ行う。fileの文書と同じ理由。
-      // keyのない文書は、毎回新しい文書になるので、順番を待つ相手がいない。
+      // Updates with the same key run scan-to-register one at a time, for the same reason as file documents.
+      // A document without a key becomes a new document every time, so there is nothing to wait for.
       return key === undefined ? openStdin() : this.#withPathLocks([`stdin-key:${key}`], openStdin);
     }
 
     if (params.paths.length === 0) {
-      throw new VdeError('E_INVALID_ARGUMENT', '開く文書を指定してください。');
+      throw new VdeError('E_INVALID_ARGUMENT', 'Specify the documents to open.');
     }
     const expansion = await expandTargets(params.cwd, params.paths, params.recursive);
     const watchTargets = params.watch ? expansion.watchTargets : [];
     if (params.watch && watchTargets.length === 0) {
-      throw new VdeError('E_INVALID_ARGUMENT', '--watchはdirectoryかglobに対して指定します。');
+      throw new VdeError('E_INVALID_ARGUMENT', '--watch applies to a directory or a glob.');
     }
     for (const target of expansion.emptyTargets) {
       warnings.push({
         code: 'W_NO_DOCUMENTS',
-        message: `${target} に対象の文書がありません。`,
+        message: `No documents found in ${target}.`,
         details: { path: target },
       });
     }
@@ -678,21 +690,25 @@ export class DocumentService {
     );
     const settings = await this.#assetSettings(params);
     if (settings.explicit !== undefined && resolved.unique.size !== 1) {
-      throw new VdeError('E_INVALID_ARGUMENT', '--assetは、文書を1件だけ開くときに指定できます。', {
-        documents: resolved.unique.size,
-      });
+      throw new VdeError(
+        'E_INVALID_ARGUMENT',
+        '--asset can only be specified when opening a single document.',
+        {
+          documents: resolved.unique.size,
+        },
+      );
     }
     if (
       params.htmlMode !== undefined &&
       ![...resolved.unique.values()].some((entry) => entry.format === 'html')
     ) {
-      throw new VdeError('E_INVALID_ARGUMENT', '--html-modeはHTMLの文書に指定します。');
+      throw new VdeError('E_INVALID_ARGUMENT', '--html-mode applies to HTML documents.');
     }
     return this.#withPathLocks(resolved.unique.keys(), async () => {
       const incoming = await this.#readCandidates(resolved, settings, warnings);
-      // --watchなら、いま対象がなくても、ruleだけを登録できる。
+      // With --watch, the rule alone can be registered even if there are no documents yet.
       if (incoming.length === 0 && watchTargets.length === 0) {
-        throw new VdeError('E_PATH_NOT_FOUND', '対象の文書がありません。', {
+        throw new VdeError('E_PATH_NOT_FOUND', 'No documents found.', {
           paths: params.paths,
         });
       }
@@ -710,7 +726,7 @@ export class DocumentService {
     if ((params.title !== undefined || params.key !== undefined) && incoming.length !== 1) {
       throw new VdeError(
         'E_INVALID_ARGUMENT',
-        '--titleと--keyは、文書を1件だけ開くときに指定できます。',
+        '--title and --key can only be specified when opening a single document.',
         { documents: incoming.length },
       );
     }
@@ -737,7 +753,7 @@ export class DocumentService {
         else if (outcome.outcome === 'updated') updated += 1;
         else unchanged += 1;
         openSetChanged ||= outcome.openSetChanged;
-        // titleや状態だけの変更も通知する。UIは通知を契機に一覧を取り直す。
+        // Title-only or status-only changes are also notified. The UI re-fetches the list on notification.
         if (outcome.outcome === 'updated') {
           events.push({
             type: outcome.revisionChanged ? 'document-changed' : 'document-status',
@@ -745,7 +761,7 @@ export class DocumentService {
             revision: state.documents[outcome.documentId]?.currentRevision ?? null,
           });
         }
-        // 明示的に開いた文書は、監視ruleでの「閉じたので復帰させない」扱いを解除する。
+        // An explicitly opened document is no longer suppressed ("closed, do not restore") by watch rules.
         if (item.canonicalPath !== null) {
           for (const rule of state.watchRules) {
             rule.suppressedPaths = rule.suppressedPaths.filter(
@@ -774,7 +790,7 @@ export class DocumentService {
           };
           state.watchRules.push(rule);
         } else if (settings.root !== undefined) {
-          // 同じ対象を、assets-rootを指定して登録し直した。後から見つける文書にも、新しい指定を使う。
+          // The same target was registered again with assets-root. Documents found later also use the new value.
           rule.assetsRoot = settings.root;
         }
         rules.push(rule);
@@ -798,14 +814,14 @@ export class DocumentService {
       };
     });
     for (const item of incoming) this.#record(item);
-    // scriptの実行の許可は、commitの後にだけ変える。明示的なinteractiveの指定で許可し、
-    // staticの指定と、stdinの更新（別の内容への置き換え）では外す。同じfileの開き直しでは保つ。
+    // Script permission changes only after the commit. An explicit interactive option grants it;
+    // a static option or a stdin update (replacement with other content) revokes it. Reopening the same file keeps it.
     const permissionChanged: string[] = [];
     result.data.documents.forEach((summary, index) => {
       const item = incoming[index];
       if (summary.format !== 'html' || !item) return;
       let changed = false;
-      // stdinの更新は、別の内容への置き換え。前の許可は外し、明示的な指定があれば許可し直す。
+      // A stdin update replaces the content. Revoke the previous permission, then re-grant if explicitly requested.
       if (params.htmlMode === 'static' || item.sourceKind !== 'file') {
         changed = this.#setInteractive(summary.documentId, false);
       }
@@ -826,7 +842,7 @@ export class DocumentService {
     return result;
   }
 
-  // 形式の検査は全候補に対して行い、本文の読み込みは重複を除いてから行う。
+  // Format checks run on all candidates; content is read only after removing duplicates.
   async #resolveCandidates(
     candidates: Candidate[],
     explicitFormat: DocumentFormat | null,
@@ -845,32 +861,36 @@ export class DocumentService {
         });
         continue;
       }
-      // symlink経由や重複指定は、同じcanonical fileの1件として数える。
+      // Symlinked and duplicate entries count as one canonical file.
       const canonicalPath = await canonicalizePath(candidate.absolutePath);
       const first = unique.get(canonicalPath);
-      // 同じfileが直接の指定と列挙の両方に含まれるときは、直接の指定を優先する。
+      // If the same file is both specified directly and enumerated, the direct one wins.
       if (!first || (candidate.explicit && !first.candidate.explicit)) {
         unique.set(canonicalPath, { candidate, format });
       }
     }
     if (unique.size > LIMITS.openDocuments) {
-      throw new VdeError('E_LIMIT_EXCEEDED', '開ける文書数の上限を超えます。', {
-        limit: 'openDocuments',
-        max: LIMITS.openDocuments,
-        actual: unique.size,
-      });
+      throw new VdeError(
+        'E_LIMIT_EXCEEDED',
+        'The limit on the number of open documents would be exceeded.',
+        {
+          limit: 'openDocuments',
+          max: LIMITS.openDocuments,
+          actual: unique.size,
+        },
+      );
     }
     return { unique, problems };
   }
 
-  // 候補の本文を読む。呼び出し側が、対象のfileの待ち行列を取得してから呼ぶ。
+  // Reads candidate contents. The caller acquires the queues of the target files first.
   async #readCandidates(
     resolved: ResolvedCandidates,
     settings: AssetSettings,
     warnings: Warning[],
   ): Promise<Incoming[]> {
     const problems = [...resolved.problems];
-    // 合計の大きさは読み込みながら確かめる。上限を超える量をmemoryへ載せない。
+    // The total size is checked while reading. Never load more than the limit into memory.
     const incoming: Incoming[] = [];
     let loadedBytes = 0;
     for (const [canonicalPath, { candidate, format }] of resolved.unique) {
@@ -886,17 +906,21 @@ export class DocumentService {
         });
         continue;
       }
-      // 待ち行列を取得した後に、指定が別のfileを指すようになった。順序を保証できないので登録しない。
+      // The path started pointing at another file after the queue was acquired. Ordering cannot be guaranteed, so do not register.
       if (loaded.canonicalPath !== canonicalPath) {
         problems.push({ path: candidate.displayPath, code: 'E_IO', reason: 'changed-during-read' });
         continue;
       }
       loadedBytes += loaded.bytes.byteLength;
       if (loadedBytes > LIMITS.openSourceBytes) {
-        throw new VdeError('E_LIMIT_EXCEEDED', '開いている文書の合計の大きさが上限を超えます。', {
-          limit: 'openSourceBytes',
-          max: LIMITS.openSourceBytes,
-        });
+        throw new VdeError(
+          'E_LIMIT_EXCEEDED',
+          'The total size of open documents would exceed the limit.',
+          {
+            limit: 'openSourceBytes',
+            max: LIMITS.openSourceBytes,
+          },
+        );
       }
       try {
         const existing = this.#existingFile(loaded.canonicalPath);
@@ -916,7 +940,7 @@ export class DocumentService {
           settings,
         );
         if (item.assetScanFailed) {
-          // 調べ終えたassetを持つ文書を、調べられなかった結果で置き換えない。
+          // Do not replace a document with fully scanned assets by a failed scan result.
           if (this.#hasCompleteAssets(existing)) {
             problems.push({
               path: candidate.displayPath,
@@ -943,14 +967,14 @@ export class DocumentService {
       const first = problems[0] as Problem;
       throw new VdeError(
         first.code as VdeError['code'],
-        `${String(problems.length)}件の文書を開けないため、どの文書も登録していません。`,
+        `${String(problems.length)} document(s) could not be opened, so none were registered.`,
         { problems },
       );
     }
     return incoming;
   }
 
-  // 読み込んだ内容をstateへ反映する。同じ内容なら版を増やさない。
+  // Applies the loaded content to state. Identical content does not add a revision.
   #upsert(tx: Transaction, item: Incoming, options: UpsertOptions): UpsertOutcome {
     const state = tx.state;
     const now = this.#now();
@@ -959,7 +983,7 @@ export class DocumentService {
     if (options.key !== undefined) {
       const holder = Object.values(state.documents).find((record) => record.key === options.key);
       if (holder && holder.documentId !== existing?.documentId) {
-        throw new VdeError('E_KEY_CONFLICT', 'そのkeyは別の文書が使っています。', {
+        throw new VdeError('E_KEY_CONFLICT', 'That key is used by another document.', {
           key: options.key,
           documentId: holder.documentId,
         });
@@ -973,7 +997,7 @@ export class DocumentService {
         revisionChanged: false,
       };
     }
-    // 登録の時点の状態で確かめる。調べ終えたassetを持つ文書を、調べられなかった結果で置き換えない。
+    // Check against the state at registration time. Do not replace a document with fully scanned assets by a failed scan result.
     if (item.assetScanFailed && this.#hasCompleteAssets(existing)) throw assetScanError();
 
     const sourceSha256 = tx.putBlob(item.bytes);
@@ -984,7 +1008,7 @@ export class DocumentService {
       sha256: tx.putBlob(asset.bytes),
       byteLength: asset.bytes.byteLength,
     }));
-    // 参照しているfileの内容が変われば、本文が同じでも別の版になる（仕様4.1）。
+    // If a referenced file changes, the revision changes even with the same content (spec 4.1).
     const revision = computeRevision({
       format: item.format,
       sourceSha256,
@@ -1059,7 +1083,7 @@ export class DocumentService {
       changed = true;
       revisionChanged = true;
     } else {
-      // 版が同じでも、参照を調べ終えたかどうかは変わりうる（参照のない文書）。
+      // Even with the same revision, whether the scan completed can change (a document with no references).
       const current = existing.revisions.find((entry) => entry.revision === revision);
       if (current && current.assetScan !== revisionRecord.assetScan) {
         current.assetScan = revisionRecord.assetScan;
@@ -1107,7 +1131,7 @@ export class DocumentService {
     };
   }
 
-  // 一覧に出す文書の情報。順番、検索の状態、回答待ちの質問を含める。
+  // Document info shown in the list. Includes order, search state, and pending questions.
   #summary(state: StatePayload, documentId: string): DocumentSummary {
     return toSummary(
       state.documents[documentId] as DocumentRecord,
@@ -1128,7 +1152,7 @@ export class DocumentService {
         (record) => record.sourceKind === 'file' && record.canonicalPath === item.canonicalPath,
       );
     }
-    // keyのないstdinは、呼び出しごとに新しい文書になる。
+    // stdin without a key becomes a new document on every call.
     if (key === undefined) return undefined;
     return Object.values(state.documents).find(
       (record) => record.sourceKind !== 'file' && record.key === key,
@@ -1142,9 +1166,13 @@ export class DocumentService {
     if (params.cursor !== undefined) {
       const payload = this.#cursors.decode(params.cursor, 'list');
       if (payload['catalogVersion'] !== state.catalogVersion) {
-        throw new VdeError('E_CURSOR_STALE', '一覧が変わりました。最初から取得し直してください。', {
-          catalogVersion: state.catalogVersion,
-        });
+        throw new VdeError(
+          'E_CURSOR_STALE',
+          'The list has changed. Fetch it again from the start.',
+          {
+            catalogVersion: state.catalogVersion,
+          },
+        );
       }
       offset = payload['offset'] as number;
     }
@@ -1171,11 +1199,11 @@ export class DocumentService {
   #requireOpen(documentId: string): DocumentRecord {
     const record = this.#store.payload.documents[documentId];
     if (!record) {
-      throw new VdeError('E_DOCUMENT_NOT_FOUND', '文書が見つかりません。', { documentId });
+      throw new VdeError('E_DOCUMENT_NOT_FOUND', 'The document was not found.', { documentId });
     }
-    // 版が残っていても、閉じた文書は通常のreadで返さない（仕様4.4）。
+    // A closed document is not returned by a normal read even if revisions remain (spec 4.4).
     if (!record.isOpen) {
-      throw new VdeError('E_DOCUMENT_NOT_OPEN', '文書は開かれていません。', { documentId });
+      throw new VdeError('E_DOCUMENT_NOT_OPEN', 'The document is not open.', { documentId });
     }
     return record;
   }
@@ -1188,7 +1216,7 @@ export class DocumentService {
     if (selectors.filter(Boolean).length > 1) {
       throw new VdeError(
         'E_INVALID_ARGUMENT',
-        '--outline、--section、--linesは、どれか1つだけ指定できます。',
+        'Only one of --outline, --section, and --lines can be specified.',
       );
     }
 
@@ -1202,16 +1230,16 @@ export class DocumentService {
     let offset: number | null = null;
     let endByteExclusive: number | null = null;
     if (params.cursor !== undefined) {
-      // cursorは、発行したときの版と取得の種類に固定される。範囲や版を、後から変えられない。
+      // A cursor is bound to the revision and read kind it was issued with. The range and revision cannot be changed later.
       if (params.revision !== undefined || selectors.some(Boolean)) {
         throw new VdeError(
           'E_INVALID_ARGUMENT',
-          'cursorと、--revision・--outline・--section・--linesは併用できません。',
+          'A cursor cannot be combined with --revision, --outline, --section, or --lines.',
         );
       }
       const payload = this.#cursors.decode(params.cursor, 'read');
       if (payload['documentId'] !== params.documentId) {
-        throw new VdeError('E_INVALID_CURSOR', 'cursorが別の文書のものです。', {
+        throw new VdeError('E_INVALID_CURSOR', 'The cursor belongs to another document.', {
           reason: 'document',
         });
       }
@@ -1222,7 +1250,7 @@ export class DocumentService {
       sectionId = payload['sectionId'] as string | undefined;
     }
 
-    // 保持していない版を、現在の版で代用しない。cursorでの続きでも、そのたびに確かめる。
+    // Never substitute the current revision for one that is not retained. Check every time, even when continuing with a cursor.
     const entry = this.#requireRevision(record, revision);
     if (mode === 'outline') return this.#readOutline(record, entry, params.maxBytes, offset ?? 0);
     if (mode === 'section') {
@@ -1236,7 +1264,7 @@ export class DocumentService {
       if (params.lines) {
         const range = byteRangeOfLines(index, params.lines.start, params.lines.end);
         if (!range) {
-          throw new VdeError('E_INVALID_ARGUMENT', '行範囲が文書の範囲外です。', {
+          throw new VdeError('E_INVALID_ARGUMENT', 'The line range is outside the document.', {
             lines: params.lines,
             lineCount: index.lineCount,
           });
@@ -1284,8 +1312,8 @@ export class DocumentService {
   #requireRevision(record: DocumentRecord, revision: string | null): RevisionRecord {
     const entry = record.revisions.find((candidate) => candidate.revision === revision);
     if (!revision || !entry) {
-      // 保持していない版を、現在の版で代用しない。
-      throw new VdeError('E_REVISION_UNAVAILABLE', '指定した版は保持されていません。', {
+      // Never substitute the current revision for one that is not retained.
+      throw new VdeError('E_REVISION_UNAVAILABLE', 'The specified revision is not retained.', {
         documentId: record.documentId,
         revision: revision ?? null,
       });
@@ -1293,14 +1321,14 @@ export class DocumentService {
     return entry;
   }
 
-  // 見出しの一覧。要素は分割せず、配列のJSON表現が予算に収まるところまで返す（仕様5.4）。
+  // The outline. Items are not split; returns as many as fit the budget in the array's JSON form (spec 5.4).
   async #readOutline(
     record: DocumentRecord,
     entry: RevisionRecord,
     maxBytes: number,
     offset: number,
   ): Promise<ServiceResult<ReadResult>> {
-    // 解析の条件は、版を作ったときの形式で決める。文書の現在の形式では決めない。
+    // Analysis uses the format the revision was created with, not the document's current format.
     const analysis = await this.#analysisOf(entry);
     const outline: OutlineItem[] = [];
     let bytes = 2;
@@ -1308,10 +1336,10 @@ export class DocumentService {
       const size = Buffer.byteLength(JSON.stringify(item), 'utf8') + (outline.length > 0 ? 1 : 0);
       if (bytes + size > maxBytes) {
         if (outline.length === 0) {
-          // 空の配列と続きのcursorを返すと、位置が進まない。必要な大きさを伝える。
+          // Returning an empty array with a cursor would not advance. Report the required size.
           throw new VdeError(
             'E_MAX_BYTES_TOO_SMALL',
-            '--max-bytesが小さく、1件目の見出しを返せません。',
+            '--max-bytes is too small to return the first outline item.',
             { requiredBytes: bytes + size },
           );
         }
@@ -1328,7 +1356,7 @@ export class DocumentService {
         revision: entry.revision,
         mode: 'outline',
         outline,
-        // 原文の位置を正確に得られないので、推測した行番号は返さない（仕様8.3）。
+        // Source positions cannot be determined exactly, so guessed line numbers are not returned (spec 8.3).
         sourceRange: null,
         extraction: entry.format === 'markdown' ? 'markdown' : 'static-html',
         truncated,
@@ -1347,7 +1375,7 @@ export class DocumentService {
     };
   }
 
-  // 1つの節の、抽出した本文。見出しと本文を返す。原文そのものではない。
+  // Extracted text of one section. Returns the heading and body, not the original source.
   async #readSection(
     record: DocumentRecord,
     entry: RevisionRecord,
@@ -1358,8 +1386,8 @@ export class DocumentService {
     const analysis = await this.#analysisOf(entry);
     const section = analysis.sections.find((candidate) => candidate.sectionId === sectionId);
     if (!section) {
-      // 節のIDは、版の中でだけ決まる。別の版のIDは使えない。
-      throw new VdeError('E_SECTION_NOT_FOUND', '節が見つかりません。', {
+      // Section IDs are defined only within a revision. IDs from another revision cannot be used.
+      throw new VdeError('E_SECTION_NOT_FOUND', 'The section was not found.', {
         documentId: record.documentId,
         revision: entry.revision,
         sectionId,
@@ -1401,11 +1429,11 @@ export class DocumentService {
     const cached = this.#analysisCache.get(entry.revision);
     if (cached) return cached.analysis;
     if (!this.#analyze) {
-      throw new VdeError('E_INTERNAL', '文書の解析が利用できません。');
+      throw new VdeError('E_INTERNAL', 'Document analysis is not available.');
     }
     const source = await this.#store.readBlob(entry.sourceSha256);
     const analysis = await this.#analyze(entry.format, source.toString('utf8'));
-    // 結果は解析した版にだけ結び付ける。別の版の結果として返ることはない。
+    // The result is bound only to the analyzed revision. It is never returned for another revision.
     if (!this.#analysisCache.has(entry.revision)) {
       this.#analysisCache.set(entry.revision, { analysis, bytes: entry.byteLength });
       this.#analysisCacheBytes += entry.byteLength;
@@ -1423,7 +1451,7 @@ export class DocumentService {
     return analysis;
   }
 
-  // 開いている文書の、表示する版の記録。指定がなければ現在の版。
+  // The revision record of an open document to display. Defaults to the current revision.
   describeRevision(
     documentId: string,
     revision: string | undefined,
@@ -1432,8 +1460,8 @@ export class DocumentService {
     return { record, entry: this.#requireRevision(record, revision ?? record.currentRevision) };
   }
 
-  // 文書中のlinkが指すlocalの文書を開く（仕様10.4）。hrefは、解析で取り出したものだけを受け取る。
-  // すでに開いている文書なら、表示を切り替えるだけ。未登録の文書は、利用者の確認があるときだけ開く。
+  // Opens the local document a link in the document points to (spec 10.4). Only hrefs extracted by analysis are accepted.
+  // If the document is already open, only switches the view. An unregistered document is opened only with the user's confirmation.
   async openLinked(link: {
     documentId: string;
     revision: string;
@@ -1451,11 +1479,14 @@ export class DocumentService {
           ? record.assetsRoot
           : dirname(record.canonicalPath);
     if (target.kind !== 'document' || base === null) {
-      throw new VdeError('E_INVALID_ARGUMENT', 'このlinkは、開ける文書を指していません。');
+      throw new VdeError(
+        'E_INVALID_ARGUMENT',
+        'This link does not point to a document that can be opened.',
+      );
     }
     const absolute = resolve(base, ...target.segments);
     const canonical = await canonicalizePath(absolute);
-    // 確認は1回だけ使える。渡された確認は、どの結果になっても、ここで使い終える。
+    // A confirmation can be used once. The given confirmation is consumed here whatever the outcome.
     const now = this.#now().getTime();
     const offered =
       link.confirmation === undefined ? undefined : this.#linkConfirmations.get(link.confirmation);
@@ -1469,8 +1500,8 @@ export class DocumentService {
         warnings: [],
       };
     }
-    // 確認した文書・版・link・行き先のすべてが、いまの解決結果と同じときだけ有効。
-    // 確認の後で文書が更新されたり、assets-rootが変わったりして行き先が変わっていたら、確認し直す。
+    // Valid only if the confirmed document, revision, link, and target all match the current resolution.
+    // If the target changed after confirmation (document updated, assets-root changed), confirm again.
     const confirmed =
       offered !== undefined &&
       offered.expiresAt > now &&
@@ -1479,7 +1510,7 @@ export class DocumentService {
       offered.linkId === link.linkId &&
       offered.canonicalPath === canonical;
     if (!confirmed) {
-      // 文書に書かれたlinkだけを根拠に、一覧へ文書を増やさない。開く対象を示して、確認を求める。
+      // Never add a document to the list based only on a link in a document. Show the target and ask for confirmation.
       for (const [key, entry] of this.#linkConfirmations) {
         if (entry.expiresAt <= now) this.#linkConfirmations.delete(key);
       }
@@ -1498,12 +1529,12 @@ export class DocumentService {
       });
       throw new VdeError(
         'E_CONFIRMATION_REQUIRED',
-        'この文書はまだ開かれていません。開くには確認が必要です。',
-        // changedは、渡された確認が成立しなかったこと（行き先が変わった、期限が切れた、使用済み）を示す。
+        'This document is not open yet. Opening it requires confirmation.',
+        // changed means the given confirmation did not hold (target changed, expired, or already used).
         { path: canonical, confirmation, changed: link.confirmation !== undefined },
       );
     }
-    // 開くのは、確認した行き先そのもの。
+    // Open exactly the confirmed target.
     const opened = await this.open({ cwd: dirname(canonical), paths: [canonical] });
     const openedId = opened.data.documents[0]?.documentId as string;
     await this.focus({ documentId: openedId });
@@ -1514,14 +1545,14 @@ export class DocumentService {
     };
   }
 
-  // 一覧から外すだけで、原本は削除しない。全対象を先に検査する（仕様5.5）。
+  // Only removes from the list; never deletes the original. Checks all targets first (spec 5.5).
   async close(rawParams: unknown): Promise<ServiceResult<CloseResult>> {
     const params = closeParamsSchema.parse(rawParams);
     if (!params.all && params.targets.length === 0) {
-      throw new VdeError('E_INVALID_ARGUMENT', '閉じる文書を指定してください。');
+      throw new VdeError('E_INVALID_ARGUMENT', 'Specify the documents to close.');
     }
-    // pathの指定は、登録時と同じcanonical pathへ直して照合する。
-    // 表示用の相対pathは、cwdが違うと別のfileを指すので使わない。
+    // Paths are matched after resolving to the same canonical path as at registration.
+    // Display-relative paths are not used, since they point to different files under a different cwd.
     const canonicalTargets = new Map<string, string>();
     for (const target of params.targets) {
       if (target.startsWith('doc_')) continue;
@@ -1548,7 +1579,7 @@ export class DocumentService {
         }
         record.isOpen = false;
         closed.push(record.documentId);
-        // 監視ruleの範囲にある文書は、再走査で勝手に復帰させない（仕様5.3）。
+        // A document within a watch rule's scope is not restored automatically by a rescan (spec 5.3).
         if (record.canonicalPath !== null) {
           for (const rule of state.watchRules) {
             if (
@@ -1560,7 +1591,7 @@ export class DocumentService {
           }
         }
       }
-      // 閉じた文書の回答待ちの質問は、同じcommitで中止にする（仕様7.3）。送信済みの回答は残す。
+      // Pending questions on closed documents are cancelled in the same commit (spec 7.3). Submitted answers remain.
       for (const request of Object.values(state.feedbackRequests)) {
         if (request.status !== 'pending' || !closed.includes(request.documentId)) continue;
         request.status = 'cancelled';
@@ -1581,7 +1612,7 @@ export class DocumentService {
         state.catalogVersion += 1;
         changed = true;
       }
-      // --allは、すべての監視ruleも解除する。
+      // --all also removes all watch rules.
       if (params.all) state.watchRules = [];
       return {
         data: { closed, alreadyClosed },
@@ -1589,7 +1620,7 @@ export class DocumentService {
         warnings: [],
       };
     });
-    // 閉じる前に始まっていた処理（表示の権限の発行など）が、閉じた後の文書に対して成立しないようにする。
+    // Keeps work started before the close (such as issuing render grants) from applying to the document after the close.
     for (const documentId of result.data.closed) {
       this.#openEpochs.set(documentId, this.openEpoch(documentId) + 1);
     }
@@ -1612,16 +1643,16 @@ export class DocumentService {
       );
       if (byPath) return byPath;
     }
-    throw new VdeError('E_DOCUMENT_NOT_FOUND', '文書が見つかりません。', { target });
+    throw new VdeError('E_DOCUMENT_NOT_FOUND', 'The document was not found.', { target });
   }
 
-  // 表示順を保存する。fileの場所は動かさない（仕様13.1）。
+  // Saves the display order. Files are not moved (spec 13.1).
   async reorder(rawParams: unknown): Promise<ServiceResult<ListResult>> {
     const params = reorderParamsSchema.parse(rawParams);
     const changed = await this.#store.transaction((tx) => {
       const state = tx.state;
       if (state.catalogVersion !== params.expectedCatalogVersion) {
-        throw new VdeError('E_CATALOG_CONFLICT', '一覧が変わりました。取得し直してください。', {
+        throw new VdeError('E_CATALOG_CONFLICT', 'The list has changed. Fetch it again.', {
           catalogVersion: state.catalogVersion,
         });
       }
@@ -1634,7 +1665,7 @@ export class DocumentService {
       if (!sameSet) {
         throw new VdeError(
           'E_INVALID_ARGUMENT',
-          '並び順には、開いている全文書のIDを1回ずつ指定してください。',
+          'The order must list the ID of every open document exactly once.',
         );
       }
       if (params.order.every((documentId, index) => state.openOrder[index] === documentId)) {
@@ -1648,8 +1679,8 @@ export class DocumentService {
     return this.list({ limit: LIMITS.listLimitMax });
   }
 
-  // 質問だけを渡されたときに、質問のtitleと説明を内容とする文書を作る（仕様11.1）。
-  // 呼び出し側のtransactionの中で作り、同じcommitで質問を作る。文書の通知は呼び出し側が出す。
+  // When only a question is given, creates a document whose content is the question's title and instructions (spec 11.1).
+  // Created inside the caller's transaction, in the same commit as the question. The caller emits the document notification.
   createGenerated(tx: Transaction, input: { title: string; text: string }): string {
     const outcome = this.#upsert(
       tx,
@@ -1678,7 +1709,7 @@ export class DocumentService {
     return outcome.documentId;
   }
 
-  // 明示的なUI選択の通知。文書は再登録しない（仕様5.5）。
+  // Notification of an explicit UI selection. The document is not re-registered (spec 5.5).
   async focus(rawParams: unknown): Promise<ServiceResult<{ documentId: string }>> {
     const documentId = documentIdSchema.parse((rawParams as { documentId?: unknown }).documentId);
     this.#requireOpen(documentId);
@@ -1690,7 +1721,7 @@ export class DocumentService {
     return { data: { documentId }, catalogVersion, warnings: [] };
   }
 
-  // fileを読み直す。指定がなければ、開いているfile文書のすべて。
+  // Re-reads files. Without a target, all open file documents.
   async refresh(rawParams: unknown): Promise<ServiceResult<RefreshResult>> {
     const raw = (rawParams as { documentId?: unknown }).documentId;
     const targets =
@@ -1715,8 +1746,8 @@ export class DocumentService {
     };
   }
 
-  // 開いているfile文書の現在の内容を読み、変わっていれば新しい版として公開する。
-  // 読めなくなっていれば状態だけを更新し、古い内容を新しい内容として扱わない。
+  // Reads the current content of an open file document and publishes it as a new revision if changed.
+  // If it became unreadable, only the status is updated; old content is never treated as new.
   async refreshFromDisk(documentId: string): Promise<RefreshOutcome> {
     const before = this.#store.payload.documents[documentId];
     if (!before?.isOpen || before.sourceKind !== 'file' || before.canonicalPath === null) {
@@ -1739,7 +1770,7 @@ export class DocumentService {
       } catch (error) {
         if (!(error instanceof VdeError)) throw error;
         if (error.code === 'E_PATH_NOT_FOUND') {
-          // 保存の途中で一時的に消えているだけかもしれない。少し待って読み直す。
+          // It may be missing only temporarily during a save. Wait a little and read again.
           failure = 'missing';
           if (Date.now() < deadline) {
             await new Promise((resolveWait) => setTimeout(resolveWait, MISSING_RETRY_INTERVAL_MS));
@@ -1752,7 +1783,7 @@ export class DocumentService {
       }
     }
 
-    // 参照しているfileも読み直す。本文が同じでも、assetが変われば新しい版になる。
+    // Referenced files are re-read too. Even with the same content, changed assets make a new revision.
     let item: Incoming | null = null;
     const current = this.#store.payload.documents[documentId];
     if (loaded && current && loaded.canonicalPath === canonicalPath) {
@@ -1773,12 +1804,12 @@ export class DocumentService {
           INHERITED_ASSETS,
         );
       } catch (error) {
-        // assetが上限を超えたなど。切り捨てた内容を、新しい版として公開しない。
+        // E.g. assets exceeded a limit. Truncated content is not published as a new revision.
         if (!(error instanceof VdeError)) throw error;
         failure = 'error';
       }
-      // 参照を調べられなかった。調べ終えたassetを持つ版があるなら、その版・asset・追っているfileを保ち、
-      // 状態だけをerrorにする。fileが変わるか、手動で読み直すと、もう一度調べる。
+      // The references could not be scanned. If a revision with fully scanned assets exists, keep that revision, its assets,
+      // and tracked files, and set only the status to error. A file change or a manual refresh scans again.
       if (item?.assetScanFailed && this.#hasCompleteAssets(current)) {
         item = null;
         failure = 'error';
@@ -1790,7 +1821,7 @@ export class DocumentService {
     const applied = await this.#store.transaction((tx) => {
       const state = tx.state;
       const record = state.documents[documentId];
-      // 読んでいる間に閉じられていたら、何もしない。
+      // If closed while reading, do nothing.
       if (!record?.isOpen) return false;
       if (!read || read.canonicalPath !== record.canonicalPath) {
         if (record.sourceState !== failure) {
@@ -1813,8 +1844,8 @@ export class DocumentService {
       return true;
     });
     if (!applied) return { changed: false, signature: null };
-    // 読み取った内容を公開した（または、読めないことを記録した）。対応するfileの状態を覚える。
-    // 読めなかったときは、それまで追っていたfileを引き続き追う。
+    // The content read was published (or the read failure was recorded). Remember the matching file state.
+    // If it could not be read, keep tracking the files tracked so far.
     if (read) this.#record(read);
     else {
       const files = this.#signatures.get(canonicalPath)?.files ?? [];
@@ -1824,8 +1855,8 @@ export class DocumentService {
     return { changed: events.length > 0, signature: read?.signature ?? null };
   }
 
-  // 監視ruleの対象を走査し、新しく現れた文書を登録する。
-  // 閉じた文書（suppressedPaths）と、すでに開いている文書は対象にしない。
+  // Scans a watch rule's targets and registers newly found documents.
+  // Closed documents (suppressedPaths) and already open documents are skipped.
   async reconcileWatchRule(watchId: string): Promise<string[]> {
     const before = this.#store.payload;
     const rule = before.watchRules.find((candidate) => candidate.watchId === watchId);
@@ -1835,7 +1866,7 @@ export class DocumentService {
         .filter((record) => record.isOpen && record.canonicalPath !== null)
         .map((record) => record.canonicalPath),
     );
-    // すでに開いている文書と、閉じた文書は、本文を読まずに除く。
+    // Already open and closed documents are excluded without reading their content.
     const candidates = new Map<string, DocumentFormat>();
     for (const path of await scanWatchTarget(rule)) {
       const format = formatOfPath(path);
@@ -1845,13 +1876,17 @@ export class DocumentService {
       candidates.set(candidatePath, format);
     }
     if (candidates.size === 0) return [];
-    // 件数は本文を読む前に確かめる。上限を超える量をmemoryへ載せない。
+    // The count is checked before reading content. Never load more than the limit into memory.
     if (before.openOrder.length + candidates.size > LIMITS.openDocuments) {
-      throw new VdeError('E_LIMIT_EXCEEDED', '開ける文書数の上限を超えます。', {
-        limit: 'openDocuments',
-        max: LIMITS.openDocuments,
-        actual: before.openOrder.length + candidates.size,
-      });
+      throw new VdeError(
+        'E_LIMIT_EXCEEDED',
+        'The limit on the number of open documents would be exceeded.',
+        {
+          limit: 'openDocuments',
+          max: LIMITS.openDocuments,
+          actual: before.openOrder.length + candidates.size,
+        },
+      );
     }
 
     return this.#withPathLocks(candidates.keys(), () =>
@@ -1871,27 +1906,31 @@ export class DocumentService {
         (record) => record.isOpen && record.sourceKind === 'file' && record.canonicalPath === path,
       );
 
-    // 合計の大きさは、開いている文書の分も含めて、読み込みながら確かめる。
+    // The total size, including open documents, is checked while reading.
     let totalBytes = openSourceBytes(before);
     const discovered: Incoming[] = [];
     for (const [path, format] of candidates) {
-      // 順番を待っている間に開かれた文書と、閉じられた文書は読まない。
+      // Documents opened or closed while waiting in the queue are not read.
       if (isOpenPath(before, path) || rule.suppressedPaths.includes(path)) continue;
       let loaded;
       try {
         loaded = await this.#readSource(path);
       } catch (error) {
-        // 個別のerrorで監視全体を止めない。次の走査でもう一度試す。
+        // A single error does not stop the whole watch. Try again on the next scan.
         if (error instanceof VdeError) continue;
         throw error;
       }
       if (loaded.canonicalPath !== path) continue;
       totalBytes += loaded.bytes.byteLength;
       if (totalBytes > LIMITS.openSourceBytes) {
-        throw new VdeError('E_LIMIT_EXCEEDED', '開いている文書の合計の大きさが上限を超えます。', {
-          limit: 'openSourceBytes',
-          max: LIMITS.openSourceBytes,
-        });
+        throw new VdeError(
+          'E_LIMIT_EXCEEDED',
+          'The total size of open documents would exceed the limit.',
+          {
+            limit: 'openSourceBytes',
+            max: LIMITS.openSourceBytes,
+          },
+        );
       }
       try {
         discovered.push(
@@ -1899,7 +1938,7 @@ export class DocumentService {
             {
               sourceKind: 'file',
               canonicalPath: loaded.canonicalPath,
-              // 監視で見つけた文書は、ruleの起点からの相対pathで表示する。
+              // Documents found by watch are displayed relative to the rule's root.
               displayPath: displayPathOf(rule.root, loaded.canonicalPath),
               pathSegments: loaded.canonicalPath.split(sep).filter((segment) => segment !== ''),
               format,
@@ -1909,7 +1948,7 @@ export class DocumentService {
               signature: loaded.signature,
             },
             this.#existingFile(loaded.canonicalPath),
-            // ruleの登録時に指定されたassets-rootを、後から見つけた文書にも使う。
+            // The assets-root given when the rule was registered also applies to documents found later.
             rule.assetsRoot === null
               ? INHERITED_ASSETS
               : { ...INHERITED_ASSETS, root: rule.assetsRoot },
@@ -1926,13 +1965,13 @@ export class DocumentService {
     const registered = await this.#store.transaction((tx) => {
       const state = tx.state;
       const current = state.watchRules.find((candidate) => candidate.watchId === watchId);
-      // 走査の間にruleが外されていたら、登録しない。
+      // If the rule was removed during the scan, register nothing.
       if (!current) return [];
       const added: string[] = [];
       for (const item of discovered) {
         const path = item.canonicalPath as string;
         if (current.suppressedPaths.includes(path)) continue;
-        // ここで扱うのは、新しく登録する文書だけ。開いている文書には触れない。
+        // Only newly registered documents are handled here. Open documents are not touched.
         if (isOpenPath(state, path)) continue;
         const outcome = this.#upsert(tx, item, { reopen: true });
         appliedItems.push(item);
@@ -1958,13 +1997,13 @@ export class DocumentService {
     };
   }
 
-  // ruleだけを外す。そのruleで開いた文書は閉じない（仕様5.3）。
+  // Removes only the rule. Documents opened by it are not closed (spec 5.3).
   async removeWatchRule(rawParams: unknown): Promise<ServiceResult<WatchListResult>> {
     const watchId = (rawParams as { watchId?: unknown }).watchId;
     await this.#store.transaction((tx) => {
       const index = tx.state.watchRules.findIndex((rule) => rule.watchId === watchId);
       if (index === -1) {
-        throw new VdeError('E_WATCH_NOT_FOUND', '監視ruleが見つかりません。', {
+        throw new VdeError('E_WATCH_NOT_FOUND', 'The watch rule was not found.', {
           watchId: typeof watchId === 'string' ? watchId : null,
         });
       }

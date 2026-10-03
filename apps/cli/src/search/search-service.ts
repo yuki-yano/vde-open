@@ -26,17 +26,17 @@ import { codePointLength, uniqueTokens } from './tokenize.ts';
 export type DocumentSearchState = 'ready' | 'indexing' | 'excluded';
 
 export interface SearchService {
-  // 現在の文書の状態に合わせて、indexを更新する。変更の通知のたびに呼ぶ。
+  // Updates the index to the current document state. Called on every change notification.
   sync(): void;
   search(rawParams: unknown): Promise<ServiceResult<SearchResult>>;
-  // 一覧に出す、文書ごとの検索の状態。
+  // Per-document search state shown in the list.
   stateOf(documentId: string): DocumentSearchState;
-  // 保持している項目の数（資源の漏れの確認に使う。daemon.diagnostics）。
+  // Counts of retained entries (used to check for resource leaks; daemon.diagnostics).
   retainedCounts(): Record<string, number>;
-  // workerのheapと、indexが保持している項目の数を返す。workerがなければnull。
-  // collectGarbageなら、indexを今の文書の状態に合わせ終え、workerで片付けとGCを行ってから測る
-  // （資源の漏れの検査のため。それ以外の診断では、同期などの処理を起こさない）。
-  // signalが中断されたら（daemonの停止）、待つのをやめてE_DAEMON_STOPPINGで終える。
+  // Returns the worker heap and the counts of entries the index retains. null if there is no worker.
+  // With collectGarbage, first syncs the index to the current document state, then cleans up and runs GC in the worker before measuring
+  // (for leak checks; other diagnostics do not trigger work such as syncing).
+  // If the signal is aborted (the daemon is stopping), stops waiting and fails with E_DAEMON_STOPPING.
   diagnostics(collectGarbage: boolean, signal?: AbortSignal): Promise<WorkerDiagnostics | null>;
   close(): Promise<void>;
 }
@@ -46,15 +46,15 @@ export interface SearchServiceOptions {
   cursors: CursorCodec;
   now?: () => Date;
   workerPath?: string;
-  // 1件の処理を待つ上限。超えたらworkerを止めて作り直す。
+  // Max wait per request. When exceeded, the worker is stopped and recreated.
   timeoutMs?: number;
-  // 文書を節へ分ける解析。daemonでは、解析用のworkerへ出す（検索のworkerを、重い解析で塞がない）。
-  // 指定がなければ、このthreadで解析する。
+  // Analysis that splits documents into sections. The daemon offloads it to the parse worker (so heavy analysis does not block the search worker).
+  // Without it, analysis runs on this thread.
   analyze?: (format: DocumentFormat, text: string) => Promise<DocumentAnalysis>;
 }
 
-// 1文書のindexの状態。revisionは、indexへ入れた（入れようとした）版。
-// metaKeyは、indexへ入れたtitle・path・順番。本文が同じでも、これが変われば入れ直す。
+// Index state of one document. revision is the revision indexed (or attempted).
+// metaKey is the indexed title, path, and order. If it changes, the document is re-indexed even with the same content.
 interface Indexed {
   revision: string;
   metaKey: string;
@@ -81,13 +81,13 @@ type Work = SearchWorkerRequest extends infer Request
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 const WAIT_STEP_MS = 20;
-// 1回の依頼で索引へ入れる量。小さく分けて、その間に検索の依頼を挟めるようにする。
-// 重さは、索引に入れるfield（本文・見出し）の長さ（UTF-16のcode unit）。
+// Amount indexed per request. Kept small so search requests can interleave.
+// The weight is the length of the indexed fields (body and heading) in UTF-16 code units.
 const APPEND_BATCH_WEIGHT = 65_536;
-// 1回の依頼で入れる部分の数。本文の短い節が多い文書でも、1回の量を抑える。
+// Number of parts per request. Keeps each request small even for documents with many short sections.
 const APPEND_BATCH_PARTS = 256;
 
-// 検索の対象になるのは、開いていて、いまの内容を読めている文書だけ（仕様9.1、8.5）。
+// Only open documents whose current content is readable are searchable (spec 9.1, 8.5).
 function searchable(record: DocumentRecord | undefined): record is DocumentRecord {
   return record !== undefined && record.isOpen && record.sourceState === 'ready';
 }
@@ -113,7 +113,7 @@ function metaKeyOf(meta: IndexedMeta): string {
   return JSON.stringify([meta.title, meta.displayPath, meta.canonicalPath, meta.order]);
 }
 
-// hitの並び。cursorは、この並びが変わっていないときだけ続きを返す（抜けや重複を黙って返さない）。
+// The order of hits. A cursor continues only if this order is unchanged (never silently returns gaps or duplicates).
 function digestOf(hits: SearchHit[]): string {
   const hash = createHash('sha256');
   for (const hit of hits) hash.update(`${hit.documentId}\0${hit.revision}\0${hit.sectionId}\n`);
@@ -123,7 +123,7 @@ function digestOf(hits: SearchHit[]): string {
 function staleCursor(reason: 'catalog' | 'results', catalogVersion: number): VdeError {
   return new VdeError(
     'E_CURSOR_STALE',
-    '検索の対象か結果が変わりました。最初から検索し直してください。',
+    'The search targets or results have changed. Search again from the start.',
     { reason, catalogVersion, restart: true },
   );
 }
@@ -133,7 +133,7 @@ function analyzeInProcess(format: DocumentFormat, text: string): Promise<Documen
     return Promise.resolve(analyzeDocument(text, format));
   } catch (error) {
     return Promise.reject(
-      new VdeError('E_PARSE_FAILED', '文書を解析できませんでした。', {
+      new VdeError('E_PARSE_FAILED', 'The document could not be analyzed.', {
         reason: error instanceof ParseLimitError ? `limit-${error.limit}` : 'parse-error',
       }),
     );
@@ -147,14 +147,14 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
   const workerPath = options.workerPath ?? searchWorkerPath();
   const analyze = options.analyze ?? analyzeInProcess;
   const indexed = new Map<string, Indexed>();
-  // workerが内容を持ちうる文書（入れている途中か、確定済み）。登録の記録（indexed）とは別に持つ。
+  // Documents the worker may hold (being added or committed). Kept separately from the indexing records (indexed).
   const resident = new Set<string>();
   const pending = new Map<number, Pending>();
   let worker: Worker | null = null;
   let nextId = 1;
   let closed = false;
   let indexedAt = now().toISOString();
-  // indexの更新は1件ずつ行う。実行中に依頼が来たら、終わった後にもう一度だけ行う。
+  // Index updates run one at a time. A request during a run triggers exactly one more run afterwards.
   let syncing: Promise<void> | null = null;
   let syncRequested = false;
 
@@ -166,7 +166,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     pending.clear();
   };
 
-  // workerを止める。indexはworkerの中にあるので、止めたら全部の文書を入れ直す。
+  // Stops the worker. The index lives in the worker, so every document is re-indexed afterwards.
   const discardWorker = () => {
     const current = worker;
     worker = null;
@@ -187,32 +187,31 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
       if (reply.ok) waiter.resolve(reply.result);
       else
         waiter.reject(
-          new VdeError('E_INDEX_NOT_READY', '検索のindexを更新できませんでした。', {
+          new VdeError('E_INDEX_NOT_READY', 'The search index could not be updated.', {
             reason: reply.reason,
           }),
         );
     });
     created.on('error', () => {
       if (worker === created) discardWorker();
-      failAll(new VdeError('E_INDEX_NOT_READY', '検索のindexを使えません。'));
+      failAll(new VdeError('E_INDEX_NOT_READY', 'The search index is not available.'));
     });
     worker = created;
     return created;
   };
 
   const request = <T>(work: Work): Promise<T> => {
-    if (closed)
-      return Promise.reject(new VdeError('E_DAEMON_STOPPING', 'daemonは停止処理中です。'));
+    if (closed) return Promise.reject(new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));
     return new Promise<T>((resolve, reject) => {
       const id = nextId;
       nextId += 1;
       const timer = setTimeout(() => {
-        // 終わらない処理は、workerごと止めて回収する。
+        // A request that never finishes is reclaimed by stopping the whole worker.
         pending.delete(id);
         discardWorker();
-        failAll(new VdeError('E_INDEX_NOT_READY', '検索のindexを使えません。'));
+        failAll(new VdeError('E_INDEX_NOT_READY', 'The search index is not available.'));
         reject(
-          new VdeError('E_INDEX_NOT_READY', '検索のindexの処理が時間内に終わりませんでした。', {
+          new VdeError('E_INDEX_NOT_READY', 'The search index operation did not finish in time.', {
             reason: 'timeout',
           }),
         );
@@ -222,8 +221,8 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     });
   };
 
-  // 解析用のworkerは、ほかの文書の解析が時間切れになると作り直され、待っていた解析もすべて失敗として返る。
-  // その巻き添えで、この文書を「解析できない」と記録しないよう、1回だけやり直す。
+  // The parse worker is recreated when another document's analysis times out, and every waiting analysis fails too.
+  // Retry once so this document is not recorded as unanalyzable because of that.
   const analyzeOnce = async (format: DocumentFormat, text: string): Promise<DocumentAnalysis> => {
     try {
       return await analyze(format, text);
@@ -234,12 +233,12 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     }
   };
 
-  // 文書を解析して、本文を何回かに分けてindexへ入れる。
-  // 分けて送る間に、検索の依頼を挟める（workerが1回に塞がる時間を短くする）。
+  // Analyzes the document and adds its content to the index in several steps.
+  // Search requests can interleave between steps (keeps each worker busy period short).
   const reindex = async (entry: RevisionRecord, meta: IndexedMeta): Promise<void> => {
     const { documentId, revision } = meta;
     const metaKey = metaKeyOf(meta);
-    // 入れている間に、閉じたり版が進んだりしていないか。workerを作り直した場合も、続けない。
+    // Whether the document was closed or advanced while being added. Also stops if the worker was recreated.
     const current = () => {
       const latest = store.payload.documents[documentId];
       return (
@@ -250,7 +249,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     };
     const attempt: Indexed = { revision, metaKey, state: 'indexing', code: null };
     indexed.set(documentId, attempt);
-    // 途中でやめる。入れかけた内容を捨て、この登録の記録を消す（次の同期で、改めて入れ直す）。
+    // Stops midway. Discards the partial content and removes this indexing record (the next sync re-indexes).
     const giveUp = async (begun: boolean) => {
       if (begun) await request({ op: 'abort', documentId }).catch(() => undefined);
       if (indexed.get(documentId) === attempt) indexed.delete(documentId);
@@ -262,10 +261,10 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
         await giveUp(false);
         return;
       }
-      // workerがこの文書を持ちうる。閉じたときに、確定済みの内容も含めて消すために覚えておく。
+      // The worker may now hold this document. Remember it so a close removes it, including committed content.
       resident.add(documentId);
       await request({ op: 'begin', meta });
-      // 1回に送る量は、索引に入れるfieldの長さと、部分の数で区切る。
+      // Each request is bounded by the indexed field length and the number of parts.
       for (const batch of batchesOf(partsOf(sections), APPEND_BATCH_WEIGHT, APPEND_BATCH_PARTS)) {
         if (!current()) {
           await giveUp(true);
@@ -283,16 +282,16 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
       }
     } catch (error) {
       const code = error instanceof VdeError ? error.code : 'E_INTERNAL';
-      // workerを止めた場合は、indexedが空になっている。この文書だけ、失敗として記録する。
+      // If the worker was stopped, indexed is empty. Record only this document as failed.
       indexed.set(documentId, { revision, metaKey, state: 'failed', code });
     }
   };
 
-  // stateとindexを比べ、差分を1件ずつ反映する。
+  // Compares state with the index and applies the differences one at a time.
   const syncOnce = async (): Promise<void> => {
     const state = store.payload;
-    // 検索の対象でなくなった文書を、workerから消す。登録の記録を消した後でも、
-    // workerに確定済みの内容が残っていることがあるので、workerが持ちうる文書も調べる。
+    // Removes documents that are no longer searchable from the worker. Committed content may remain in the worker
+    // even after the indexing record is removed, so documents the worker may hold are checked too.
     for (const documentId of new Set([...indexed.keys(), ...resident])) {
       if (searchable(state.documents[documentId])) continue;
       indexed.delete(documentId);
@@ -310,15 +309,15 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
       const meta = metaOf(record, entry, order);
       const metaKey = metaKeyOf(meta);
       const known = indexed.get(documentId);
-      // 同期は1件ずつ行うので、ここで「登録中」の記録が残っていれば、それは終わらなかった登録のもの。入れ直す。
+      // Syncs run one at a time, so an "indexing" record here belongs to an indexing that did not finish. Re-index.
       if (known && known.revision === revision && known.state !== 'indexing') {
         if (known.metaKey === metaKey) continue;
         if (known.state === 'failed') {
-          // 解析できなかった版は、titleなどが変わっても入れ直さない（版が変わるまで失敗のまま）。
+          // A revision that could not be analyzed is not re-indexed when title etc. change (stays failed until the revision changes).
           known.metaKey = metaKey;
           continue;
         }
-        // title・path・順番だけが変わった。本文は入れ直さずに、属性だけを変える。
+        // Only title, path, or order changed. Update the attributes without re-indexing the content.
         const updated = await request<boolean>({ op: 'meta', meta }).catch(() => false);
         if (updated) {
           const latest = indexed.get(documentId);
@@ -349,8 +348,8 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     return syncing;
   };
 
-  // 文書のindexの状態。いまの版と属性（title・path・順番）に追い付いていれば'ready'。
-  // 待機の判定、検索結果の集計、一覧の表示で、同じ判定を使う。
+  // Index state of a document. 'ready' if it has caught up with the current revision and attributes (title, path, order).
+  // The same check is used for waiting, result aggregation, and the list display.
   const syncStateOf = (
     state: StatePayload,
     documentId: string,
@@ -366,7 +365,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     return known.metaKey === metaKeyOf(metaOf(record, entry, order)) ? 'ready' : 'indexing';
   };
 
-  // 対象の文書のindexが、いまの版と属性に追い付いているか（解析できない文書は、待たない）。
+  // Whether the index of the target documents has caught up with the current revision and attributes (unanalyzable documents are not waited for).
   const settled = (state: StatePayload, targets: string[]): boolean =>
     targets.every((documentId) => syncStateOf(state, documentId) !== 'indexing');
 
@@ -375,10 +374,10 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     for (const documentId of documents) {
       const record = state.documents[documentId];
       if (!record)
-        throw new VdeError('E_DOCUMENT_NOT_FOUND', '文書が見つかりません。', { documentId });
-      // 閉じた文書は、検索の対象にできない。
+        throw new VdeError('E_DOCUMENT_NOT_FOUND', 'The document was not found.', { documentId });
+      // A closed document cannot be a search target.
       if (!record.isOpen)
-        throw new VdeError('E_DOCUMENT_NOT_OPEN', '文書は開かれていません。', { documentId });
+        throw new VdeError('E_DOCUMENT_NOT_OPEN', 'The document is not open.', { documentId });
     }
     return [...new Set(documents)];
   };
@@ -388,7 +387,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
       return { indexed: indexed.size, resident: resident.size, pending: pending.size };
     },
     diagnostics(collectGarbage, signal) {
-      // indexの同期と、workerの応答（片付けを待つ）の両方を、停止で待つのをやめられるようにする。
+      // Both the index sync and the worker reply (waiting for cleanup) can be abandoned on shutdown.
       const work = (collectGarbage ? sync() : Promise.resolve()).then(() =>
         worker === null || signal?.aborted === true
           ? null
@@ -408,18 +407,18 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     async search(rawParams) {
       const params = searchParamsSchema.parse(rawParams);
       if (codePointLength(params.query) > LIMITS.searchQueryCodePoints) {
-        throw new VdeError('E_INVALID_ARGUMENT', 'queryが長すぎます。', {
+        throw new VdeError('E_INVALID_ARGUMENT', 'The query is too long.', {
           limit: 'searchQueryCodePoints',
           max: LIMITS.searchQueryCodePoints,
         });
       }
       if (uniqueTokens(params.query).length > LIMITS.searchTerms) {
-        throw new VdeError('E_INVALID_ARGUMENT', '検索語が多すぎます。', {
+        throw new VdeError('E_INVALID_ARGUMENT', 'Too many search terms.', {
           limit: 'searchTerms',
           max: LIMITS.searchTerms,
         });
       }
-      // cursorは、発行したときのquery・条件・一覧の版・hitの並びにだけ使える。
+      // A cursor is valid only for the query, options, catalog version, and hit order it was issued with.
       const signature = createHash('sha256')
         .update(
           JSON.stringify([params.query, params.mode, params.limit, params.documents.toSorted()]),
@@ -431,7 +430,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
         if (payload['signature'] !== signature) {
           throw new VdeError(
             'E_INVALID_CURSOR',
-            'cursorが別の検索のものです。最初から検索し直してください。',
+            'The cursor belongs to another search. Search again from the start.',
             { reason: 'query' },
           );
         }
@@ -445,14 +444,14 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
         }
       }
 
-      // 検索は、始めた時点の一覧に対して行う。indexがその状態へ追い付くのを待つのは、
-      // 検索を始めてから決まった時間まで（やり直しの分も含める）。
-      // indexへは小さく分けて入れているので、待った後の検索は、入れている途中の1回分しか待たない。
+      // The search runs against the list as of when it started. Waiting for the index to catch up is bounded
+      // by a fixed time from the start of the search (including retries).
+      // Indexing is done in small steps, so after the wait the search waits for at most one in-progress step.
       const deadline = Date.now() + LIMITS.searchIndexWaitMs;
       let state = store.payload;
       let hits: SearchHit[] = [];
       let dropped = false;
-      // 続きの取得では、やり直さない。変わっていたら、最初からの検索を求める。
+      // Continuations are not retried. If anything changed, a fresh search is required.
       const attempts = resume === null ? 2 : 1;
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         state = store.payload;
@@ -473,12 +472,12 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
           if (error instanceof VdeError && error.code === 'E_DAEMON_STOPPING') throw error;
           throw new VdeError(
             'E_INDEX_NOT_READY',
-            '検索のindexを使えません。',
+            'The search index is not available.',
             {},
             { cause: error },
           );
         }
-        // 返す前に、いまの状態で確かめる。閉じた文書、版が変わった文書、titleやpathが変わった文書のhitは返さない。
+        // Check against the current state before returning. Hits from closed documents or documents whose revision, title, or path changed are dropped.
         const current = store.payload;
         hits = found.filter((hit) => {
           const record = current.documents[hit.documentId];
@@ -491,12 +490,12 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
         });
         dropped = hits.length !== found.length || current.catalogVersion !== state.catalogVersion;
         state = current;
-        // 検索している間に状態が変わった。1回だけやり直す。
+        // The state changed during the search. Retry once.
         if (!dropped) break;
       }
 
       if (resume !== null) {
-        // 検索を待っている間に一覧が変わった、または、hitの並びが前のページを返したときと違う。
+        // The list changed while waiting, or the hit order differs from when the previous page was returned.
         if (dropped || state.catalogVersion !== resume.catalogVersion) {
           throw staleCursor('catalog', state.catalogVersion);
         }
@@ -511,7 +510,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
         const record = state.documents[documentId];
         if (!record) continue;
         if (record.sourceState !== 'ready') {
-          // 読めなくなった文書の、前の内容を、いまの検索結果として返さない。
+          // Old content of a document that became unreadable is not returned as a current result.
           failedDocuments.push({ documentId, code: `source-${record.sourceState}` });
           continue;
         }
@@ -524,15 +523,15 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
           });
         } else searchedDocuments += 1;
       }
-      // 対象の文書が1件も検索できなかった。0件の結果は、「見つからなかった」と区別できないので返さない。
+      // None of the target documents could be searched. An empty result would be indistinguishable from "not found", so fail instead.
       if (targets.length > 0 && searchedDocuments === 0) {
-        throw new VdeError('E_INDEX_NOT_READY', '検索できる文書がありません。', {
+        throw new VdeError('E_INDEX_NOT_READY', 'No documents can be searched.', {
           failedDocuments,
           indexingDocuments,
         });
       }
 
-      // hitは分割しない。件数と、配列のJSON表現の大きさの、どちらかの上限まで返す。
+      // Hits are not split. Returns up to either the count limit or the JSON size limit of the array.
       const offset = resume?.offset ?? 0;
       const page: SearchHit[] = [];
       let bytes = 2;
@@ -543,7 +542,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
           if (page.length === 0) {
             throw new VdeError(
               'E_MAX_BYTES_TOO_SMALL',
-              '--max-bytesが小さく、1件目の結果を返せません。',
+              '--max-bytes is too small to return the first result.',
               { requiredBytes: bytes + size },
             );
           }
@@ -584,7 +583,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
 
     async close() {
       closed = true;
-      failAll(new VdeError('E_DAEMON_STOPPING', 'daemonは停止処理中です。'));
+      failAll(new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));
       const current = worker;
       worker = null;
       if (current) await current.terminate();

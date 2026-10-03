@@ -1,116 +1,132 @@
 # vde-open
 
-Agentと人が同じ資料を見ながら作業するための、ローカルの文書viewerです。MarkdownとHTMLの文書を開いて、browserの管理画面で読み、Agentは同じ文書をCLIから検索・読み取りできます。Agentから人へ質問し、人が管理画面で回答を確定することもできます。
+[日本語](README.ja.md)
 
-- 開いた文書だけを、Agentが検索・読み取りできます（閉じた文書やdirectory全体は探しません）。
-- 文書を保存すると、管理画面の表示が自動で更新されます。
-- HTMLは、管理画面と分けた別のoriginで、scriptを動かさずに表示します（既定）。
-- 状態はlocalのdaemonが持ち、外部のserviceへ送りません。
+A local document viewer for agents and people who work from the same material. Open Markdown and HTML documents, read them in a management UI in the browser, and let an agent search and read the same documents from the CLI. An agent can also ask a person questions, and the person submits the answers from the management UI.
 
-## 導入
+- Agents can search and read only the documents you opened (closed documents and whole directories are never searched).
+- When you save a document, the management UI updates automatically.
+- HTML is shown on a separate origin from the management UI, without running scripts (by default).
+- The state is kept by a local daemon and is never sent to an external service.
 
-Node.js 24が必要です（このrepositoryは`mise.toml`で24.21.0に固定しています）。
+## Install
+
+Node.js 24 or later is required (this repository pins 24.21.0 in `mise.toml`).
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm build
-pnpm test:pack          # artifacts/vde-open-0.1.0.tgz を作り、別のdirectoryへ導入して確かめる
-npm install ./artifacts/vde-open-0.1.0.tgz   # 使うproject（またはglobal）へ導入する
+pnpm test:pack                              # builds artifacts/vde-open-0.1.0.tgz and verifies an install in a separate directory
+bun add -g ./artifacts/vde-open-0.1.0.tgz   # recommended: user-level install into ~/.bun/bin
 ```
 
-導入は、`.zshrc`などのshellの設定を変えません。導入時にbuildやscriptも実行しません（tarballは依存をすべて同梱しています）。npmへの公開はしていません。
+- We recommend installing it once per user with Bun. `~/.bun/bin` does not depend on which Node.js version is active, so switching Node.js versions (with mise and similar tools) does not remove `vo`. Bun is only used to install; the commands run on Node.js (`#!/usr/bin/env node`), so Node.js 24 or later must be on your `PATH`. Running it on the Bun runtime (`bun --bun`) is not tested.
+- `npm install -g ./artifacts/vde-open-0.1.0.tgz` also works, but it installs into the prefix of the active Node.js version.
+- Installing it per project is not recommended. There is one daemon per user, so different versions in different projects would talk to the same daemon.
+- Always start the path with `./`. Without it, the path is treated as a GitHub repository name.
 
-## `vde-open`と`vo`
+Installing does not change shell files such as `.zshrc`, and runs no build or install scripts (the tarball bundles every dependency). The package is not published to npm.
 
-同じCLIを2つの名前で導入します。どちらで実行しても、同じstateとdaemonを使います。
+## `vde-open` and `vo`
 
-- `vde-open` … 正式な名前。
-- `vo` … 短い名前。
+The same CLI is installed under two names. Both use the same state and daemon.
 
-既に別の`vo`がある場合（ほかのtoolのcommandやaliasなど）は、導入でそれを上書きしたり消したりしません。
+- `vde-open`: the full name.
+- `vo`: the short name.
 
-- 導入先のbin（`npm install -g`ならnpmのglobalのbin）に別の`vo`のfileがあると、npmは`EEXIST`で導入をやめます。`--force`を付けると既存の`vo`を置き換えるので、付けないでください。projectへ導入して`npx vde-open`で使うか、別のprefix（例: `npm install -g --prefix ~/.local/vde-open ./artifacts/vde-open-0.1.0.tgz`）へ導入して、そのbinの`vde-open`を使ってください。
-- 別の場所の`vo`やaliasは、PATHの順番で先に見つかったものが動きます。その場合は`vde-open`を使ってください。短い名前を使いたいときは、自分のshellで別名（例: `alias vdo=vde-open`）を設定してください。
+If you already have a different `vo` (another tool's command, an alias, and so on), installing never overwrites or deletes it.
 
-## 基本の使い方
+- If the install target's bin directory (for `npm install -g`, npm's global bin) already has another `vo` file, npm stops with `EEXIST`. Do not use `--force`; it replaces the existing `vo`. Install with Bun instead, or into another prefix (for example `npm install -g --prefix ~/.local/vde-open ./artifacts/vde-open-0.1.0.tgz`) and use `vde-open` from that bin directory.
+- For a `vo` or alias elsewhere, whichever comes first on `PATH` runs. In that case, use `vde-open`. If you want a short name, define an alias in your shell (for example `alias vdo=vde-open`).
+
+## Basic usage
 
 ```bash
-vo open README.md docs/design.md        # 文書を開く（daemonがなければ起動する）
-vo open docs -w                          # directoryを開き、新しい文書も追う
-vo ui                                    # 管理画面を開く（一回限りのURL）
-vo list --json                           # 開いている文書の一覧
-vo search "認証の設計" --json            # 開いている文書を検索する
-vo read <documentId> --section sec_0003 --json   # 節を読む
-vo close docs/design.md                  # 一覧から外す（fileは消さない）
-vo daemon stop                           # daemonを止める
+vo open README.md docs/design.md        # open documents (starts the daemon if needed)
+vo open docs -w                          # open a directory and follow new documents
+vo ui                                    # open the management UI (one-time URL)
+vo list --json                           # list open documents
+vo search "認証の設計" --json            # search open documents
+vo read <documentId> --section sec_0003 --json   # read a section
+vo close docs/design.md                  # remove from the list (the file is not deleted)
+vo daemon stop                           # stop the daemon
 ```
 
-Agentからの使い方は [docs/agent-usage.md](docs/agent-usage.md) にあります（検索→見出しの一覧→節の順に読む、回答の往復、HTMLから回答案を受け取る方法）。
+How agents should use it is described in [docs/agent-usage.md](docs/agent-usage.md): read in the order search, outline, then sections; ask questions and get answers; receive draft answers from HTML.
 
-## 検索の範囲
+## Agent skill
 
-- 検索の対象は、**いま開いている文書だけ**です。閉じた文書、開いていないfile、directory全体は探しません。
-- 結果は、検索した時点の公開済みの版です。結果の`revision`を指定して読むと、検索したときと同じ内容を返します。
-- 日本語は`Intl.Segmenter`で語に分けます。完全な一致、前方一致、1文字違いまでの英数字の語の一致（fuzzy）を使います。
-- 管理画面では`Cmd/Ctrl+K`で検索できます。
+[`skills/vde-open/SKILL.md`](skills/vde-open/SKILL.md) is a skill that teaches an agent (Claude Code, Codex, and others that read `SKILL.md`) when and how to use `vo`. It is also included in the package. To use it, link or copy the directory into your agent's skill directory:
 
-## HTMLの表示の制限
+```bash
+ln -s "$PWD/skills/vde-open" ~/.claude/skills/vde-open   # Claude Code
+ln -s "$PWD/skills/vde-open" ~/.codex/skills/vde-open    # Codex
+```
 
-- 既定（static）では、scriptを動かしません。script、event属性、iframe・object・embed、base、自動の移動（meta refresh）、formの送信先、外部の画像・CSS・fontを取り除きます。linkは表示の中では押せず、「文書中のlink」の一覧から開きます。
-- 読み込めるのは、文書が参照する、assets-root（既定は文書のあるdirectory）の中のfileだけです。`.env`や`.git`など名前が「.」で始まるfileは読み込みません。範囲は`--assets-root`、個別のfileは`--asset`で指定します。
-- `--html-mode interactive`を指定したHTMLだけ、scriptを動かします。scriptが読み込めるのは登録したfileだけで、管理画面・管理API・fileには触れられません。ただし、表示の中でのpageの移動などを含め、すべての外部への通信を止めるものではありません。自分やAgentが用意した、信頼できるHTMLだけで使ってください。daemonを起動し直すと、管理画面で許可し直すまで静的表示になります。
-- 元の文書と表示が違う点は、管理画面の「元の文書と表示が異なる点」に、対象・理由・対処とともに表示します。
+## Search scope
 
-## Markdownの表示の制限
+- Search covers **only the documents that are open right now**. Closed documents, files that are not open, and whole directories are never searched.
+- Results come from the revision that was published when you searched. Reading with the `revision` from a result returns the same content that was searched.
+- Japanese text is split into words with `Intl.Segmenter`. Search uses exact matches, prefix matches, and fuzzy matches of alphanumeric words with up to one character of difference.
+- In the management UI, press `Cmd/Ctrl+K` to search.
 
-Markdownは、TanStack Markdown 1.0.0で表示します。CommonMark・GFMの完全な互換ではありません。
+## HTML display limits
 
-- 生のHTMLは描画せず、文字として表示します。
-- 外部の画像は読み込みません。文書と同じdirectoryの下の画像だけを表示します。
-- コードの色付けは、JS・JSX・TS・TSX・JSON・YAML・HTML・CSS・Bash・Markdownだけです。256KiBを超えるコードと、それ以外の言語は色を付けません。
-- 解析が2秒で終わらない文書や、要素が10万を超える・入れ子が64段を超える文書は、原文で表示します。
+- By default (static), scripts do not run. Scripts, event attributes, iframe/object/embed, base, automatic navigation (meta refresh), form targets, and external images, CSS, and fonts are removed. Links cannot be clicked inside the view; open them from "Links in this document".
+- Only files that the document references, inside the assets root (by default the document's directory), can be loaded. Files whose names start with "." such as `.env` and `.git` are never loaded. Set the scope with `--assets-root` and individual files with `--asset`.
+- Scripts run only in HTML opened with `--html-mode interactive`. Scripts can load only registered files and cannot reach the management UI, the management API, or other files. This does not block every outbound request, including navigation inside the view. Use it only with HTML that you or the agent prepared and trust. After the daemon restarts, the HTML shows as a static view until you allow scripts again in the management UI.
+- Differences between the original document and the view are listed under "Differences from the original document" in the management UI, with what is affected, why, and what to do.
 
-## 状態の保存先と停止
+## Markdown display limits
 
-- 状態（開いている文書、版、質問と回答）は、次の場所に保存します。`VDE_OPEN_HOME`で変えられます。
+Markdown is rendered with TanStack Markdown 1.0.0. It is not fully compatible with CommonMark or GFM.
+
+- Raw HTML is not rendered; it is shown as text.
+- External images are not loaded. Only images under the document's directory are shown.
+- Code is highlighted only for JS, JSX, TS, TSX, JSON, YAML, HTML, CSS, Bash, and Markdown. Code larger than 256 KiB and other languages are not highlighted.
+- Documents that cannot be parsed within 2 seconds, or that have more than 100,000 elements or more than 64 levels of nesting, are shown as source.
+
+## Where the state is stored, and stopping
+
+- The state (open documents, revisions, questions and answers) is stored here. Change it with `VDE_OPEN_HOME`.
   - macOS: `~/Library/Application Support/vde-open`
-  - Linux: `$XDG_STATE_HOME/vde-open`（未設定なら`~/.local/state/vde-open`）
+  - Linux: `$XDG_STATE_HOME/vde-open` (or `~/.local/state/vde-open` if unset)
   - Windows: `%LOCALAPPDATA%\vde-open`
-- daemonは`vo daemon stop`で止めます。どちらの名前で起動したdaemonも止められます。`vo daemon status`で状態を確かめられます。
-- 管理画面の配色・表示の切り替えなどはbrowserに保存します。開いている文書はdaemonの状態に従います。
+- Stop the daemon with `vo daemon stop`. It stops the daemon no matter which name started it. Check its status with `vo daemon status`.
+- Management UI preferences such as the color theme and the view mode are stored in the browser. The open documents follow the daemon's state.
 
-## 人への質問と回答
+## Asking a person and getting answers
 
 ```bash
-vo ask questions.json --view review.md --json    # 文書を開いて質問する
+vo ask questions.json --view review.md --json    # open a document and ask about it
 vo feedback wait <requestId> --timeout 120 --json
 vo feedback ack <requestId> --submission-id <id> --json
 ```
 
-人は管理画面の回答panelで回答し、「Agentへ回答を送信」を押したときだけ回答が確定します。送信の前の入力（回答案）はAgentへ返しません。passwordやAPI keyなどの秘密を入力してもらう用途には使わないでください。
+The person answers in the answer panel of the management UI. The answers are submitted only when they press "Send answers to the agent". Input before submission (the draft answer) is never returned to the agent. Do not use this to collect secrets such as passwords or API keys.
 
-## トラブルシュート
+## Troubleshooting
 
-| 症状 | 対処 |
+| Symptom | What to do |
 |---|---|
-| `vo`で別のcommandが動く | `vde-open`を使うか、PATHの順番を確かめる |
-| 管理画面が「CLIから開き直してください」になる | `vo ui`で新しいURLを開く（URLは一回限り。daemonを起動し直すと前の画面は使えない） |
-| 終了コード8（daemonへ接続できない・起動できない） | `vo daemon status`で確かめ、`vo doctor`で残ったfileを調べる |
-| 画像やCSSが表示されない | 「元の文書と表示が異なる点」を開き、`--assets-root`・`--asset`で登録する |
-| 検索で見つからない | `vo list --json`で、文書が開いていて`searchState`が`ready`かを確かめる |
+| `vo` runs a different command | Use `vde-open`, or check the order of `PATH` |
+| The management UI asks you to open it again from the CLI | Open a new URL with `vo ui` (each URL works once; after the daemon restarts, earlier windows stop working) |
+| Exit code 8 (cannot connect to or start the daemon) | Check with `vo daemon status`, and look for leftover files with `vo doctor` |
+| Images or CSS are not shown | Open "Differences from the original document" and register them with `--assets-root` or `--asset` |
+| Search does not find a document | Check with `vo list --json` that the document is open and its `searchState` is `ready` |
 
-## 検証した範囲
+## Verified scope
 
-| 範囲 | 状態 |
+| Scope | Status |
 |---|---|
-| macOS（Darwin 25.6.0、arm64）、Node.js 24.21.0 | 検証済み（format・lint・typecheck・unit／integration・build・pack・e2e） |
-| Linux、Windows | 未検証（CI定義は`.github/workflows/ci.yml`にあるが、未実行） |
-| browser（macOS） | Chromium（PlaywrightのChrome Headless Shell）は全件を検証済み。Firefox 155・WebKit 26.6（Playwright 1.63.0）は、表示の隔離・CSP・HTMLとの通信・認証の試験（`pnpm test:e2e:cross`）を検証済み |
-| browser（未検証） | Firefox・WebKitのそれ以外の画面操作（検索、回答panel、狭い画面、1,000文書の一覧など）は未検証 |
-| Markdownの構文 | 上の「Markdownの表示の制限」のとおり。CommonMark・GFMの全体は検証していない |
+| macOS (Darwin 25.6.0, arm64), Node.js 24.21.0 | Verified (format, lint, typecheck, unit/integration, build, pack, e2e) |
+| Linux, Windows | Not verified yet (CI is defined in `.github/workflows/ci.yml`) |
+| Browsers (macOS) | Chromium (Playwright's Chrome Headless Shell): the full suite is verified. Firefox 155 and WebKit 26.6 (Playwright 1.63.0): the view isolation, CSP, HTML bridge, and authentication tests (`pnpm test:e2e:cross`) are verified |
+| Browsers (not verified) | Other UI interactions in Firefox and WebKit (search, answer panel, narrow screens, a list of 1,000 documents) are not verified |
+| Markdown syntax | As described in "Markdown display limits" above. Full CommonMark and GFM are not verified |
 
-詳しい記録は [docs/implementation-status.md](docs/implementation-status.md)、性能の実測は [docs/performance.md](docs/performance.md)、設計は [docs/architecture.md](docs/architecture.md) と [docs/security-model.md](docs/security-model.md) にあります。
+More details: [docs/performance.md](docs/performance.md) (measurements), [docs/architecture.md](docs/architecture.md) and [docs/security-model.md](docs/security-model.md) (design). Development records (in Japanese): [docs/implementation-status.md](docs/implementation-status.md), [docs/dependency-validation.md](docs/dependency-validation.md), and [docs/adr/](docs/adr/).
 
 ## License
 
-UNLICENSED（非公開）。同梱した依存のlicenseは、それぞれのpackageに従います。一覧とlicenseの本文は、配布物の`THIRD_PARTY_NOTICES.md`にあります（`pnpm build`がbundleの内容から作ります）。
+[MIT](LICENSE). Bundled dependencies keep their own licenses. Their list and license texts are in `THIRD_PARTY_NOTICES.md` in the package (generated by `pnpm build` from what was bundled).

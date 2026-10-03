@@ -1,4 +1,4 @@
-// IPCのwire形式。UTF-8のNDJSONで、1 frameが1つのJSON object（仕様6.3）。
+// IPC wire format. UTF-8 NDJSON, where one frame is one JSON object (spec 6.3).
 
 export type FrameErrorKind = 'too-large' | 'invalid-json' | 'not-an-object';
 
@@ -6,7 +6,7 @@ export class FrameError extends Error {
   readonly kind: FrameErrorKind;
 
   constructor(kind: FrameErrorKind) {
-    super(`IPC frameが不正です: ${kind}`);
+    super(`Invalid IPC frame: ${kind}`);
     this.name = 'FrameError';
     this.kind = kind;
   }
@@ -15,7 +15,7 @@ export class FrameError extends Error {
 const NEWLINE = 0x0a;
 
 export function encodeFrame(value: unknown): Buffer {
-  // JSON.stringifyは文字列中の改行をescapeするので、frame内に生の改行は入らない。
+  // JSON.stringify escapes newlines inside strings, so a frame never contains a raw newline.
   return Buffer.from(`${JSON.stringify(value)}\n`, 'utf8');
 }
 
@@ -24,7 +24,7 @@ export class FrameDecoder {
   #chunks: Buffer[] = [];
   #size = 0;
 
-  // 上限は認証の前後で変わるので、都度問い合わせる。
+  // The limit differs before and after authentication, so query it each time.
   constructor(limit: () => number) {
     this.#limit = limit;
   }

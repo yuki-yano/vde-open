@@ -27,7 +27,7 @@ function hitOf(index: number): SearchHit {
 
 let container: HTMLElement;
 let root: Root;
-// 検索の応答を、試験の側で返す。
+// Search responses are returned by the test.
 let pending: Array<(result: SearchResult) => void>;
 let selected: SearchHit[];
 let scrolled: string[];
@@ -70,8 +70,8 @@ async function until(condition: () => boolean, timeoutMs = 3000): Promise<void> 
   while (!condition() && Date.now() < deadline) await settle(10);
 }
 function input(): HTMLInputElement {
-  const found = document.querySelector<HTMLInputElement>('input[aria-label="検索する語句"]');
-  if (!found) throw new Error('検索の入力欄が見つかりません');
+  const found = document.querySelector<HTMLInputElement>('input[aria-label="Search query"]');
+  if (!found) throw new Error('Search input not found');
   return found;
 }
 function type(value: string): void {
@@ -87,7 +87,7 @@ function press(key: string, isComposing = false): KeyboardEvent {
 const options = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')];
 const activeIndex = () =>
   options().findIndex((option) => option.getAttribute('aria-selected') === 'true');
-// 入力から検索の依頼までの待ち（200ms）を過ぎ、依頼が届くのを待って応答する。
+// Wait past the delay between typing and the search request (200ms), wait for the request, and respond.
 async function respond(count: number): Promise<void> {
   await until(() => pending.length > 0);
   pending.shift()?.({
@@ -96,8 +96,8 @@ async function respond(count: number): Promise<void> {
   await until(() => options().length === count);
 }
 
-describe('UX-002 検索の結果のkeyboard操作', () => {
-  it('変換中の↑↓とEnterは入力欄へ渡し、選択も移動もしない', async () => {
+describe('UX-002 keyboard navigation of search results', () => {
+  it('passes ↑↓ and Enter during IME composition to the input without selecting or jumping', async () => {
     await until(() => document.querySelector('input') !== null);
     type('検索');
     await respond(3);
@@ -107,16 +107,16 @@ describe('UX-002 検索の結果のkeyboard操作', () => {
     await settle();
     expect(activeIndex()).toBe(0);
     expect(selected).toEqual([]);
-    // 変換を終えた後の↓は、結果を選ぶ。
+    // After composition ends, ↓ selects a result.
     expect(press('ArrowDown').defaultPrevented).toBe(true);
     await until(() => activeIndex() === 1);
     expect(activeIndex()).toBe(1);
   });
 
-  it('結果を待っている間の↓で選択を失わず、届いた結果の先頭をEnterで開ける', async () => {
+  it('does not lose the selection on ↓ while waiting for results, and Enter opens the first result once they arrive', async () => {
     await until(() => document.querySelector('input') !== null);
     type('検索');
-    // 検索の依頼（入力から200ms後）より前に、画面の更新を挟んで↓を押す。
+    // Press ↓ before the search request (200ms after typing), with a screen update in between.
     await settle(20);
     press('ArrowDown');
     await settle(20);
@@ -129,7 +129,7 @@ describe('UX-002 検索の結果のkeyboard操作', () => {
     expect(selected.map((hit) => hit.sectionId)).toEqual(['sec_0000']);
   });
 
-  it('下へ移動すると、選んだ行を見える位置へscrollし、末尾で止まる', async () => {
+  it('moving down scrolls the selected row into view and stops at the end', async () => {
     await until(() => document.querySelector('input') !== null);
     type('検索');
     await respond(20);

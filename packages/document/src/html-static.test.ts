@@ -13,7 +13,7 @@ interface Found {
   foreign: number;
 }
 
-// 出力をbrowserと同じ規則で解析し直し、残っている要素と属性を集める。
+// Re-parse the output with the browser's rules and collect the remaining elements and attributes.
 function inspect(html: string): Found {
   const found: Found = { tags: [], attributes: [], foreign: 0 };
   const stack: HtmlNode[] = [parse(html, { scriptingEnabled: false })];
@@ -71,8 +71,8 @@ function assertInert(html: string): void {
   }
 }
 
-describe('SEC-005 実行される内容の除去', () => {
-  it('script、event属性、埋め込み、文書内のSVGとMathMLを取り除き、理由を記録する', () => {
+describe('SEC-005 removal of executed content', () => {
+  it('removes scripts, event attributes, embeds, and inline SVG and MathML, and records the reasons', () => {
     const result = render(`<!doctype html><html><head><title>t</title>
       <script>window.pwned = 1</script><script src="app.js"></script></head>
       <body onload="pwn()"><h1 id="t" onclick="pwn()">見出し</h1>
@@ -101,7 +101,7 @@ describe('SEC-005 実行される内容の除去', () => {
     expect(result.diagnostics.find((entry) => entry.code === 'embed-removed')?.count).toBe(5);
   });
 
-  it('noscriptの中身を通常の要素として扱い、その中の実行される内容も取り除く', () => {
+  it('treats the contents of noscript as ordinary elements and removes executed content inside them too', () => {
     const result = render(
       '<noscript><img src=x onerror=pwn()><iframe src="//evil.example"></iframe><p>代替の文</p></noscript>',
     );
@@ -111,7 +111,7 @@ describe('SEC-005 実行される内容の除去', () => {
     expect(result.html).not.toContain('pwn');
   });
 
-  it('templateの中と、解析の規則の違いを突く入力でも、実行される内容を残さない', () => {
+  it('leaves no executed content even inside template or with inputs that exploit parsing rule differences', () => {
     const sources = [
       '<template shadowrootmode="open"><script>pwn()</script><p onclick="pwn()">t</p></template>',
       '<style><!--</style><img src=x onerror=pwn()>--></style>',
@@ -132,19 +132,19 @@ describe('SEC-005 実行される内容の除去', () => {
     for (const source of sources) {
       const result = render(source);
       assertInert(result.html);
-      // 出力をもう一度変換しても、取り除くものが残っていない。
+      // Transforming the output again finds nothing left to remove.
       const again = render(result.html);
       expect(inspect(again.html).tags, source).toEqual(inspect(result.html).tags);
     }
   });
 
-  it('要素の数が上限を超える文書は、変換せずにerrorにする', () => {
+  it('a document with more elements than the limit is an error instead of being transformed', () => {
     expect(() => render('<p>x</p>'.repeat(60_000))).toThrow(ParseLimitError);
   });
 });
 
-describe('SEC-006 自動の遷移と外部への要求の除去', () => {
-  it('meta refresh、base、iframe、ping、先読みの指定、formの送信先を取り除く', () => {
+describe('SEC-006 removal of automatic navigation and external requests', () => {
+  it('removes meta refresh, base, iframe, ping, resource hints and form targets', () => {
     const result = render(`<html><head>
       <meta http-equiv="refresh" content="0;url=https://evil.example/">
       <meta http-equiv="Content-Security-Policy" content="script-src *">
@@ -166,7 +166,7 @@ describe('SEC-006 自動の遷移と外部への要求の除去', () => {
     expect(result.html).not.toContain('evil.example');
     expect(result.html).toContain('<meta charset="utf-8">');
     expect(result.html).toContain('<meta name="viewport"');
-    // formの部品は表示だけ残す。
+    // Form controls are kept for display only.
     expect(result.html).toContain('<input name="q">');
     expect(inspect(result.html).attributes).not.toContain('autofocus');
     expect(codes(result)).toEqual(
@@ -182,7 +182,7 @@ describe('SEC-006 自動の遷移と外部への要求の除去', () => {
     );
   });
 
-  it('linkは無効にして一覧へ取り出し、文書内の移動だけを残す', () => {
+  it('disables links, lists them, and keeps only in-document navigation', () => {
     const result = render(`<a href="#sec">文書内</a>
       <a href="https://example.com/a">  外部の
         ページ </a><a href="mailto:a@example.com">mail</a>
@@ -212,7 +212,7 @@ describe('SEC-006 自動の遷移と外部への要求の除去', () => {
   });
 });
 
-describe('登録済みのassetだけを残す', () => {
+describe('keeps only registered assets', () => {
   const assets: Record<string, AssetRole> = {
     'img/a.png': 'image',
     'img/b.svg': 'svg',
@@ -222,7 +222,7 @@ describe('登録済みのassetだけを残す', () => {
     'data.json': 'data',
   };
 
-  it('登録済みの画像とstylesheetは相対URLへ直して残し、それ以外は理由を付けて外す', () => {
+  it('keeps registered images and stylesheets rewritten to relative URLs, and removes the rest with a reason', () => {
     const result = render(
       `<link rel="stylesheet" href="/css/site.css?v=2"><link rel="stylesheet" href="https://evil.example/x.css">
        <link rel="alternate stylesheet" href="/css/site.css">
@@ -259,7 +259,7 @@ describe('登録済みのassetだけを残す', () => {
     expect(result.html).toContain('.b{color:red}');
     expect(result.html).toContain('.c{background:url(data:image/png;base64,AAAA)}');
     expect(result.html).toContain('style="background:url(../img/b.svg);color:blue"');
-    // 画像でないfileや、個別に登録しただけのdataは、画像としては出さない。
+    // Non-image files and data registered only individually are not output as images.
     expect(result.html).not.toContain('data.json');
     expect(result.html).not.toContain('app.js');
 
@@ -282,7 +282,7 @@ describe('登録済みのassetだけを残す', () => {
     expect(result.diagnostics.find((entry) => entry.target === 'docs/missing.png')?.count).toBe(2);
   });
 
-  it('文書が参照するlocal fileの候補を、文脈とともに集める', () => {
+  it('collects candidate local files the document references, with their context', () => {
     const references = scanHtmlReferences(
       `<link rel="stylesheet" href="a.css"><link rel="icon" href="icon.png">
        <script src="app.js"></script><img src="a.png" srcset="b.png 2x">
@@ -306,12 +306,12 @@ describe('登録済みのassetだけを残す', () => {
         { url: 't.png', context: 'image' },
       ]),
     );
-    // 先読みの指定、linkの行き先、動画は、assetの候補にしない。
+    // Resource hints, link targets and videos are not asset candidates.
     const urls = references.map((reference) => reference.url);
     for (const url of ['icon.png', 'v.mp4', 'e.html']) expect(urls, url).not.toContain(url);
   });
 
-  it('通常の構造とlayoutの指定を保つ', () => {
+  it('preserves ordinary structure and layout rules', () => {
     const source = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>設計</title>
 <style>.grid{display:grid;grid-template-columns:1fr 2fr;gap:1rem}.card{display:flex}</style></head>
 <body class="doc"><header><h1 id="top">設計書</h1></header>
@@ -320,12 +320,12 @@ describe('登録済みのassetだけを残す', () => {
 <details open=""><summary>補足</summary><pre>  整形済み  </pre></details></section></main></body></html>`;
     const result = render(source);
     expect(result.diagnostics).toEqual([]);
-    // 構造、class、id、data属性、style属性、layoutのCSSが、そのまま出力される。
+    // Structure, class, id, data attributes, style attributes and layout CSS are output unchanged.
     expect(result.html).toBe(source);
   });
 });
 
-describe('interactive（scriptを動かす表示）の変換', () => {
+describe('interactive view transform', () => {
   function interactive(source: string, assets: Record<string, AssetRole> = {}, sdkScript?: string) {
     return transformStaticHtml({
       source,
@@ -336,7 +336,7 @@ describe('interactive（scriptを動かす表示）の変換', () => {
     });
   }
 
-  it('inlineのscript、登録済みのscript file、event属性は残す。未登録・外部のscriptは要素ごと外す', () => {
+  it('keeps inline scripts, registered script files and event attributes, and removes unregistered and external scripts as whole elements', () => {
     const result = interactive(
       `<script>window.a = 1</script>
        <script type="module" src="/js/app.mjs"></script>
@@ -348,7 +348,7 @@ describe('interactive（scriptを動かす表示）の変換', () => {
     const found = inspect(result.html);
     expect(found.tags.filter((tag) => tag === 'script')).toHaveLength(2);
     expect(result.html).toContain('<script>window.a = 1</script>');
-    // root-relativeの参照は、文書からの相対pathへ直す。
+    // Root-relative references are rewritten to paths relative to the document.
     expect(result.html).toContain('<script type="module" src="../js/app.mjs"></script>');
     expect(found.attributes).toContain('onclick');
     expect(result.diagnostics).toEqual(
@@ -360,7 +360,7 @@ describe('interactive（scriptを動かす表示）の変換', () => {
     );
   });
 
-  it('埋め込み・base・自動の遷移・先読み・formの送信先・popup・download・pingはstaticと同じく外す', () => {
+  it('removes embeds, base, automatic navigation, resource hints, form targets, popups, download and ping, as in static', () => {
     const result = interactive(
       `<base href="https://evil.example/"><meta http-equiv="refresh" content="0;url=https://evil.example/">
        <link rel="preconnect" href="https://evil.example"><link rel="modulepreload" href="x.js">
@@ -390,7 +390,7 @@ describe('interactive（scriptを動かす表示）の変換', () => {
     );
   });
 
-  it('SDKは、headの最初のscriptとして入れる。scriptを閉じる文字列を含むSDKは入れない', () => {
+  it('inserts the SDK as the first script in head, and refuses an SDK containing a closing script tag', () => {
     const result = interactive(
       '<!doctype html><html><head><script>first()</script></head><body></body></html>',
       {},
@@ -400,7 +400,7 @@ describe('interactive（scriptを動かす表示）の変換', () => {
     expect(() => interactive('<p>x</p>', {}, 'a = "</script><script>evil()"')).toThrow();
   });
 
-  it('staticでは、同じ文書のscriptとevent属性を残さず、SDKも入れない', () => {
+  it('in static, the same document keeps no scripts or event attributes, and the SDK is not inserted', () => {
     const result = transformStaticHtml({
       source: '<script>1</script><button onclick="go()">押す</button>',
       documentLogicalPath: 'index.html',

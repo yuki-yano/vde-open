@@ -9,7 +9,7 @@ export interface FeedbackState {
   reload: () => void;
 }
 
-// 質問を取得する。signal（質問の変更の通知の回数）と、文書の版が変わるたびに取り直す。
+// Fetch the question. Refetch whenever signal (the number of question-change notifications) or the document revision changes.
 export function useFeedback(
   api: Api,
   requestId: string | null,
@@ -18,7 +18,7 @@ export function useFeedback(
 ): FeedbackState {
   const [loaded, setLoaded] = useState<{
     requestId: string;
-    // 取得のきっかけ（通知の回数・文書の版・取り直しの指示）。
+    // What triggered the fetch (notification count, document revision, reload request).
     fetchedFor: string;
     request: FeedbackForUi | null;
     error: string | null;
@@ -40,7 +40,7 @@ export function useFeedback(
           requestId,
           fetchedFor: trigger,
           request: current?.requestId === requestId ? current.request : null,
-          error: reason instanceof Error ? reason.message : '質問を取得できませんでした。',
+          error: reason instanceof Error ? reason.message : 'Could not fetch the question.',
         }));
       },
     );

@@ -17,7 +17,7 @@ export function isNonce(value: unknown): value is string {
   return Buffer.from(value, 'base64').byteLength >= NONCE_BYTES;
 }
 
-// 同じstream上の相互確認（仕様6.3）。key自体はwireへ出さない。
+// Mutual verification on the same stream (spec 6.3). The key itself never goes on the wire.
 export function computeProof(
   key: Buffer,
   role: ProofRole,

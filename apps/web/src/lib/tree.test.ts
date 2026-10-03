@@ -32,8 +32,8 @@ function shape(nodes: TreeNode[]): unknown {
   );
 }
 
-describe('DOC-007 pathからのtree', () => {
-  it('共通の親directoryを省き、子が1つのdirectoryを1行へまとめる', () => {
+describe('DOC-007 tree from paths', () => {
+  it('drops the shared parent directories and collapses single-child directories into one row', () => {
     const tree = buildTree([
       document('/home/u/proj/docs/a.md'),
       document('/home/u/proj/docs/guide/deep/b.md'),
@@ -42,16 +42,16 @@ describe('DOC-007 pathからのtree', () => {
     expect(shape(tree)).toEqual([{ docs: [{ 'guide/deep': ['b.md'] }, 'a.md'] }, 'README.md']);
   });
 
-  it('rootが違う同名のdocs/a.mdが衝突せず、どのrootかを見分けられる', () => {
+  it('same-named docs/a.md under different roots do not collide and the root can be told apart', () => {
     const tree = buildTree([document('/work/alpha/docs/a.md'), document('/work/beta/docs/a.md')]);
     expect(shape(tree)).toEqual([{ 'alpha/docs': ['a.md'] }, { 'beta/docs': ['a.md'] }]);
   });
 
-  it('文書が1件なら、親directoryを出さずにfileだけを表示する', () => {
+  it('with a single document, shows only the file without its parent directories', () => {
     expect(shape(buildTree([document('/a/b/c.md')]))).toEqual(['c.md']);
   });
 
-  it('stdinと生成文書は、表示上の親にまとめる', () => {
+  it('groups stdin and generated documents under a display-only parent', () => {
     const tree = buildTree([document('/a/b.md'), document(null, 'レビュー')]);
     expect(shape(tree)).toEqual(['b.md', { [INPUT_GROUP_NAME]: ['レビュー'] }]);
   });

@@ -33,7 +33,7 @@ const list = async () =>
 const rules = async () =>
   (await t.run(['watch', 'list', '--json'])).json<{ watchRules: WatchRule[] }>().data.watchRules;
 
-// 監視による反映を待つ。条件を満たすまで一覧を取り直す。
+// Wait for the watch to reflect changes. Re-fetch the list until the condition holds.
 async function waitFor<T>(
   read: () => Promise<T>,
   done: (value: T) => boolean,
@@ -50,8 +50,8 @@ async function waitFor<T>(
 
 const titles = (documents: Summary[]) => documents.map((document) => document.title).toSorted();
 
-describe('DOC-004 更新の追従と、--watchでの新しい文書の登録', () => {
-  it('通常のopenでも、そのfileの更新を追う', async () => {
+describe('DOC-004 following updates, and registering new documents with --watch', () => {
+  it('a normal open also follows updates to that file', async () => {
     const path = t.write('a.md', '# 版1\n');
     const before = (await t.run(['open', 'a.md', '--json'])).json<{ documents: Summary[] }>().data
       .documents[0] as Summary;
@@ -59,17 +59,17 @@ describe('DOC-004 更新の追従と、--watchでの新しい文書の登録', (
     const after = await waitFor(
       list,
       (documents) => documents[0]?.title === '版2',
-      '更新が反映されない',
+      'update not reflected',
     );
     expect(after[0]?.documentId).toBe(before.documentId);
     expect(after[0]?.revision).not.toBe(before.revision);
-    // --watchを付けていないので、同じdirectoryの新しいfileは登録しない。
+    // Without --watch, new files in the same directory are not registered.
     t.write('b.md', '# 追加\n');
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(titles(await list())).toEqual(['版2']);
   });
 
-  it('--watchを付けたdirectoryに現れた文書だけを登録する', async () => {
+  it('registers only documents that appear in a directory opened with --watch', async () => {
     t.write('docs/a.md', '# a\n');
     const opened = (await t.run(['open', 'docs', '--watch', '--json'])).json<{
       documents: Summary[];
@@ -83,57 +83,57 @@ describe('DOC-004 更新の追従と、--watchでの新しい文書の登録', (
     t.write('docs/notes.txt', 'x');
     t.write('docs/.hidden.md', '# hidden\n');
     t.write('docs/sub/d.md', '# d\n');
-    await waitFor(list, (documents) => documents.length === 3, '新しい文書が登録されない');
+    await waitFor(list, (documents) => documents.length === 3, 'new documents not registered');
     await new Promise((resolve) => setTimeout(resolve, 500));
-    // 対象の拡張子だけ。隠しfileと、再帰していないdirectoryの下は対象外。
+    // Only target extensions. Hidden files and files under non-recursed directories are skipped.
     expect(titles(await list())).toEqual(['a', 'b', 'c']);
   });
 
-  it('globの--watchは、patternに合う新しい文書を登録する', async () => {
+  it('--watch with a glob registers new documents matching the pattern', async () => {
     t.write('notes/x.md', '# x\n');
     await t.run(['open', 'notes/**/*.md', '--watch', '--json']);
     t.write('notes/deep/y.md', '# y\n');
     t.write('notes/deep/z.html', '<title>z</title>');
-    await waitFor(list, (documents) => documents.length === 2, 'globの対象が登録されない');
+    await waitFor(list, (documents) => documents.length === 2, 'glob matches not registered');
     expect(titles(await list())).toEqual(['x', 'y']);
   });
 
-  it('対象がまだ無いdirectoryでも、--watchでruleを登録できる', async () => {
+  it('a rule can be registered with --watch even for a directory with no matches yet', async () => {
     mkdirSync(join(t.work, 'empty'));
     const opened = await t.run(['open', 'empty', '--watch', '--json']);
     expect(opened.exitCode).toBe(0);
     t.write('empty/first.md', '# 最初\n');
-    await waitFor(list, (documents) => documents.length === 1, '最初の文書が登録されない');
+    await waitFor(list, (documents) => documents.length === 1, 'first document not registered');
   });
 });
 
-describe('DOC-005 / DOC-006 閉じた文書の扱いとruleの解除', () => {
-  it('閉じた文書は再走査でも再起動でも復帰せず、明示的に開くと復帰する', async () => {
+describe('DOC-005 / DOC-006 handling closed documents and removing rules', () => {
+  it('a closed document does not come back on rescan or restart, and comes back when opened explicitly', async () => {
     t.write('docs/a.md', '# a\n');
     t.write('docs/b.md', '# b\n');
     await t.run(['open', 'docs', '--watch', '--json']);
     await t.run(['close', 'docs/a.md', '--json']);
     expect((await rules())[0]?.suppressedPaths).toHaveLength(1);
 
-    // 新しいfileで再走査を起こしても、閉じた文書は戻らない。
+    // Even when a new file triggers a rescan, the closed document does not return.
     t.write('docs/c.md', '# c\n');
-    await waitFor(list, (documents) => documents.length === 2, 'cが登録されない');
+    await waitFor(list, (documents) => documents.length === 2, 'c not registered');
     expect(titles(await list())).toEqual(['b', 'c']);
 
-    // SYS-003（部分検証）: 再起動しても、閉じた文書の扱いとruleを復元する。
+    // SYS-003 (partial): the handling of closed documents and the rules are restored after a restart.
     await t.run(['daemon', 'restart', '--json']);
     t.write('docs/d.md', '# d\n');
-    await waitFor(list, (documents) => documents.length === 3, 'dが登録されない');
+    await waitFor(list, (documents) => documents.length === 3, 'd not registered');
     expect(titles(await list())).toEqual(['b', 'c', 'd']);
     expect((await rules())[0]?.suppressedPaths).toHaveLength(1);
 
-    // 明示的に開くと、復帰させない扱いを解除する。
+    // Opening explicitly lifts the suppression.
     await t.run(['open', 'docs/a.md', '--json']);
     expect(titles(await list())).toEqual(['a', 'b', 'c', 'd']);
     expect((await rules())[0]?.suppressedPaths).toEqual([]);
   });
 
-  it('ruleの解除は監視だけを止め、文書は残す', async () => {
+  it('removing a rule stops only the watch and keeps the documents', async () => {
     t.write('docs/a.md', '# a\n');
     await t.run(['open', 'docs', '--watch', '--json']);
     const watchId = (await rules())[0]?.watchId as string;
@@ -152,7 +152,7 @@ describe('DOC-005 / DOC-006 閉じた文書の扱いとruleの解除', () => {
     expect(unknown.json().error.code).toBe('E_WATCH_NOT_FOUND');
   });
 
-  it('DOC-016（部分検証）close --allは、文書と監視ruleをすべて外す', async () => {
+  it('DOC-016 (partial) close --all removes all documents and watch rules', async () => {
     t.write('docs/a.md', '# a\n');
     await t.run(['open', 'docs', '--watch', '--json']);
     await t.run(['close', '--all', '--json']);
@@ -164,43 +164,47 @@ describe('DOC-005 / DOC-006 閉じた文書の扱いとruleの解除', () => {
   });
 });
 
-describe('DOC-009 保存の途中の状態', () => {
-  it('renameでの保存、削除後の作り直し、連続した追記の後、最終的な内容を反映する', async () => {
+describe('DOC-009 intermediate states while saving', () => {
+  it('reflects the final content after a save by rename, a recreate after delete, and consecutive appends', async () => {
     const path = t.write('a.md', '# 最初\n');
     await t.run(['open', 'a.md', '--json']);
 
-    // 一時fileへ書いてrenameで置き換える。
+    // Write to a temporary file and replace by rename.
     writeFileSync(`${path}.tmp`, '# rename後\n');
     renameSync(`${path}.tmp`, path);
-    await waitFor(list, (documents) => documents[0]?.title === 'rename後', 'renameが反映されない');
+    await waitFor(list, (documents) => documents[0]?.title === 'rename後', 'rename not reflected');
 
-    // 削除してすぐ作り直す。一覧からは消えない。
+    // Delete and recreate immediately. It does not disappear from the list.
     rmSync(path);
     writeFileSync(path, '# 作り直し\n');
     const recreated = await waitFor(
       list,
       (documents) => documents[0]?.title === '作り直し',
-      '作り直しが反映されない',
+      'recreate not reflected',
     );
     expect(recreated).toHaveLength(1);
     expect(recreated[0]?.sourceState).toBe('ready');
 
-    // 短い間隔で書き足す。途中の内容ではなく、最後の内容になる。
+    // Append at short intervals. The result is the last content, not an intermediate one.
     for (let index = 1; index <= 10; index += 1) {
       writeFileSync(path, `# 追記 ${String(index)}\n`);
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    await waitFor(list, (documents) => documents[0]?.title === '追記 10', '最後の内容にならない');
+    await waitFor(
+      list,
+      (documents) => documents[0]?.title === '追記 10',
+      'did not become the last content',
+    );
   });
 
-  it('fileが消えたら状態を示し、戻ったら元に戻る', async () => {
+  it('shows the state when the file disappears, and recovers when it returns', async () => {
     const path = t.write('a.md', '# a\n');
     await t.run(['open', 'a.md', '--json']);
     rmSync(path);
     const missing = await waitFor(
       list,
       (documents) => documents[0]?.sourceState === 'missing',
-      'missingにならない',
+      'did not become missing',
     );
     expect(missing).toHaveLength(1);
 
@@ -208,13 +212,13 @@ describe('DOC-009 保存の途中の状態', () => {
     await waitFor(
       list,
       (documents) => documents[0]?.sourceState === 'ready' && documents[0]?.title === '戻った',
-      'readyに戻らない',
+      'did not return to ready',
     );
   });
 });
 
-describe('daemonが止まっている間の変更', () => {
-  it('再起動した後、手動のrefreshなしで取り込む', async () => {
+describe('changes while the daemon is stopped', () => {
+  it('picks them up after a restart without a manual refresh', async () => {
     const path = t.write('a.md', '# 停止前\n');
     const before = (await t.run(['open', 'a.md', '--json'])).json<{ documents: Summary[] }>().data
       .documents[0] as Summary;
@@ -222,11 +226,11 @@ describe('daemonが止まっている間の変更', () => {
 
     writeFileSync(path, '# 停止中の変更\n');
 
-    // listはdaemonを起動するだけで、fileを読み直す指示は出さない。
+    // list only starts the daemon and does not ask to re-read files.
     const after = await waitFor(
       list,
       (documents) => documents[0]?.title === '停止中の変更',
-      '停止中の変更が反映されない',
+      'change while stopped not reflected',
     );
     expect(after[0]?.documentId).toBe(before.documentId);
     expect(after[0]?.revision).not.toBe(before.revision);
@@ -235,8 +239,8 @@ describe('daemonが止まっている間の変更', () => {
   });
 });
 
-describe('refreshとoutline', () => {
-  it('refreshはfileを読み直し、outlineは見出しの構造を返す', async () => {
+describe('refresh and outline', () => {
+  it('refresh re-reads the file, and outline returns the heading structure', async () => {
     t.write('a.md', '# 概要\n\n## 手順\n\n### 詳細\n');
     const opened = (await t.run(['open', 'a.md', '--json'])).json<{ documents: Summary[] }>();
     const id = opened.data.documents[0]?.documentId as string;

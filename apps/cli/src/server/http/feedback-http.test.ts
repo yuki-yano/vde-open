@@ -21,11 +21,11 @@ import { startManagementServer, type ManagementServer } from './management.ts';
 
 const questionnaire: Questionnaire = {
   schemaVersion: 1,
-  title: 'ログイン画面の確認',
+  title: 'Login screen review',
   fieldOrder: ['layout'],
   answerSchema: {
     type: 'object',
-    properties: { layout: { type: 'string', title: '採用案', enum: ['A', 'B'] } },
+    properties: { layout: { type: 'string', title: 'Chosen option', enum: ['A', 'B'] } },
     required: ['layout'],
     additionalProperties: false,
   },
@@ -53,11 +53,11 @@ interface Started {
   feedback: FeedbackService;
   events: DocumentEvent[];
   requestId: string;
-  // 送信の条件（送信IDだけ、呼び出し側が決める）。
+  // Submit parameters (only the submission ID is chosen by the caller).
   params: (submissionId: string) => Record<string, unknown>;
 }
 
-// 質問を作って回答案を保存し、管理HTTPを起動する。
+// Create a question, save a draft answer, and start the management HTTP server.
 async function start(fs: StoreFs): Promise<Started> {
   const opened = await StateStore.open({ root: join(base, 'home'), fs });
   store = opened;
@@ -118,7 +118,7 @@ interface Sent {
   response: Promise<{ status: number; body: { ok: boolean; data?: FeedbackForUi } }>;
 }
 
-// 管理UIと同じ形で送信する。requestを返すので、応答の前に接続を切れる。
+// Submit in the same form as the management UI. Returns the request so the connection can be cut before the response.
 function submit(started: Started, submissionId: string): Sent {
   const url = new URL(started.origin);
   const body = JSON.stringify(started.params(submissionId));
@@ -161,9 +161,9 @@ function submit(started: Started, submissionId: string): Sent {
 const submittedEvents = (events: DocumentEvent[]) =>
   events.filter((event) => event.type === 'feedback-changed' && event.status === 'submitted');
 
-describe('FB-013 送信の通信切断と再送', () => {
-  it('commitの前に通信が切れても、同じ送信IDの再送は同じ結果になり、1回だけ確定する', async () => {
-    // 有効にした後の最初のrename（stateのcommit）を、合図があるまで止める。
+describe('FB-013 disconnect during submit and resend', () => {
+  it('even if the connection drops before commit, a resend with the same submission ID yields the same result and submits only once', async () => {
+    // Hold the first rename (state commit) after arming until signaled.
     const gate = { armed: false, reached: () => undefined, release: () => undefined } as {
       armed: boolean;
       reached: () => void;
@@ -191,12 +191,12 @@ describe('FB-013 送信の通信切断と再送', () => {
     const first = submit(started, submissionId);
     first.response.catch(() => undefined);
     await reached;
-    // commitの前に、管理UI側の接続が切れた。まだ確定していない。
+    // The management UI's connection dropped before commit. Not yet submitted.
     first.request.destroy();
     await expect(first.response).rejects.toThrow();
     expect(started.feedback.get({ requestId: started.requestId }).data.status).toBe('pending');
 
-    // 管理UIは、同じ送信IDで再送する。最初の送信のcommitは、まだ終わっていない。
+    // The management UI resends with the same submission ID. The first submit's commit has not finished yet.
     const again = submit(started, submissionId);
     await new Promise((resolve) => setTimeout(resolve, 50));
     gate.release();
@@ -212,7 +212,7 @@ describe('FB-013 送信の通信切断と再送', () => {
     );
   });
 
-  it('保存に失敗した送信には成功を返さない。同じ送信IDの再送で確定する', async () => {
+  it('does not return success for a submit whose save failed. A resend with the same submission ID submits', async () => {
     let failWrites = false;
     const started = await start({
       ...nodeStoreFs,
@@ -239,7 +239,7 @@ describe('FB-013 送信の通信切断と再送', () => {
   });
 });
 
-describe('11.7 HTMLからの回答案の保存と、待っている間の権限の失効', () => {
+describe('11.7 saving a draft answer from the HTML, and grant expiry while waiting', () => {
   interface Bridged {
     origin: string;
     token: string;
@@ -252,12 +252,12 @@ describe('11.7 HTMLからの回答案の保存と、待っている間の権限�
     grant: string;
     sessionId: string;
     gate: { arm: () => Promise<void>; release: () => void };
-    // stateの更新（transaction）を待ち行列へ登録した数と、その数に達するまで待つ関数。
+    // Number of state updates (transactions) enqueued, and a function that waits until that count is reached.
     queued: () => number;
     untilQueued: (count: number) => Promise<void>;
   }
 
-  // interactiveのHTMLへ質問し、SDKを入れた表示の権限を発行する。stateのcommit（rename）を止められる。
+  // Ask a question on an interactive HTML and issue a render grant with the SDK injected. The state commit (rename) can be held.
   async function startBridged(): Promise<Bridged> {
     let armed = false;
     let reached: () => void = () => undefined;
@@ -279,7 +279,7 @@ describe('11.7 HTMLからの回答案の保存と、待っている間の権限�
       },
     });
     store = opened;
-    // transactionの登録を数える。待ち行列に並んだことを、時間ではなく、登録の事実で確かめる。
+    // Count transaction registrations. Confirm queueing by the fact of registration, not by timing.
     let queued = 0;
     const waiters: Array<{ count: number; resolve: () => void }> = [];
     const transaction = opened.transaction.bind(opened);
@@ -315,7 +315,7 @@ describe('11.7 HTMLからの回答案の保存と、待っている間の権限�
       isStopping: () => false,
       heartbeatMs: 60_000,
     });
-    writeFileSync(join(base, 'app.html'), '<p>本文</p>');
+    writeFileSync(join(base, 'app.html'), '<p>Body</p>');
     const document = (
       await documents.open({ cwd: base, paths: ['app.html'], htmlMode: 'interactive' })
     ).data.documents[0] as { documentId: string };
@@ -359,7 +359,7 @@ describe('11.7 HTMLからの回答案の保存と、待っている間の権限�
     };
   }
 
-  // 管理UIと同じ形で、管理APIを呼ぶ。
+  // Call the management API in the same form as the management UI.
   function call(
     bridged: Bridged,
     method: string,
@@ -398,38 +398,41 @@ describe('11.7 HTMLからの回答案の保存と、待っている間の権限�
 
   it.each([
     [
-      '表示の権限を返却した',
+      'the render grant is released',
       (bridged: Bridged) => bridged.render.release(bridged.sessionId, [bridged.grant]),
     ],
-    ['sessionが失効した', (bridged: Bridged) => bridged.sessions.revoke(bridged.token)],
-  ])('保存の順番を待つ間に%s場合、HTMLからの回答案は保存しない', async (_name, expire) => {
-    const bridged = await startBridged();
-    const reached = bridged.gate.arm();
-    // 先に並んだ保存（管理UIの回答案）を、commitの途中で止める。
-    const first = call(bridged, 'PUT', `/feedback/${bridged.requestId}/draft`, {
-      expectedDraftVersion: 0,
-      answers: { layout: 'A' },
-    });
-    await reached;
-    const before = bridged.queued();
-    // HTMLからの保存は、入口の確認を通って、待ち行列に並ぶ（並んだことを確かめてから失効させる）。
-    const fromHtml = call(bridged, 'PUT', '/render-grants/bridge/draft', {
-      grant: bridged.grant,
-      expectedDraftVersion: 1,
-      answers: { layout: 'B' },
-    });
-    await bridged.untilQueued(before + 1);
-    expire(bridged);
-    bridged.gate.release();
-    expect(await first).toEqual({ status: 200, code: null });
-    expect(await fromHtml).toEqual({ status: 403, code: 'E_RENDER_GRANT_INVALID' });
-    expect(bridged.feedback.getForUi(bridged.requestId).data).toMatchObject({
-      draftVersion: 1,
-      draftAnswers: { layout: 'A' },
-    });
-  });
+    ['the session expires', (bridged: Bridged) => bridged.sessions.revoke(bridged.token)],
+  ])(
+    'does not save the draft answer from the HTML if %s while waiting its turn to save',
+    async (_name, expire) => {
+      const bridged = await startBridged();
+      const reached = bridged.gate.arm();
+      // Hold the save queued first (the management UI's draft answer) mid-commit.
+      const first = call(bridged, 'PUT', `/feedback/${bridged.requestId}/draft`, {
+        expectedDraftVersion: 0,
+        answers: { layout: 'A' },
+      });
+      await reached;
+      const before = bridged.queued();
+      // The save from the HTML passes the entry check and joins the queue (confirm it is queued before expiring).
+      const fromHtml = call(bridged, 'PUT', '/render-grants/bridge/draft', {
+        grant: bridged.grant,
+        expectedDraftVersion: 1,
+        answers: { layout: 'B' },
+      });
+      await bridged.untilQueued(before + 1);
+      expire(bridged);
+      bridged.gate.release();
+      expect(await first).toEqual({ status: 200, code: null });
+      expect(await fromHtml).toEqual({ status: 403, code: 'E_RENDER_GRANT_INVALID' });
+      expect(bridged.feedback.getForUi(bridged.requestId).data).toMatchObject({
+        draftVersion: 1,
+        draftAnswers: { layout: 'A' },
+      });
+    },
+  );
 
-  it('先に並んだscriptの許可の取消がcommitされたら、後に並んだHTMLからの回答案は保存しない', async () => {
+  it('does not save the draft answer from the HTML queued later once the script permission revocation queued earlier is committed', async () => {
     const bridged = await startBridged();
     const reached = bridged.gate.arm();
     const first = call(bridged, 'PUT', `/feedback/${bridged.requestId}/draft`, {
@@ -438,7 +441,7 @@ describe('11.7 HTMLからの回答案の保存と、待っている間の権限�
     });
     await reached;
     const before = bridged.queued();
-    // 静的表示への切り替えが先に並び、HTMLからの保存が後に並ぶ（入口では、まだ許可がある）。
+    // The switch to the static view is queued first, and the save from the HTML after it (permission still exists at the entry check).
     const revoking = bridged.documents.setHtmlMode({
       documentId: bridged.documentId,
       mode: 'static',

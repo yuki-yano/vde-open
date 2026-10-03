@@ -3,7 +3,7 @@ import type { ServerEvent } from '@vde-open/shared';
 export type EventListener = (event: ServerEvent) => void;
 
 export interface EventHub {
-  // 現在の連番。接続時のhelloに使う。
+  // Current sequence number. Used for the hello on connect.
   readonly sequence: number;
   publish(
     event: Pick<
@@ -15,8 +15,8 @@ export interface EventHub {
   readonly subscriberCount: number;
 }
 
-// 更新通知の配信。連番を付けて渡すだけで、保存や再送はしない。
-// 受け手は連番の欠けやdaemonIdの変化を見て、stateを取り直す（仕様6.5）。
+// Delivers update notifications. Only attaches a sequence number and passes them on; no storage or redelivery.
+// Receivers resync state when they see a gap in the sequence or a change of daemonId (spec 6.5).
 export function createEventHub(daemonId: string, catalogVersion: () => number): EventHub {
   const listeners = new Set<EventListener>();
   let sequence = 0;

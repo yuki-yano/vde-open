@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { scanCssReferences, transformCss, type CssUrlResolver } from './css-transform.ts';
 
-// localの相対参照だけを残し、`r/`を前に付ける。
+// Keep only local relative references and prefix them with `r/`.
 const localOnly: CssUrlResolver = (url) =>
   /^[a-z]+:|^\/\//i.test(url) ? null : url.startsWith('#') ? url : `r/${url}`;
 
-describe('SEC-012 CSSの参照', () => {
-  it('url()、@import、image-setの参照先を、文脈とともに取り出す', () => {
+describe('SEC-012 CSS references', () => {
+  it('extracts the targets of url(), @import and image-set with their context', () => {
     const css = `
       @import "base.css";
       @import url(theme.css) screen;
@@ -34,7 +34,7 @@ describe('SEC-012 CSSの参照', () => {
     ]);
   });
 
-  it('許可されない参照を含む宣言と@importを取り除き、ほかの宣言は残す', () => {
+  it('removes declarations and @import with disallowed references, and keeps the other declarations', () => {
     const css = `
       @import url(http://evil.example/a.css);
       @import "//evil.example/b.css";
@@ -50,7 +50,7 @@ describe('SEC-012 CSSの参照', () => {
     expect(result.css).toContain('.b{background:url(r/ok.png)}');
   });
 
-  it('escapeや古い仕組みで隠した取得と実行を、宣言ごと取り除く', () => {
+  it('removes whole declarations that hide fetches or execution behind escapes or legacy mechanisms', () => {
     const css = String.raw`
       .a { background: u\72l(http://evil.example/a.png); color: blue; }
       .b { background: \75rl(http://evil.example/b.png); }
@@ -71,7 +71,7 @@ describe('SEC-012 CSSの参照', () => {
     expect(result.css).toContain('.e{background:var(--x)}');
   });
 
-  it('名前をescapeで書いた@import・宣言・関数は、無効化して数える', () => {
+  it('disables and counts @import, declarations and functions whose names use escapes', () => {
     const css = String.raw`
       @\69mport "http://evil.example/a.css";
       @impor\74  url(http://evil.example/b.css);
@@ -89,11 +89,11 @@ describe('SEC-012 CSSの参照', () => {
     expect(result.css).toContain('.b{margin:0}');
     expect(result.css).toContain('.c{padding:0}');
     expect(result.css).toContain('.d{color:blue}');
-    // 走査でも、参照として数えない（登録もしない）。
+    // The scan does not count them as references either (so nothing is registered).
     expect(scanCssReferences(css, 'stylesheet')).toEqual([]);
   });
 
-  it('変数などから差し込む値を、URLを受け取る関数へ渡す宣言は、無効化する', () => {
+  it('disables declarations that pass a substituted value, such as a variable, to a URL-taking function', () => {
     const css = `
       :root { --image: "http://evil.example/a.png"; --ok: "local.png"; --size: 2px }
       .a { background: image-set(var(--image) 1x); color: red }
@@ -112,14 +112,14 @@ describe('SEC-012 CSSの参照', () => {
     expect(result.css).toContain('.a{color:red}');
     expect(result.css).toContain('.b{margin:0}');
     expect(result.css).toContain('.c{padding:0}');
-    // 変数そのものと、URLを受け取らない関数での利用は残す。
+    // The variable itself and uses in functions that do not take URLs are kept.
     expect(result.css).toContain('--image:"http://evil.example/a.png"');
     expect(result.css).toContain('width:calc(var(--size)*2)');
     expect(result.css).toContain('image-set("r/d.png"1x)');
     expect(result.css).toContain('font-display:swap');
   });
 
-  it('解析できない部分は無効化して数え、解析できた部分は残す', () => {
+  it('disables and counts unparsable parts, and keeps the parsable parts', () => {
     const result = transformCss(
       '.a { color: red } }}} @@@ { .b { color: blue }',
       'stylesheet',
@@ -130,7 +130,7 @@ describe('SEC-012 CSSの参照', () => {
     expect(result.css).not.toContain('@@@');
   });
 
-  it('通常のlayoutの指定はそのまま通す', () => {
+  it('passes ordinary layout rules through unchanged', () => {
     const css = `
       :root { --gap: calc(1rem + 2px); --shadow: 0 0 4px rgba(0, 0, 0, 0.2); }
       .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: var(--gap); }
@@ -153,7 +153,7 @@ describe('SEC-012 CSSの参照', () => {
     }
   });
 
-  it('style属性の宣言も同じ規則で扱う', () => {
+  it('handles style attribute declarations by the same rules', () => {
     const result = transformCss(
       'color: red; background: url(//evil.example/a.png); width: 10px',
       'declarations',

@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
 
-// 起動したcommandの終了を待つ上限。これを過ぎても動いていれば、起動できたものとして扱う。
+// Upper bound for waiting on the launched command to exit. If it is still running after this, treat it as launched.
 const LAUNCH_WAIT_MS = 3000;
 
 export interface BrowserLauncher {
-  // 既定のbrowserでURLを開く。開けたらtrue。
+  // Open the URL in the default browser. true if it opened.
   open(url: string): Promise<boolean>;
 }
 
@@ -13,7 +13,7 @@ function launchCommand(
   platform: NodeJS.Platform,
   url: string,
 ): { command: string; args: string[] } {
-  // BROWSERが指定されていれば、それを実行fileとして使う。shellの文字列としては解釈しない。
+  // If BROWSER is set, use it as the executable. It is not interpreted as a shell string.
   const override = env['BROWSER'];
   if (override !== undefined && override !== '') return { command: override, args: [url] };
   if (platform === 'darwin') return { command: 'open', args: [url] };

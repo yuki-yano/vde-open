@@ -17,8 +17,8 @@ const fixture = (name: string) =>
     'utf8',
   );
 
-describe('Markdownのoutline', () => {
-  it('root直下の見出しを文書順に並べ、祖先の見出しをheadingPathに入れる', () => {
+describe('Markdown outline', () => {
+  it('lists headings directly under the root in document order and puts ancestor headings in headingPath', () => {
     const { title, outline } = analyzeMarkdown(fixture('auth.md'));
     expect(title).toBe('認証仕様');
     expect(outline.slice(0, 4).map(({ anchor: _anchor, ...rest }) => rest)).toEqual([
@@ -42,12 +42,12 @@ describe('Markdownのoutline', () => {
         headingPath: ['認証仕様', 'エラーの契約'],
       },
     ]);
-    // anchorはparserが渡す位置から作る。連番ではないが、文書内で一意になる。
+    // Anchors are built from the position the parser passes. Not sequential, but unique within the document.
     expect(outline.every((item) => /^h\d+$/.test(item.anchor))).toBe(true);
     expect(new Set(outline.map((item) => item.anchor)).size).toBe(outline.length);
   });
 
-  it('同名の見出しでもsectionIdとanchorが一意になる', () => {
+  it('sectionId and anchor are unique even for headings with the same name', () => {
     const { outline } = analyzeMarkdown('# 概要\n\n## 手順\n\n## 手順\n\n# 概要\n');
     expect(new Set(outline.map((item) => item.sectionId)).size).toBe(4);
     expect(new Set(outline.map((item) => item.anchor)).size).toBe(4);
@@ -59,7 +59,7 @@ describe('Markdownのoutline', () => {
     ]);
   });
 
-  it('引用や箇条書きの中の見出し、frontmatter、コード内の#は節にしない', () => {
+  it('headings inside quotes or lists, frontmatter, and # inside code do not become sections', () => {
     const source = [
       '---',
       'title: frontmatterの値',
@@ -80,25 +80,25 @@ describe('Markdownのoutline', () => {
     expect(analyzeMarkdown(source).outline.map((item) => item.title)).toEqual(['本物の見出し']);
   });
 
-  it('Setextの見出しは見出しとして扱わない（導入版の既知の非対応）', () => {
+  it('Setext headings are not treated as headings (known limitation of the adopted version)', () => {
     expect(analyzeMarkdown('Setextの見出し\n===\n\n本文\n').outline).toEqual([]);
   });
 });
 
-describe('MD-006 構造の上限', () => {
-  it('nodeが多すぎる文書を解析errorにする', () => {
+describe('MD-006 structure limits', () => {
+  it('a document with too many nodes is a parse error', () => {
     const source = Array.from({ length: PARSER_LIMITS.maxNodes / 2 + 10 }, () => 'a').join('\n\n');
     expect(() => parseMarkdownDocument(source)).toThrow(ParseLimitError);
   });
 
-  it('入れ子が深すぎる文書を解析errorにする', () => {
+  it('a document nested too deeply is a parse error', () => {
     const source = `${'> '.repeat(PARSER_LIMITS.maxDepth + 2)}深い`;
     expect(() => parseMarkdownDocument(source)).toThrow(ParseLimitError);
   });
 });
 
-describe('HTMLのoutline', () => {
-  it('title要素と見出しを取り出し、scriptとstyleの内容を拾わない', () => {
+describe('HTML outline', () => {
+  it('extracts the title element and headings, and does not collect script or style content', () => {
     const html = [
       '<!doctype html><title>設計メモ</title>',
       '<style>h1::after { content: "x" }</style>',
@@ -133,8 +133,8 @@ describe('HTMLのoutline', () => {
   });
 });
 
-describe('節（section）の抽出', () => {
-  it('SRCH-014: Markdownの節は、見出しから次の見出しの直前まで。下位の本文を上位へ重ねない', () => {
+describe('section extraction', () => {
+  it('SRCH-014: a Markdown section runs from a heading to just before the next heading, and lower text is not folded into upper sections', () => {
     const analysis = analyzeMarkdown(
       [
         '序文の段落。',
@@ -182,7 +182,7 @@ describe('節（section）の抽出', () => {
         text: 'セッションは30分で失効する。\n\n延長は1回まで\nrefresh_token を使う',
       },
       {
-        // 同じ名前の見出しでも、節のIDは別になる。
+        // Headings with the same name still get different section IDs.
         sectionId: 'sec_0003',
         level: 2,
         title: '有効期限',
@@ -197,29 +197,29 @@ describe('節（section）の抽出', () => {
         text: '引用の中の文。',
       },
     ]);
-    // 見出しの節は、outlineと同じIDを使う。序文はoutlineに出ない。
+    // Heading sections use the same IDs as the outline. The preamble does not appear in the outline.
     expect(analysis.outline.map((item) => item.sectionId)).toEqual([
       'sec_0001',
       'sec_0002',
       'sec_0003',
       'sec_0004',
     ]);
-    // 上位の節（認証）の本文に、下位の節の本文は入っていない。
+    // The upper section does not contain the text of the lower sections.
     expect(analysis.sections[1]?.text).not.toContain('30分');
-    // 序文がなければ、sec_0000は作らない。
+    // Without a preamble, sec_0000 is not created.
     expect(analyzeMarkdown('# 見出し\n\n本文\n').sections.map((s) => s.sectionId)).toEqual([
       'sec_0001',
     ]);
     expect(analyzeMarkdown('見出しのない文書。\n').sections).toEqual([
       { sectionId: 'sec_0000', level: 0, title: '', headingPath: [], text: '見出しのない文書。' },
     ]);
-    // 空の文書も、空の序文を1つ持つ（検索で見つけた節を、同じIDで取得できるようにする）。
+    // An empty document also has one empty preamble (so a section found by search can be read by the same ID).
     const empty = { sectionId: 'sec_0000', level: 0, title: '', headingPath: [], text: '' };
     expect(analyzeMarkdown('').sections).toEqual([empty]);
     expect(analyzeHtml('<!doctype html><title>空</title>').sections).toEqual([empty]);
   });
 
-  it('SRCH-013: HTMLは静的に抽出し、scriptの内容、入力欄の値、表示されない内容を拾わない', () => {
+  it('SRCH-013: HTML is extracted statically, without script content, form field values or hidden content', () => {
     const analysis = analyzeHtml(
       `<!doctype html><html><head><title>設計</title><style>.x{content:"STYLE-SECRET"}</style>
        <script>const token = "SCRIPT-SECRET"; document.body.innerHTML = "<p>scriptが作る本文</p>";</script></head>

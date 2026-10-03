@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 
 type MarkdownDocument = ReturnType<typeof parseMarkdownDocument>;
 
-// 解析を待つ上限（仕様7.4）。超えたらworkerを止めて、原文の表示へ切り替える。
+// Maximum time to wait for parsing (spec 7.4). Beyond it, stop the worker and switch to the Source view.
 const PARSE_TIMEOUT_MS = 2000;
 
 export type MarkdownState =
@@ -25,7 +25,7 @@ export function useMarkdown(source: string | null): MarkdownState {
 
   useEffect(() => {
     if (source === null) return undefined;
-    // 文書ごとにworkerを作る。時間切れや切り替えのときは、workerごと止めて回収する。
+    // Create a worker per document. On timeout or switch, terminate the whole worker and reclaim it.
     const worker = new Worker(new URL('./markdown.worker.ts', import.meta.url), { type: 'module' });
     const finish = (state: MarkdownState) => {
       clearTimeout(timer);
@@ -51,6 +51,6 @@ export function useMarkdown(source: string | null): MarkdownState {
     };
   }, [source]);
 
-  // 解析結果は、解析した原文にだけ結び付ける。別の原文の結果は使わない。
+  // A parse result is tied only to the source it was parsed from. A result for another source is not used.
   return parsed !== null && parsed.source === source ? parsed.state : { status: 'parsing' };
 }

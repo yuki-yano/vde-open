@@ -74,7 +74,7 @@ async function inspectStateFile(stateRoot: string, name: string): Promise<StateF
   }
   try {
     const decoded = decodeStateFile(bytes, name);
-    // 参照するblobがそろっているstateだけを、使えるstateとして扱う。
+    // Only a state whose referenced blobs are all present counts as usable.
     const blobs = new Set(await readdir(join(stateRoot, 'blobs')).catch(() => [] as string[]));
     for (const blob of referencedBlobs(decoded.payload)) {
       if (!blobs.has(blob)) {
@@ -125,8 +125,8 @@ export interface DoctorResult {
   warnings: Warning[];
 }
 
-// state・runtime・lockを診断する。tokenや本文、回答は返さない（仕様5.5）。
-// 修復は--repair --yesのときだけ行い、検証済みのbackupと、所有者が確実に停止済みのruntimeだけを扱う。
+// Diagnoses state, runtime, and lock. Never returns tokens, document bodies, or answers (spec 5.5).
+// Repairs run only with --repair --yes, and touch only a verified backup and a runtime whose owner is known to be stopped.
 export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
   const { environment, control, version } = options;
   const probe = options.probe ?? systemProcessProbe;
@@ -143,19 +143,23 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
   if (rootReason) {
     problems.push({
       code: 'E_INSECURE_PATH',
-      message: `state rootが安全ではありません（${rootReason}）。`,
+      message: `The state root is not secure (${rootReason}).`,
       repairable: false,
     });
-    // 安全でないstate rootは変更しない。
+    // Never modify an insecure state root.
     if (options.repair) {
-      throw new VdeError('E_INSECURE_PATH', `${stateRoot} は安全ではないため、修復しません。`, {
-        path: stateRoot,
-        reason: rootReason,
-      });
+      throw new VdeError(
+        'E_INSECURE_PATH',
+        `${stateRoot} is not secure, so it will not be repaired.`,
+        {
+          path: stateRoot,
+          reason: rootReason,
+        },
+      );
     }
   }
 
-  // 安全でないstate root経由では、daemonへも接続しない。
+  // Do not connect to the daemon through an insecure state root either.
   let reachable = false;
   if (rootSecure) {
     const connection = await control.connectExisting().catch(() => null);
@@ -178,7 +182,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
   if (!reachable && lock.state === 'owner-stopped') {
     problems.push({
       code: 'W_STALE_RUNTIME',
-      message: '停止済みdaemonのlockとruntimeが残っています。',
+      message: 'The lock and runtime of a stopped daemon remain.',
       repairable: true,
     });
   }
@@ -186,14 +190,14 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
     problems.push({
       code: 'E_DAEMON_LOCKED',
       message:
-        'lockの所有者は生きていますが、daemonへ接続できません。所有者のprocessを確認してください。',
+        'The lock owner is alive, but the daemon cannot be reached. Check the owner process.',
       repairable: false,
     });
   }
   if (lock.state === 'invalid') {
     problems.push({
       code: 'E_DAEMON_LOCKED',
-      message: 'daemonのlockを読めません。',
+      message: 'The daemon lock cannot be read.',
       repairable: false,
     });
   }
@@ -205,23 +209,22 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
       code: 'E_STATE_CORRUPT',
       message:
         previousState.status === 'ok'
-          ? 'state.jsonを読めません。直前のstateへ戻せますが、最後の変更は失われます。'
-          : 'state.jsonを読めず、検証済みのbackupもありません。',
+          ? 'state.json cannot be read. It can be rolled back to the previous state, but the last change will be lost.'
+          : 'state.json cannot be read, and there is no verified backup.',
       repairable: previousState.status === 'ok',
     });
   }
   if (state.status === 'unsupported') {
     problems.push({
       code: 'E_STATE_FORMAT_UNSUPPORTED',
-      message:
-        'stateは、より新しいversionのvde-openが作ったものです。そのversionを使ってください。',
+      message: 'The state was written by a newer version of vde-open. Use that version.',
       repairable: false,
     });
   }
 
   if (options.repair && rootSecure) {
-    // daemonと同じwriter lockを取り、その内側で状態を確かめ直してから修復する。
-    // lockを持っている間、daemonは起動できない。所有者が生きていれば取得できない。
+    // Take the same writer lock as the daemon, re-check the state inside it, then repair.
+    // While the lock is held, the daemon cannot start. It cannot be acquired while the owner is alive.
     const ownerId = `doctor_${randomUUID()}`;
     const hadStaleOwner = lock.state === 'owner-stopped';
     const outcome = await acquireLock(
@@ -234,14 +237,14 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
       throw new VdeError(
         'E_DAEMON_LOCKED',
         outcome.reason === 'invalid'
-          ? 'daemonのlockを読めないため、修復しません。'
-          : 'daemonが動作中か、lockの所有者が生きています。停止してから修復してください。',
+          ? 'The daemon lock cannot be read, so nothing will be repaired.'
+          : 'The daemon is running, or the lock owner is alive. Stop it before repairing.',
         { reason: outcome.reason },
       );
     }
     try {
-      // lockを持っているので、残っているruntime fileはどのdaemonも使っていない。
-      // 位置が所有者専用のdirectoryであることを確かめてから消す。
+      // We hold the lock, so no daemon is using the remaining runtime files.
+      // Confirm the location is an owner-only directory before removing them.
       const pointer = await readPointer(stateRoot);
       let removed = false;
       if (pointer) {
@@ -265,7 +268,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
       previousState = await inspectStateFile(stateRoot, 'state.prev.json');
       if (isBroken(state, previousState) && previousState.status === 'ok') {
         const statePath = join(stateRoot, 'state.json');
-        // 読めないstateは消さずに退避する。
+        // Set the unreadable state aside instead of deleting it.
         if (state.status !== 'missing') {
           await rename(statePath, join(stateRoot, `state.json.corrupt-${Date.now().toString()}`));
         }
@@ -276,7 +279,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
         warnings.push({
           code: 'W_STATE_ROLLED_BACK',
           message:
-            'stateを直前のbackupへ戻しました。最後に行った変更は失われている可能性があります。',
+            'The state was rolled back to the previous backup. The last change may have been lost.',
           details: { storeVersion: previousState.storeVersion },
         });
         state = await inspectStateFile(stateRoot, 'state.json');

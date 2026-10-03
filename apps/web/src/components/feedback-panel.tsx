@@ -32,11 +32,11 @@ import {
   withAnswer,
 } from '@/lib/feedback-form';
 
-// 選択肢がこの数までならradio、それより多ければselectで表示する。
+// Up to this many options are shown as radios; more are shown as a select.
 const RADIO_LIMIT = 6;
-// 長い入力を許すstringは、複数行で入力する。
+// Strings that allow long input use a multi-line field.
 const TEXTAREA_LENGTH = 200;
-// 入力が止まってから、回答案を保存するまでの時間。
+// Delay after typing stops before the draft answer is saved.
 const SAVE_DELAY_MS = 300;
 
 const newSubmissionId = () => `sub_${crypto.randomUUID()}`;
@@ -50,7 +50,7 @@ interface FieldProps {
   onChange: (value: AnswerValue | undefined) => void;
 }
 
-// 質問のfieldと、空の回答を明示する欄。空の回答が有効な必須のfieldにだけ出す。
+// A question field plus a control for explicitly answering with an empty value. Shown only for required fields where an empty answer is valid.
 function FieldInput(props: FieldProps) {
   const { name, field, required, value, disabled, onChange } = props;
   const empty = emptyAnswerOf(field, required);
@@ -66,14 +66,14 @@ function FieldInput(props: FieldProps) {
           onCheckedChange={(checked) => onChange(checked ? empty : undefined)}
           data-testid={`feedback-${name}-empty`}
         />
-        {field.type === 'array' ? 'どれも選ばずに回答する' : '空欄のまま回答する'}
+        {field.type === 'array' ? 'Answer with none selected' : 'Answer with an empty value'}
       </Label>
     </>
   );
 }
 
-// 質問のfieldから入力欄を作る（仕様11.5）。必須の選択肢を、勝手に選んだ状態にはしない。
-// 入力欄が空なら未入力（fieldを省く）。空の回答は、FieldInputの欄で明示する。
+// Build the input control from a question field (spec 11.5). Never preselect a required option.
+// An empty control means not answered (the field is omitted). Empty answers are made explicit in FieldInput.
 function FieldControl({ name, field, value, disabled, onChange }: FieldProps) {
   const id = `feedback-${name}`;
   switch (field.type) {
@@ -86,7 +86,7 @@ function FieldControl({ name, field, value, disabled, onChange }: FieldProps) {
             disabled={disabled}
             onCheckedChange={(checked) => onChange(checked)}
           />
-          はい
+          Yes
         </Label>
       );
     case 'number':
@@ -149,7 +149,7 @@ function FieldControl({ name, field, value, disabled, onChange }: FieldProps) {
         );
       }
       if (field.enum !== undefined) {
-        // 選択肢は位置で指す。空の文字列の選択肢を、未選択と取り違えない。
+        // Options are referenced by position, so an empty-string option is not confused with "not selected".
         const options = field.enum;
         const selected = typeof value === 'string' ? options.indexOf(value) : -1;
         return (
@@ -163,7 +163,7 @@ function FieldControl({ name, field, value, disabled, onChange }: FieldProps) {
               onChange(event.target.value === 'none' ? undefined : options[index]);
             }}
           >
-            <option value="none">選択してください</option>
+            <option value="none">Select an option</option>
             {options.map((option, index) => (
               <option key={option} value={String(index)}>
                 {optionLabel(option)}
@@ -192,32 +192,32 @@ interface FeedbackPanelProps {
   reload: () => void;
 }
 
-// 質問への回答のpanel。回答は管理UIの送信buttonでだけ確定する（仕様11.8）。
-// 入力は回答案として自動で保存する。確定する内容は、保存済みの回答案からserverが取る。
+// The panel for answering a question. Answers are finalized only with the submit button in the management UI (spec 11.8).
+// Input is saved automatically as a draft answer. The server takes the content to finalize from the saved draft.
 export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
   const { requestId, questionnaire } = request;
   const pending = request.status === 'pending';
-  // この画面が知っている、serverの最新の回答案（取得した結果か、自分が保存した結果）。
-  // 入力の保存と送信は、この版をもとにする。
+  // The latest draft answer on the server that this panel knows of (either fetched or saved by this panel).
+  // Saving input and submitting are based on this version.
   const [synced, setSynced] = useState({
     version: request.draftVersion,
     answers: request.draftAnswers,
   });
-  // 入力中の回答。
+  // The answers being entered.
   const [answers, setAnswers] = useState<Answers>(request.draftAnswers);
   const [dirty, setDirty] = useState(false);
   const [phase, setPhase] = useState<'idle' | 'saving' | 'submitting'>('idle');
   const [message, setMessage] = useState<string | null>(null);
-  // 旧版への回答であることを確認したときの、文書の現在の版。版がさらに変われば、確認し直す。
+  // The document's current revision at the time the user confirmed answering an older revision. If the revision changes again, confirm again.
   const [confirmedRevision, setConfirmedRevision] = useState<string | null>(null);
-  // 送信のID。通信が切れて再送するときは、同じIDを使う（二重に確定しない）。
+  // The submission ID. When resending after a connection failure, reuse the same ID (do not finalize twice).
   const [submissionId, setSubmissionId] = useState(newSubmissionId);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
-  // 入力の回数。保存している間に入力されたら、保存の後も未保存のままにする。
+  // Number of edits. If the user types while a save is in flight, stay unsaved after the save.
   const edits = useRef(0);
 
-  // 別の画面が回答案を更新し、こちらに未保存の入力がなければ、新しい回答案を表示する。
-  // 版は増えるだけなので、知っている版より古い取得結果（自分の保存の前の状態）は使わない。
+  // If another window updated the draft answer and this panel has no unsaved input, show the new draft.
+  // Versions only increase, so a fetched result older than the known version (the state before this panel's save) is not used.
   if (request.draftVersion > synced.version && !dirty && phase === 'idle') {
     setSynced({ version: request.draftVersion, answers: request.draftAnswers });
     setAnswers(request.draftAnswers);
@@ -225,8 +225,8 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
 
   const newer = pending && request.currentRevision !== request.revision;
   const confirmed = newer && confirmedRevision === request.currentRevision;
-  // 確定・中止した質問は、serverの内容（確定した回答、なければ保存済みの回答案）を表示する。
-  // この画面の未保存の入力を、確定した回答のように見せない。
+  // For submitted or cancelled questions, show the server's content (the submitted answers, or the saved draft if none).
+  // Do not present this panel's unsaved input as if it were the submitted answers.
   const shown = pending ? answers : (request.submission?.answers ?? request.draftAnswers);
   const issues = validateAnswers(questionnaire, shown, { complete: true });
   const summary = summarize(questionnaire, shown);
@@ -238,11 +238,11 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
     }
     switch (reason.code) {
       case 'E_DRAFT_CONFLICT':
-        // 自分の入力で、別の画面の回答案を上書きしない。最新の回答案を表示し直す。
+        // Do not overwrite another window's draft with this panel's input. Show the latest draft instead.
         setDirty(false);
         setAnswers(synced.answers);
         setMessage(
-          '別の画面で回答案が更新されました。最新の内容を表示しています。必要なら入力し直してください。',
+          'The draft answer was updated in another window. Showing the latest content. Enter your answers again if needed.',
         );
         setSubmissionId(newSubmissionId());
         reload();
@@ -251,7 +251,7 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
         setConfirmedRevision(null);
         setSubmissionId(newSubmissionId());
         setMessage(
-          '文書の版が変わりました。表示中の版への回答であることを、もう一度確認してください。',
+          'The document revision changed. Confirm again that this answer is for the revision shown.',
         );
         reload();
         return;
@@ -266,7 +266,7 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
     }
   };
 
-  // 入力が止まったら、回答案を保存する。
+  // Save the draft answer once typing stops.
   useEffect(() => {
     if (!dirty || phase !== 'idle' || !pending) return undefined;
     const timer = setTimeout(() => {
@@ -275,14 +275,14 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
       setPhase('saving');
       void api.saveDraft(requestId, synced.version, sent).then(
         (saved) => {
-          // 保存した回答と版を組で覚える。保存の間に入力されていれば、未保存のままにする。
+          // Remember the saved answers together with their version. If the user typed during the save, stay unsaved.
           setSynced({ version: saved.draftVersion, answers: sent });
           if (edits.current === started) setDirty(false);
           setPhase('idle');
         },
         (reason: unknown) => {
           setPhase('idle');
-          failWith(reason, '回答案を保存できませんでした。');
+          failWith(reason, 'Could not save the draft answer.');
         },
       );
     }, SAVE_DELAY_MS);
@@ -304,7 +304,7 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
         submissionId,
         expectedDraftVersion: synced.version,
         revision: request.revision,
-        // 新しい版があるときは、確認した版を送る。serverは、それが現在の版かを確かめる。
+        // When a newer revision exists, send the confirmed revision. The server checks that it is the current one.
         currentRevision: newer ? confirmedRevision : request.currentRevision,
         confirmOlderRevision: confirmed,
       })
@@ -315,8 +315,8 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
         },
         (reason: unknown) => {
           setPhase('idle');
-          // 通信が切れたときは、同じ送信IDのまま再送できるようにする。
-          failWith(reason, '送信できたか確かめられませんでした。もう一度送信してください。');
+          // On a connection failure, keep the same submission ID so the user can resend.
+          failWith(reason, 'Could not confirm whether the submission succeeded. Submit again.');
         },
       );
   };
@@ -325,36 +325,36 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
     setConfirmingCancel(false);
     void api
       .cancelFeedback(requestId)
-      .then(reload, (reason: unknown) => failWith(reason, '中止できませんでした。'));
+      .then(reload, (reason: unknown) => failWith(reason, 'Could not cancel.'));
   };
 
   const statusText =
     request.status === 'cancelled'
-      ? '中止されました'
+      ? 'Cancelled'
       : request.status === 'submitted'
         ? request.acknowledgedAt !== null
-          ? 'Agentが回答を取得しました'
-          : '送信しました。Agentの取得を待っています'
+          ? 'The agent retrieved the answers'
+          : 'Submitted. Waiting for the agent to retrieve it'
         : phase === 'submitting'
-          ? '送信中…'
+          ? 'Submitting…'
           : phase === 'saving'
-            ? '回答案を保存中…'
+            ? 'Saving draft answer…'
             : dirty
-              ? '未保存の入力があります'
+              ? 'Unsaved changes'
               : synced.version > 0
-                ? '回答案を保存しました'
-                : '未回答';
+                ? 'Draft answer saved'
+                : 'Not answered';
   const blocked =
     !pending || phase !== 'idle' || dirty || issues.length > 0 || (newer && !confirmed);
 
   return (
     <aside
-      aria-label="質問への回答"
+      aria-label="Answer the question"
       className="flex max-h-[50svh] w-full shrink-0 flex-col border-t bg-background min-[900px]:max-h-none min-[900px]:w-96 min-[900px]:border-t-0 min-[900px]:border-l"
       data-testid="feedback-panel"
     >
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <p className="text-xs text-muted-foreground">Agentからの質問</p>
+        <p className="text-xs text-muted-foreground">Question from the agent</p>
         <h2 className="mt-1 text-base font-semibold break-words">{questionnaire.title}</h2>
         {questionnaire.instructions && (
           <p className="mt-2 text-sm whitespace-pre-wrap text-muted-foreground">
@@ -363,10 +363,10 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
         )}
         {newer && (
           <div role="alert" className="mt-3 rounded-md border border-amber-500/50 p-3 text-sm">
-            <p>新しい版があります。この回答は表示中の旧版に対するものです。</p>
+            <p>A newer revision is available. This answer is for the older revision shown.</p>
             {confirmedRevision !== null && !confirmed && (
               <p className="mt-1">
-                確認した後に、文書がさらに更新されました。もう一度確認してください。
+                The document was updated again after you confirmed. Confirm again.
               </p>
             )}
             <Label className="mt-2 font-normal">
@@ -376,7 +376,7 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
                   setConfirmedRevision(checked ? request.currentRevision : null)
                 }
               />
-              旧版への回答として送信することを確認しました
+              I confirm that this answer is for the older revision
             </Label>
           </div>
         )}
@@ -389,7 +389,7 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
               <div key={name} className="flex flex-col gap-2" data-field={name}>
                 <p id={`feedback-${name}-label`} className="text-sm font-medium">
                   <label htmlFor={`feedback-${name}`}>{field.title}</label>
-                  {required && <span className="ml-1 text-xs text-destructive">（必須）</span>}
+                  {required && <span className="ml-1 text-xs text-destructive">(required)</span>}
                 </p>
                 {field.description && (
                   <p className="text-xs whitespace-pre-wrap text-muted-foreground">
@@ -410,12 +410,12 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
         </div>
       </div>
       <div className="border-t px-4 py-3" data-testid="feedback-footer">
-        <p className="text-xs text-muted-foreground">送信先の質問</p>
+        <p className="text-xs text-muted-foreground">Submitting to</p>
         <p className="text-sm font-medium break-words">{questionnaire.title}</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          対象の版 <code className="font-mono">{request.revision.slice(4, 16)}</code>
+          Target revision <code className="font-mono">{request.revision.slice(4, 16)}</code>
         </p>
-        <dl className="mt-2 max-h-40 overflow-y-auto text-xs" aria-label="回答の要約">
+        <dl className="mt-2 max-h-40 overflow-y-auto text-xs" aria-label="Answer summary">
           {summary.map((item) => (
             <div key={item.name} className="flex gap-2 py-0.5">
               <dt className="w-24 shrink-0 truncate text-muted-foreground">{item.title}</dt>
@@ -424,7 +424,10 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
           ))}
         </dl>
         {pending && issues.length > 0 && (
-          <ul className="mt-2 text-xs text-muted-foreground" aria-label="送信の前に必要なこと">
+          <ul
+            className="mt-2 text-xs text-muted-foreground"
+            aria-label="Required before submitting"
+          >
             {describeIssues(questionnaire, issues).map((issue) => (
               <li key={`${issue.name}:${issue.text}`}>{issue.text}</li>
             ))}
@@ -441,10 +444,10 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
         {pending && (
           <div className="mt-3 flex gap-2">
             <Button type="button" className="flex-1" disabled={blocked} onClick={submit}>
-              Agentへ回答を送信
+              Send answers to the agent
             </Button>
             <Button type="button" variant="outline" onClick={() => setConfirmingCancel(true)}>
-              中止
+              Cancel
             </Button>
           </div>
         )}
@@ -452,14 +455,15 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
       <AlertDialog open={confirmingCancel} onOpenChange={setConfirmingCancel}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>質問を中止しますか</AlertDialogTitle>
+            <AlertDialogTitle>Cancel this question?</AlertDialogTitle>
             <AlertDialogDescription>
-              中止すると、この質問には回答できなくなります。Agentには中止したことが伝わります。
+              After cancelling, this question can no longer be answered. The agent is told that it
+              was cancelled.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>戻る</AlertDialogCancel>
-            <AlertDialogAction onClick={cancel}>中止する</AlertDialogAction>
+            <AlertDialogCancel>Back</AlertDialogCancel>
+            <AlertDialogAction onClick={cancel}>Cancel question</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

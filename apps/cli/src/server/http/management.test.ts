@@ -39,7 +39,7 @@ interface Fixture {
   events: ReturnType<typeof createEventHub>;
   token: string;
   advance: (ms: number) => void;
-  // SSEで受け取った内容と、接続が終わったか。
+  // What was received over SSE, and whether the connection ended.
   stream: { received: string; ended: boolean; reading: Promise<void> };
 }
 
@@ -77,7 +77,7 @@ async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> 
     headers: { Authorization: `Bearer ${token}` },
   });
   expect(response.status).toBe(200);
-  // 保存を許す応答だと、Firefoxは同じURLへの2つ目の接続を待たせる。
+  // With a storable response, Firefox holds a second connection to the same URL.
   expect(response.headers.get('cache-control')).toBe('no-store');
   const reader = (response.body as ReadableStream<Uint8Array>).getReader();
   const decoder = new TextDecoder();
@@ -92,7 +92,7 @@ async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> 
   })();
   const deadline = Date.now() + 5000;
   while (!stream.received.includes('event: hello')) {
-    if (Date.now() > deadline) throw new Error('helloを受け取れませんでした');
+    if (Date.now() > deadline) throw new Error('Did not receive hello');
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   return {
@@ -111,13 +111,13 @@ const ended = (stream: Fixture['stream']) =>
   Promise.race([
     stream.reading,
     new Promise((_resolve, reject) =>
-      setTimeout(() => reject(new Error('SSEが終了しません')), 5000),
+      setTimeout(() => reject(new Error('SSE does not end')), 5000),
     ),
   ]);
 
-describe('SEC-001 期限が切れたsessionの接続', () => {
-  it('期限が切れた後の通知は、次の定期確認を待たずに、送らずに閉じる', async () => {
-    // 定期確認は、この試験の間には来ない。
+describe('SEC-001 connections of an expired session', () => {
+  it('closes without sending a notification published after expiry, without waiting for the next periodic check', async () => {
+    // The periodic check does not occur during this test.
     const { store, events, stream, advance, token } = await connect(60_000);
     advance(LIMITS.sessionIdleMs + 1);
     events.publish({ type: 'catalog-changed' });
@@ -131,10 +131,10 @@ describe('SEC-001 期限が切れたsessionの接続', () => {
     await store.close();
   });
 
-  it('接続したままでも期限は延びず、期限が切れたらSSEを閉じる', async () => {
+  it('staying connected does not extend the expiry, and SSE is closed once it expires', async () => {
     const { store, events, stream, advance, token } = await connect(20);
 
-    // 期限内は、接続を保ったまま通知を受け取れる。確認を何度繰り返しても期限は延びない。
+    // Within the expiry, notifications arrive while the connection stays open. Repeated checks do not extend it.
     advance(LIMITS.sessionIdleMs - 1000);
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(stream.ended).toBe(false);
@@ -143,7 +143,7 @@ describe('SEC-001 期限が切れたsessionの接続', () => {
     expect(stream.received).toContain('event: catalog-changed');
     expect(events.subscriberCount).toBe(1);
 
-    // 期限を過ぎると、次の定期確認で接続が閉じ、購読も外れる。通知がなくても閉じる。
+    // Once expired, the next periodic check closes the connection and unsubscribes. It closes even without notifications.
     advance(1001);
     await ended(stream);
     expect(stream.ended).toBe(true);
@@ -156,8 +156,8 @@ describe('SEC-001 期限が切れたsessionの接続', () => {
   });
 });
 
-// 通知を読まない接続。helloを受け取ったら、socketからの読み込みを止める。
-// 受け取った内容は残す（読み込みを再開した後の内容も足していく）。
+// A connection that does not read notifications. Stops reading from the socket once hello is received.
+// Keeps what was received (and keeps appending after reading resumes).
 async function connectStuck(
   port: number,
   token: string,
@@ -185,7 +185,7 @@ async function connectStuck(
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// 書き込みが詰まるまで通知を出す。読む接続は待ち行列が空になるが、読まない接続は残る。
+// Publish notifications until writes stall. The reading connection drains its queue, but the non-reading one keeps it.
 async function fillUntilStuck(events: Fixture['events'], running: ManagementServer): Promise<void> {
   let published = 0;
   for (;;) {
@@ -196,16 +196,16 @@ async function fillUntilStuck(events: Fixture['events'], running: ManagementServ
       await wait(200);
       if (running.eventStreams().maxPending > 0) return;
     }
-    if (published > 400_000) throw new Error('書き込みが詰まりません');
+    if (published > 400_000) throw new Error('Writes do not stall');
   }
 }
 
-// 受け取った通知の連番（`id:`の行）を、届いた順に取り出す。
+// Extract the sequence numbers (`id:` lines) of received notifications, in arrival order.
 const sequencesOf = (received: string) =>
   [...received.matchAll(/^id: (\d+)\r?$/gm)].map((match) => Number(match[1]));
 
-describe('PERF-004 通知を読まない接続', () => {
-  it('書き込みが詰まっても待ち行列は上限で止まり、読む接続には届き、詰まった接続は切る', async () => {
+describe('PERF-004 connections that do not read notifications', () => {
+  it('the queue stops at the limit even when writes stall, the reading connection still receives, and the stalled one is cut', async () => {
     const { store, events, stream, token } = await connect(50, 3000);
     const running = server as ManagementServer;
     const stuck = await connectStuck(running.port, token);
@@ -214,7 +214,7 @@ describe('PERF-004 通知を読まない接続', () => {
 
     await fillUntilStuck(events, running);
 
-    // 詰まった後に5万件を出しても、待ち行列は上限（と取り直しの合図1つ）を超えない。
+    // Even after publishing 50,000 more once stalled, the queue never exceeds the limit (plus one resync marker).
     let maxPending = 0;
     for (let batch = 0; batch < 50; batch += 1) {
       for (let index = 0; index < 1000; index += 1) events.publish({ type: 'catalog-changed' });
@@ -225,20 +225,21 @@ describe('PERF-004 通知を読まない接続', () => {
     expect(maxPending).toBeLessThanOrEqual(LIMITS.ssePendingEvents + 1);
     expect(running.eventStreams().streams).toBe(2);
 
-    // 読む接続には、捨てた通知の代わりに取り直しの合図と、その後の通知が届く。
+    // The reading connection receives a resync marker in place of the dropped notifications, and the ones after it.
     await wait(200);
     const last = events.publish({ type: 'focus-requested' });
     const deadline = Date.now() + 5000;
     while (!stream.received.includes(`id: ${String(last.sequence)}\n`)) {
-      if (Date.now() > deadline) throw new Error('読む接続へ通知が届きません');
+      if (Date.now() > deadline)
+        throw new Error('Notification did not reach the reading connection');
       await wait(20);
     }
     expect(stream.received).toContain('event: resync-required');
 
-    // 書き込みが進まない接続は、期限の後に切り、購読も外す。読む接続は残る。
+    // A connection whose writes make no progress is cut after the deadline and unsubscribed. The reading one remains.
     const cutDeadline = Date.now() + 10_000;
     while (running.eventStreams().streams > 1) {
-      if (Date.now() > cutDeadline) throw new Error('詰まった接続が切れません');
+      if (Date.now() > cutDeadline) throw new Error('Stalled connection was not cut');
       await wait(50);
     }
     expect(events.subscriberCount).toBe(1);
@@ -249,8 +250,8 @@ describe('PERF-004 通知を読まない接続', () => {
     await store.close();
   });
 
-  it('書き込みが詰まったままsessionが失効したら、残りを送らずにsocketまで閉じる', async () => {
-    // 詰まりによる切断（60秒）より先に、sessionの失効で閉じることを確かめる。
+  it('if the session expires while writes are stalled, closes down to the socket without sending the rest', async () => {
+    // Verify that session expiry closes it before the stall cutoff (60 seconds) does.
     const { store, events, stream, token, advance } = await connect(50, 60_000);
     const running = server as ManagementServer;
     const stuck = await connectStuck(running.port, token);
@@ -261,24 +262,24 @@ describe('PERF-004 通知を読まない接続', () => {
     advance(LIMITS.sessionIdleMs + 1);
     const deadline = Date.now() + 5000;
     while (running.eventStreams().streams > 0) {
-      if (Date.now() > deadline) throw new Error('失効したsessionの接続が終わりません');
+      if (Date.now() > deadline) throw new Error('Connection of the expired session did not end');
       await wait(20);
     }
     expect(events.subscriberCount).toBe(0);
     await ended(stream);
-    // 読まない側のsocketも、serverが閉じている（読み込みを再開すると、終わりが届く）。
+    // The server has closed the non-reading socket too (resuming reading delivers the end).
     stuck.resume();
     await Promise.race([once(stuck, 'close'), wait(5000)]);
     expect(stuck.destroyed).toBe(true);
     await store.close();
   });
 
-  it('待ち行列があふれた後に通知が続いても、届く連番は増え続け、取り直しの合図が届く', async () => {
+  it('delivered sequences keep increasing and a resync marker arrives even as notifications continue after the queue overflows', async () => {
     const { store, events, token } = await connect(60_000);
     const running = server as ManagementServer;
     const slow = await connectStuck(running.port, token);
     slow.on('error', () => undefined);
-    // 待ち行列をあふれさせてから読み込みを再開し、書き込みが進む間にも通知を出し続ける。
+    // Overflow the queue, then resume reading and keep publishing while writes progress.
     await fillUntilStuck(events, running);
     for (let index = 0; index < 1000; index += 1) events.publish({ type: 'catalog-changed' });
     expect(running.eventStreams().maxPending).toBe(LIMITS.ssePendingEvents + 1);
@@ -290,13 +291,15 @@ describe('PERF-004 通知を読まない接続', () => {
     const last = events.publish({ type: 'focus-requested' });
     const deadline = Date.now() + 10_000;
     while (!sequencesOf(slow.received()).includes(last.sequence)) {
-      if (Date.now() > deadline) throw new Error('最後の通知が届きません');
+      if (Date.now() > deadline) throw new Error('Last notification did not arrive');
       await wait(20);
     }
     expect(slow.received()).toContain('event: resync-required');
     const sequences = sequencesOf(slow.received());
     for (let index = 1; index < sequences.length; index += 1) {
-      expect(sequences[index], `${String(index)}番目`).toBeGreaterThan(sequences[index - 1] ?? -1);
+      expect(sequences[index], `index ${String(index)}`).toBeGreaterThan(
+        sequences[index - 1] ?? -1,
+      );
     }
     await store.close();
   });

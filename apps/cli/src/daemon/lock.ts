@@ -8,12 +8,12 @@ import { z } from 'zod';
 
 const execFileAsync = promisify(execFile);
 
-// lockは世代で管理する。`<name>.<世代>`のうち、世代が最大のfileが現在のlock。
-// 次の世代のfileは排他的にしか作れないので、既存のlockを外さずに引き継げる。
-// 解放は自分のfileを「解放済み」へ書き換えるだけで、消さない。
-// 最大の世代のfileは誰も消さない。消されるのは、より新しい世代ができた後の古い世代だけ。
-// したがって、消された世代を遅れて作り直しても、その時点で必ずより新しい世代が存在する。
-// 取得は「作成できた」だけでは成立させず、自分が最大の世代であることを確かめてから成立させる。
+// Locks are managed by generation. Among `<name>.<generation>` files, the highest generation is the current lock.
+// The next generation's file can only be created exclusively, so a lock can be taken over without removing the existing one.
+// Releasing only rewrites the owner's file as "released"; it does not delete it.
+// Nobody deletes the file of the highest generation. Only older generations are deleted, after a newer one exists.
+// Therefore, even if a deleted generation is recreated late, a newer generation always exists by then.
+// Acquisition is not complete just because the file was created; it completes only after confirming this is the highest generation.
 const GENERATION_DIGITS = 12;
 const ACQUIRE_ATTEMPTS = 8;
 
@@ -26,17 +26,17 @@ const lockInfoSchema = z.strictObject({
 });
 export type LockInfo = z.infer<typeof lockInfoSchema>;
 
-// alive: 所有者が生きている。dead: 確実に停止している。
-// 判定できない場合はaliveとして扱い、lockを引き継がない（仕様6.2）。
+// alive: the owner is running. dead: it has definitely stopped.
+// When undeterminable, treat it as alive and do not take over the lock (spec 6.2).
 export type OwnerState = 'alive' | 'dead';
 
 export interface ProcessProbe {
   isAlive(pid: number): boolean;
-  // processの起動時刻。取得できなければnull。
+  // Start time of the process. null if unavailable.
   startTime(pid: number): Promise<Date | null>;
 }
 
-// lockを書いてからprocessが起動することはない。起動時刻がこれより後なら、PIDが再利用されている。
+// A process never starts after its lock was written. If the start time is later than this, the PID has been reused.
 const START_TIME_TOLERANCE_MS = 2000;
 
 export const systemProcessProbe: ProcessProbe = {
@@ -45,7 +45,7 @@ export const systemProcessProbe: ProcessProbe = {
       process.kill(pid, 0);
       return true;
     } catch (error) {
-      // EPERMは「存在するが別ユーザーのprocess」。停止済みとは言えない。
+      // EPERM means "exists but belongs to another user". It cannot be called dead.
       return (error as NodeJS.ErrnoException).code !== 'ESRCH';
     }
   },
@@ -95,7 +95,7 @@ async function listGenerations(directory: string, name: string): Promise<number[
   return generations.toSorted((a, b) => a - b);
 }
 
-// 現在のlock。無ければnull。読めないfileは'invalid'として、引き継ぎの対象にしない。
+// The current lock. null if none. An unreadable file is 'invalid' and is not a takeover candidate.
 export async function readCurrentLock(
   directory: string,
   name: string,
@@ -107,7 +107,7 @@ export async function readCurrentLock(
     try {
       text = await readFile(join(directory, fileNameOf(name, generation)), 'utf8');
     } catch (error) {
-      // 一覧の後に、より新しい世代の所有者が古いfileを消した。一覧からやり直す。
+      // After listing, the owner of a newer generation deleted the old file. Start over from the listing.
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
       throw error;
     }
@@ -121,8 +121,8 @@ export async function readCurrentLock(
   return 'invalid';
 }
 
-// 内容を書き終えたfileを、排他的に指定の名前へ置く。既にあればfalse。
-// 読む側が書きかけのlockを見ることはない。
+// Place a fully written file at the given name exclusively. Returns false if it already exists.
+// Readers never see a partially written lock.
 async function createExclusive(
   directory: string,
   fileName: string,
@@ -154,12 +154,12 @@ export type AcquireOutcome =
   | { acquired: false; reason: 'held' | 'invalid'; holder: LockInfo | null };
 
 export interface AcquireHooks {
-  // testで競合を再現するために、世代のfileを置く直前で待たせる。
+  // Pauses right before placing the generation file, so tests can reproduce a race.
   beforeLink?: (generation: number) => Promise<void>;
 }
 
-// lockを取得する。現在の所有者が生きていれば取得しない。
-// 解放済み、または所有者が停止済みのときだけ、次の世代を排他的に作って引き継ぐ。
+// Acquire the lock. Does not acquire if the current owner is alive.
+// Only when released or the owner is dead, create the next generation exclusively and take over.
 export async function acquireLock(
   directory: string,
   name: string,
@@ -193,17 +193,17 @@ export async function acquireLock(
       info,
       beforeLink ? () => beforeLink(generation) : undefined,
     );
-    // 同じ世代を別のprocessが先に作った。現在のlockを読み直して判定する。
+    // Another process created the same generation first. Re-read the current lock and decide again.
     if (!created) continue;
 
-    // 作成できても、観測が古かった場合がある（観測の後に世代が進み、この世代のfileが消されていた）。
-    // 自分が最大の世代でなければ取得は成立していない。作ったfileを消して、判定をやり直す。
+    // Even if created, the observation may have been stale (the generation advanced after it, and this generation's file had been deleted).
+    // If this is not the highest generation, acquisition did not complete. Delete the created file and decide again.
     const latest = (await listGenerations(directory, name)).at(-1);
     if (latest !== generation) {
       await rm(join(directory, fileNameOf(name, generation)), { force: true });
       continue;
     }
-    // 自分より古い世代は、もう参照されない。
+    // Generations older than ours are no longer referenced.
     for (const older of await listGenerations(directory, name)) {
       if (older < generation) await rm(join(directory, fileNameOf(name, older)), { force: true });
     }
@@ -223,7 +223,7 @@ export async function holdsLock(
   );
 }
 
-// 自分のlockを解放済みへ書き換える。fileは残すので、lockが存在しない瞬間はできない。
+// Rewrite our own lock as released. The file is kept, so there is never a moment without a lock.
 export async function releaseLock(directory: string, name: string, ownerId: string): Promise<void> {
   const current = await readCurrentLock(directory, name);
   if (!current || current === 'invalid' || current.ownerId !== ownerId || current.released) return;

@@ -6,12 +6,12 @@ import { z } from 'zod';
 
 import { IPC_KEY_BYTES } from '../server/ipc-auth.ts';
 
-// lock fileの名前の先頭。実際のfileは`<name>.<世代>`（lock.ts）。
+// Prefix of the lock file name. The actual file is `<name>.<generation>` (lock.ts).
 export const DAEMON_LOCK_NAME = 'daemon.lock';
 export const START_LOCK_NAME = 'start.lock';
 export const POINTER_FILE = 'runtime-pointer.json';
 
-// daemonが実際に使っているruntimeの位置。秘密を含めない（仕様7.1）。
+// Location of the runtime the daemon is actually using. Contains no secrets (spec 7.1).
 const runtimePointerSchema = z.strictObject({
   daemonId: z.string().min(1),
   pid: z.number().int().positive(),
@@ -30,7 +30,7 @@ export async function readPointer(stateRoot: string): Promise<RuntimePointer | n
       JSON.parse(await readFile(join(stateRoot, POINTER_FILE), 'utf8')),
     );
   } catch {
-    // 無い、または読めないpointerは「daemonなし」として扱う。接続先の確認はIPCの認証で行う。
+    // A missing or unreadable pointer is treated as "no daemon". The connection target is verified by IPC authentication.
     return null;
   }
 }

@@ -19,8 +19,8 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('解析worker', () => {
-  it('文書の構造を解析して返す', async () => {
+describe('parse worker', () => {
+  it('parses and returns the document structure', async () => {
     service = createParseService();
     const analysis = await service.analyze('markdown', '# 概要\n\n## 手順\n');
     expect(analysis.title).toBe('概要');
@@ -28,18 +28,18 @@ describe('解析worker', () => {
     expect((await service.analyze('html', '<title>t</title><h1>見出し</h1>')).title).toBe('t');
   });
 
-  it('MD-006: 構造の上限を超える文書は、解析errorにする', async () => {
+  it('MD-006: a document over the structure limit is a parse error', async () => {
     service = createParseService();
     await expect(service.analyze('markdown', `${'> '.repeat(70)}深い`)).rejects.toMatchObject({
       code: 'E_PARSE_FAILED',
       details: { reason: 'limit-depth' },
     });
-    // errorの後も、同じworkerで解析を続けられる。
+    // Parsing continues on the same worker after the error.
     expect((await service.analyze('markdown', '# 次\n')).title).toBe('次');
   });
 
-  it('MD-006: 時間内に終わらない解析は、workerを止めて回収し、その後も解析できる', async () => {
-    // 最初の依頼にだけ応答しないworker。作り直された後は、すぐに応答する。
+  it('MD-006: a parse that does not finish in time stops and reclaims the worker, and parsing still works afterwards', async () => {
+    // A worker that ignores only the first request. After being recreated, it replies immediately.
     const marker = join(dir, 'started');
     const workerPath = join(dir, 'slow-worker.mjs');
     writeFileSync(
@@ -64,7 +64,7 @@ parentPort.on('message', (request) => {
     expect((await service.analyze('markdown', '# 次\n')).title).toBe('recovered');
   });
 
-  it('参照の収集と、表示用の変換も、workerで行う', async () => {
+  it('also collects references and transforms for display on the worker', async () => {
     service = createParseService();
     expect(
       await service.scan('html', '<img src="a.png"><link rel="stylesheet" href="s.css">'),
@@ -104,7 +104,7 @@ parentPort.on('message', (request) => {
     expect(rendered.html).toContain('<img src="a.png">');
     expect(rendered.html).not.toContain('script');
     expect(rendered.stylesheets).toEqual([
-      // 外部を参照する宣言だけが外れる。
+      // Only the declaration that references an external resource is dropped.
       { logicalPath: 's.css', css: '.a{background:url(a.png)}.b{}' },
     ]);
     expect(rendered.diagnostics.map((entry) => entry.code).toSorted()).toEqual([
@@ -113,7 +113,7 @@ parentPort.on('message', (request) => {
     ]);
   });
 
-  it('閉じた後は解析を受け付けない', async () => {
+  it('does not accept parses after close', async () => {
     service = createParseService();
     await service.close();
     await expect(service.analyze('markdown', '# x\n')).rejects.toMatchObject({

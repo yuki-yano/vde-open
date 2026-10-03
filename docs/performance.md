@@ -1,66 +1,69 @@
-# 性能の実測
+# Performance measurements
 
-仕様16.1の性能目標に対する実測です。値は設計目標であり、約束した値ではありません。CIでは環境に依存するms値をassertionにせず、hang・件数の上限・資源の増加を検査します（`tests/integration/resources.test.ts`）。
+[日本語](performance.ja.md)
 
-## 測定の方法
+Measurements against the performance goals in spec 16.1. The values are design goals, not promises. CI does not assert environment-dependent millisecond values; it checks for hangs, count limits, and resource growth (`tests/integration/resources.test.ts`).
 
-`pnpm build && pnpm perf`（`scripts/perf.ts`）。配布物（`apps/cli/dist`）を、一時の`VDE_OPEN_HOME`で動かします。fixtureは決まった内容のMarkdown（日本語と英語、8行ごとに見出し）を、指定の件数と合計の大きさで作ります。
+## How it is measured
 
-- cold open: daemonの起動から、directoryの全文書を開き終えるまで（CLIの`open docs --recursive`）。
-- 索引: 開いた後、全文書が検索の対象になるまで。
-- warm検索: 10種類のqueryを5回ずつ（50回）、IPCで実行した時間のp50・p95。
-- list・read: 一覧（500件ずつcursorで全件）と、1文書のreadの時間。
-- 更新の公開: fileを書き換えてから、IPCの一覧の版が変わるまで（監視からdaemonが新しい版を公開するまで）。
-- 管理画面（PlaywrightのChromium、headless、1280×800）:
-  - 一覧: 一回限りのURLを開いてから、一覧に全文書が出るまで（件数の見出しと行の数で確かめる）。
-  - 選択: 一覧の末尾の文書を押してから、その文書の見出しが表示されるまで。
-  - 保存から表示の反映: 表示中の文書のfileへ行を足してから、その行が画面（DOM）に出るまで。
-- 待機中のCPU: 5秒の待機の間に、daemonのprocessが使ったCPU時間の割合。
-- RSS: 待機の後のdaemonのprocessのRSS（解析と検索のworker threadを含む）。1回だけの測定で、memoryが増え続けるかどうかは、この値では判断しない（下の「資源の検査」で確かめる）。
+`pnpm build && pnpm perf` (`scripts/perf.ts`). The packaged build (`apps/cli/dist`) runs with a temporary `VDE_OPEN_HOME`. The fixtures are generated Markdown with fixed content (Japanese and English, a heading every 8 lines), with the given number of documents and total size.
 
-## 結果（2026-10-03）
+- Cold open: from starting the daemon until every document in the directory is open (the CLI's `open docs --recursive`).
+- Indexing: after opening, until every document is searchable.
+- Warm search: p50 and p95 of 10 queries run 5 times each (50 runs) over IPC.
+- List and read: listing every document (500 per page with a cursor) and reading one document.
+- Update published: from rewriting a file until the revision in the IPC list changes (until the daemon publishes the new revision through the watcher).
+- Management UI (Playwright's Chromium, headless, 1280×800):
+  - List: from opening the one-time URL until every document is in the list (checked by the count heading and the number of rows).
+  - Select: from clicking the last document in the list until its heading is shown.
+  - Save to screen: from appending a line to the file of the shown document until that line appears on screen (in the DOM).
+- Idle CPU: the share of CPU time the daemon process used during 5 seconds of idle.
+- RSS: the RSS of the daemon process after the idle period (including the analysis and search worker threads). This is a single measurement; whether memory keeps growing is not judged from it (see "Resource checks" below).
 
-環境: macOS（darwin arm64）、Apple M5 Max（18コア）、Node.js v24.21.0、Chromium（Playwright 1.63.0、headless）。
+## Results (2026-10-03)
 
-daemonとIPC:
+Environment: macOS (darwin arm64), Apple M5 Max (18 cores), Node.js v24.21.0, Chromium (Playwright 1.63.0, headless).
 
-| fixture | 文書数 | cold open | 索引 | 検索 p50 | 検索 p95 | list | read | 更新の公開 | 待機中のCPU | RSS |
+Daemon and IPC:
+
+| fixture | documents | cold open | indexing | search p50 | search p95 | list | read | update published | idle CPU | RSS |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 標準（100文書／10MiB） | 100 | 730.8ms | 1553.0ms | 64.1ms | 169.0ms | 1.6ms | 2.7ms | 241.2ms | 0.3% | 1055.4MiB |
-| 負荷（1,000文書／50MiB） | 1000 | 5187.8ms | 8989.5ms | 456.5ms | 1217.8ms | 4.9ms | 1.1ms | 325.1ms | 0.3% | 3024.5MiB |
+| standard (100 documents / 10 MiB) | 100 | 730.8ms | 1553.0ms | 64.1ms | 169.0ms | 1.6ms | 2.7ms | 241.2ms | 0.3% | 1055.4MiB |
+| load (1,000 documents / 50 MiB) | 1000 | 5187.8ms | 8989.5ms | 456.5ms | 1217.8ms | 4.9ms | 1.1ms | 325.1ms | 0.3% | 3024.5MiB |
 
-管理画面:
+Management UI:
 
-| fixture | 一覧に全件が出るまで | 末尾の文書の選択 | 保存から表示の反映（DOM） |
+| fixture | all documents in the list | select the last document | save to screen (DOM) |
 |---|---|---|---|
-| 標準（100文書／10MiB） | 103.8ms | 89.6ms | 303.2ms |
-| 負荷（1,000文書／50MiB） | 188.7ms | 396.0ms | 336.4ms |
+| standard (100 documents / 10 MiB) | 103.8ms | 89.6ms | 303.2ms |
+| load (1,000 documents / 50 MiB) | 188.7ms | 396.0ms | 336.4ms |
 
-## 目標との比較
+## Against the goals
 
-| 目標（仕様16.1） | 結果 |
+| goal (spec 16.1) | result |
 |---|---|
-| 標準fixtureでwarm検索p95 300ms以内 | 達成（169.0ms） |
-| 通常の保存から表示の反映まで1秒程度 | 達成（画面の表示まで303.2ms、負荷でも336.4ms） |
-| 待機時にCPUが回り続けない | 達成（0.3%、0.3%） |
+| Warm search p95 within 300 ms on the standard fixture | Met (169.0ms) |
+| About 1 second from a normal save to the updated view | Met (303.2ms to the screen; 336.4ms even under load) |
+| CPU does not keep spinning while idle | Met (0.3%, 0.3%) |
 
-## 未達・未調査の点
+## Not met or not investigated
 
-- **RSSが大きい。** 標準で約1.0GB、負荷で約3.0GBでした。原因は調べていません。推定は、検索workerのMiniSearchの索引（長い節を重なりのある部分に分けて入れている）と、索引を作る間に増えたV8のheapが、待機の後も返されていないことです（Not verified）。強制的なGCの後の値は測っていません。
-- 負荷fixtureでの検索p95は1217.8msでした。負荷fixtureには時間の目標はありませんが、文書が多いと検索が遅くなります。
-- 表の値は1回の測定です。同じ日のほかの測定と比べると、cold open・索引・検索・更新の公開・管理画面の項目の差は15%以内でした。list・readは値が数msなので、割合では大きく変わります（listは1.0〜1.6ms）。待機中のCPUは、測定によって0.1〜0.3%でした。
-- 診断（`daemon.diagnostics`）は、回収を求めないときは索引の同期などの処理を起こさない。測定の途中で、診断のたびに索引の同期を行う形にしていたときは、待機中のCPUが0.9%（標準）と出た（待機の後の診断の処理が含まれたため）。Linux・Windows、Firefox・WebKitでは測っていません。
+- **RSS is large.** About 1.0 GB on the standard fixture and about 3.0 GB under load. The cause has not been investigated. The guess is that the MiniSearch index in the search worker (long sections are split into overlapping parts) and the V8 heap that grew while indexing are not returned after the idle period (Not verified). Values after a forced GC were not measured.
+- Search p95 on the load fixture was 1217.8ms. The load fixture has no time goal, but search gets slower with many documents.
+- The table shows a single run. Compared with other runs on the same day, cold open, indexing, search, update published, and the management UI items differed by less than 15%. List and read take a few milliseconds, so their ratios vary a lot (list was 1.0 to 1.6ms). Idle CPU was 0.1 to 0.3% depending on the run.
+- Diagnostics (`daemon.diagnostics`) trigger no index sync or similar work unless garbage collection is requested. While diagnostics synced the index on every call, idle CPU measured 0.9% on the standard fixture (the diagnostics work after the idle period was counted).
+- Nothing was measured on Linux, Windows, Firefox, or WebKit.
 
-## 資源の検査（PERF-002〜005）
+## Resource checks (PERF-002 to 005)
 
-`tests/integration/resources.test.ts`で、daemonの診断（IPCの`daemon.diagnostics`。監視しているdirectoryの数と、作ったwatcher・閉じ終えたwatcherの数、通知の購読数、通知の接続ごとの書き終わっていない通知の数、表示の権限の数、各serviceが保持している項目の数、検索と解析のworkerのheapと、検索のindexが保持している項目の数、Nodeの有効な資源の種類ごとの数、RSS、heap、CPU時間）を使って検査します。`collectGarbage: true`を渡すと、検索のindexを今の文書の状態に合わせ終え、消した項目を片付けて（MiniSearchのvacuum）から、daemonの本体と各workerのthreadでGCを1回行い、heapを測ります。診断の最中にdaemonの停止が始まったら、同期を待たずに`E_DAEMON_STOPPING`で終えます（停止を待たせない）。
+`tests/integration/resources.test.ts` checks resources with the daemon's diagnostics (IPC `daemon.diagnostics`): the number of watched directories and of watchers created and closed, event subscribers, unwritten events per notification connection, render grants, items each service retains, the heap of the search and analysis workers and the items the search index retains, active Node.js resources by type, RSS, heap, and CPU time. With `collectGarbage: true`, the daemon first brings the search index up to date with the current documents and cleans up removed items (MiniSearch vacuum), then runs one GC on the main thread and on each worker thread and measures the heap. If the daemon starts stopping during diagnostics, they end with `E_DAEMON_STOPPING` without waiting for the sync (so they never delay the stop).
 
-- 1,000文書を開いても、管理画面の一覧に全件が出て、末尾の文書を選んで表示でき、保存が表示に反映される（PERF-002。`tests/e2e/ux.spec.ts`）。
-- 100回の開閉と、監視ruleの追加・解除20回の後でも、監視しているdirectoryの数と有効な資源の数が増えず、外したwatcherはすべて閉じ終えている（作った数－閉じた数＝監視中のdirectoryの数）（PERF-003）。
-- memoryの継続増加（PERF-003、仕様16.1）: 約40KiBの文書を「書き換える・開く・読む・検索する・表示の権限を取って返す・閉じる」を30回行った後、40回ずつ3区間を繰り返し、区間の終わりごとに、daemonの本体・検索のworker・解析のworkerのGCの後のheapと、保持している項目の数を測る（決まった時間は待たず、上の診断が同期と片付けを待つ）。
-  - 本体が保持している項目（解析の結果、版の記録、表示の権限と変換の結果、索引の記録、待っている処理、session）と、検索のindexが保持している項目（確定・途中の文書、索引の項目、語、片付け前の項目）の数は、3区間で同じ。
-  - heapの区間ごとの増え方は、本体・各workerとも1MiB未満（macOSの実測で、本体は+0.3MiB、+0.1MiB程度、workerは+0.1MiB未満）。
-  - 漏れを作ると失敗することを確かめた: 本体でreadのたびに約40KiBを残すと1区間で約2.0MB、検索のworkerでindexの確定のたびに8,192要素の配列を残すと1区間で約2.6MB増える。
-  - 閉じた文書の記録（stateに残り、開き直すと同じIDを使う）に付く項目は、開いたことのある文書の数までで止まる。
-- 通知を読まないclientがいても、50回の連続した更新と、ほかのclientの操作が終わる（PERF-004）。書き込みが詰まった接続の検査は`apps/cli/src/server/http/management.test.ts`にあります。受け手のsocketが埋まるまで通知を出した後、さらに5万件を出しても、接続ごとの待ち行列は上限（256件と取り直しの合図1つ）を超えません。読む接続には取り直しの合図とその後の通知が届き、書き込みが進まない接続は期限（既定60秒）の後に切って購読を外します。
-- 通知の接続と切断を30回繰り返しても購読が残らず、3秒の待機で使うCPU時間が150ms未満（PERF-005）。
+- With 1,000 documents open, the management UI lists all of them, the last document can be selected and shown, and saves are reflected on screen (PERF-002, `tests/e2e/ux.spec.ts`).
+- After 100 open/close cycles and 20 watch rule add/remove cycles, the number of watched directories and active resources does not grow, and every removed watcher has finished closing (created minus closed equals the number of watched directories) (PERF-003).
+- Continuous memory growth (PERF-003, spec 16.1): after 30 rounds of "rewrite, open, read, search, take and release a render grant, close" on a document of about 40 KiB, three intervals of 40 rounds follow. At the end of each interval, the heap after GC and the retained item counts are measured on the daemon's main thread, the search worker, and the analysis worker (there is no fixed wait; the diagnostics above wait for the sync and cleanup).
+  - The items the main thread retains (analysis results, revision records, render grants and conversion results, index records, pending waiters, sessions) and the items the search index retains (committed and staged documents, index entries, terms, items awaiting cleanup) are the same in all three intervals.
+  - Heap growth per interval is under 1 MiB on the main thread and on each worker (measured on macOS: about +0.3 MiB and +0.1 MiB on the main thread, under +0.1 MiB on the workers).
+  - Leaks make the test fail: keeping about 40 KiB per read on the main thread adds about 2.0 MB per interval, and keeping an array of 8,192 elements per index commit in the search worker adds about 2.6 MB per interval.
+  - Items attached to records of closed documents (kept in the state; reopening uses the same ID) stop growing at the number of documents that have ever been opened.
+- A client that does not read notifications does not block 50 consecutive updates or other clients' operations (PERF-004). The check for connections whose writes are blocked is in `apps/cli/src/server/http/management.test.ts`. After sending notifications until the receiver's socket is full and then 50,000 more, each connection's queue stays within the limit (256 events plus one resync event). Reading connections receive the resync event and later events, and connections whose writes make no progress are closed after the timeout (60 seconds by default) and unsubscribed.
+- After 30 notification connect/disconnect cycles, no subscriptions remain, and 3 seconds of idle use less than 150 ms of CPU time (PERF-005).

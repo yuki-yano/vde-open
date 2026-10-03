@@ -1,11 +1,11 @@
 import type { DocumentSummary } from '@vde-open/shared';
 
-// sidebarのtree（仕様13.1）。登録済みの文書のpathから作る表示で、filesystemは操作しない。
+// The sidebar tree (spec 13.1). A view built from the paths of registered documents; it never touches the filesystem.
 export type TreeNode =
   | { kind: 'directory'; name: string; children: TreeNode[] }
   | { kind: 'document'; name: string; document: DocumentSummary };
 
-export const INPUT_GROUP_NAME = '入力・生成文書';
+export const INPUT_GROUP_NAME = 'Input and generated documents';
 
 interface Branch {
   directories: Map<string, Branch>;
@@ -18,7 +18,7 @@ function emptyBranch(): Branch {
 
 function commonPrefixLength(paths: string[][]): number {
   if (paths.length === 0) return 0;
-  // fileの名前は残し、directoryの部分だけを比べる。
+  // Keep the file name and compare only the directory part.
   const directories = paths.map((segments) => segments.slice(0, -1));
   const shortest = Math.min(...directories.map((segments) => segments.length));
   let length = 0;
@@ -34,7 +34,7 @@ function commonPrefixLength(paths: string[][]): number {
 function toNodes(branch: Branch): TreeNode[] {
   const nodes: TreeNode[] = [];
   for (const [name, child] of branch.directories) {
-    // 子が1つのdirectoryだけなら、`a/b/c`のように1行へまとめる。
+    // If the only child is a single directory, collapse it into one row like `a/b/c`.
     let label = name;
     let current = child;
     while (current.documents.length === 0 && current.directories.size === 1) {
@@ -57,7 +57,7 @@ function toNodes(branch: Branch): TreeNode[] {
 export function buildTree(documents: DocumentSummary[]): TreeNode[] {
   const files = documents.filter((document) => document.sourceKind === 'file');
   const others = documents.filter((document) => document.sourceKind !== 'file');
-  // すべての文書に共通する親directoryは省く。rootが違う文書は、違いが残るところから表示される。
+  // Drop the parent directories shared by all documents. Documents under different roots are shown from where they start to differ.
   const skip = commonPrefixLength(files.map((document) => document.pathSegments));
   const root = emptyBranch();
   for (const document of files) {

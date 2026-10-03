@@ -4,14 +4,14 @@ import { canonicalJson } from './canonical-json.ts';
 import { documentIdSchema, htmlModeSchema, revisionSchema } from './documents.ts';
 import { LIMITS } from './limits.ts';
 
-// 質問定義（仕様11.2）。任意のJSON Schemaではなく、決まった形だけを受け付ける。
-// 同梱の`packages/shared/schemas/questionnaire.schema.json`と同じ契約で、contract testで一致を確かめる。
+// Question definition (spec 11.2). Accepts only a fixed shape, not arbitrary JSON Schema.
+// Same contract as the bundled `packages/shared/schemas/questionnaire.schema.json`; a contract test checks they match.
 
 export const requestIdSchema = z.string().regex(/^req_[0-9a-f-]{36}$/);
 export const submissionIdSchema = z.string().regex(/^sub_[0-9a-f-]{36}$/);
 
 const FIELD_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-// objectの組み込みの名前。回答のkeyにすると、prototypeの値と取り違える。
+// Built-in object names. Used as answer keys, they get confused with prototype values.
 const RESERVED_NAMES: ReadonlySet<string> = new Set([
   '__proto__',
   'constructor',
@@ -22,7 +22,7 @@ const RESERVED_NAMES: ReadonlySet<string> = new Set([
 export const fieldNameSchema = z
   .string()
   .regex(FIELD_NAME)
-  .refine((name) => !RESERVED_NAMES.has(name), { message: 'このfield名は使えません。' });
+  .refine((name) => !RESERVED_NAMES.has(name), { message: 'This field name cannot be used.' });
 
 const fieldTitle = z.string().min(1).max(160);
 const fieldDescription = z.string().max(2000);
@@ -31,10 +31,10 @@ const enumValues = z
   .min(1)
   .max(32)
   .refine((values) => new Set(values).size === values.length, {
-    message: '選択肢が重複しています。',
+    message: 'The choices contain duplicates.',
   });
 const lengthLimit = z.number().int().min(0).max(LIMITS.answerStringLength);
-const finite = z.number().refine(Number.isFinite, { message: '有限の数を指定してください。' });
+const finite = z.number().refine(Number.isFinite, { message: 'The number must be finite.' });
 
 const stringFieldSchema = z.strictObject({
   type: z.literal('string'),
@@ -90,7 +90,7 @@ export const questionnaireSchema = z
           const count = Object.keys(properties).length;
           return count >= 1 && count <= LIMITS.questionFields;
         },
-        { message: `fieldは1〜${String(LIMITS.questionFields)}件です。` },
+        { message: `There must be 1 to ${String(LIMITS.questionFields)} fields.` },
       ),
       required: z.array(fieldNameSchema).max(LIMITS.questionFields),
       additionalProperties: z.literal(false),
@@ -100,13 +100,13 @@ export const questionnaireSchema = z
     const names = Object.keys(questionnaire.answerSchema.properties);
     const order = questionnaire.fieldOrder;
     if (new Set(order).size !== order.length) {
-      context.addIssue({ code: 'custom', path: ['fieldOrder'], message: '重複があります。' });
+      context.addIssue({ code: 'custom', path: ['fieldOrder'], message: 'There are duplicates.' });
     }
     if (order.length !== names.length || !names.every((name) => order.includes(name))) {
       context.addIssue({
         code: 'custom',
         path: ['fieldOrder'],
-        message: 'fieldOrderとpropertiesのfieldが一致しません。',
+        message: 'The fields in fieldOrder and properties do not match.',
       });
     }
     const { required } = questionnaire.answerSchema;
@@ -114,7 +114,7 @@ export const questionnaireSchema = z
       context.addIssue({
         code: 'custom',
         path: ['answerSchema', 'required'],
-        message: '重複があります。',
+        message: 'There are duplicates.',
       });
     }
     for (const name of required) {
@@ -122,7 +122,7 @@ export const questionnaireSchema = z
         context.addIssue({
           code: 'custom',
           path: ['answerSchema', 'required'],
-          message: `存在しないfieldです: ${name}`,
+          message: `The field ${name} does not exist.`,
         });
       }
     }
@@ -138,19 +138,28 @@ export const questionnaireSchema = z
           field.maximum !== undefined &&
           field.minimum > field.maximum) ||
         (field.type === 'array' && field.minItems !== undefined && field.minItems > field.maxItems);
-      if (inverted) context.addIssue({ code: 'custom', path, message: '上限と下限が逆です。' });
+      if (inverted)
+        context.addIssue({
+          code: 'custom',
+          path,
+          message: 'The lower bound is greater than the upper bound.',
+        });
       if (
         field.type === 'array' &&
         field.minItems !== undefined &&
         field.minItems > field.items.enum.length
       ) {
-        context.addIssue({ code: 'custom', path, message: '選択肢より多い最小数です。' });
+        context.addIssue({
+          code: 'custom',
+          path,
+          message: 'minItems is greater than the number of choices.',
+        });
       }
     }
   });
 export type Questionnaire = z.infer<typeof questionnaireSchema>;
 
-// 回答の値。stringのarrayは、選択肢のarray。
+// An answer value. An array of strings is an array of choices.
 export const answerValueSchema = z.union([
   z.string(),
   z.boolean(),
@@ -162,7 +171,7 @@ export const answersSchema = z.record(fieldNameSchema, answerValueSchema);
 export type Answers = z.infer<typeof answersSchema>;
 
 export interface AnswerIssue {
-  // field名。回答全体の問題は''。値は含めない（秘密を書かれていても、errorに写さない）。
+  // Field name. '' for an issue with the whole answer. Never includes the value (a secret written there must not leak into the error).
   field: string;
   code:
     | 'not-object'
@@ -185,7 +194,7 @@ function codePointLength(text: string): number {
   return length;
 }
 
-// UTF-8での大きさ。browserとNode.jsの両方で同じ値になるよう、文字から数える。
+// Size in UTF-8. Counted from the characters so the browser and Node.js give the same value.
 export function utf8Length(text: string): number {
   let bytes = 0;
   for (const char of text) {
@@ -199,9 +208,9 @@ export function byteLengthOfJson(value: unknown): number {
   return utf8Length(canonicalJson(value));
 }
 
-// 回答を検証する（仕様11.2）。completeなら送信時の検証（必須と最小の条件も見る）、
-// そうでなければ回答案の検証（未完成を許し、あるfieldの型・値・大きさだけを見る）。
-// 型の変換はしない。問題がなければ空の配列。
+// Validate answers (spec 11.2). With complete, validate for submit (also checks required and minimum constraints);
+// otherwise validate a draft answer (allows an incomplete answer and checks only the type, value and size of the fields present).
+// No type coercion. Returns an empty array when there are no issues.
 export function validateAnswers(
   questionnaire: Questionnaire,
   answers: unknown,
@@ -214,7 +223,7 @@ export function validateAnswers(
   try {
     bytes = byteLengthOfJson(answers);
   } catch {
-    // JSONで表せない値（undefinedや非有限の数）を含む。
+    // Contains a value JSON cannot represent (undefined or a non-finite number).
     return [{ field: '', code: 'type' }];
   }
   if (bytes > LIMITS.answerBytes) return [{ field: '', code: 'too-large' }];
@@ -302,11 +311,11 @@ export const submissionSchema = z.strictObject({
   submissionId: submissionIdSchema,
   answers: answersSchema,
   submittedAt: z.string(),
-  // 回答した版（質問を作ったときに固定した版）。
+  // The revision answered (the revision pinned when the question was created).
   revision: revisionSchema,
-  // 新しい版があると確認したうえで、固定した版への回答として送ったか。
+  // Whether it was submitted as an answer to the pinned revision after confirming a newer revision exists.
   confirmedAgainstOlderRevision: z.boolean(),
-  // 送信の時点で確認した、文書の現在の版。
+  // The document's current revision as confirmed at submit time.
   currentRevisionAtSubmit: revisionSchema.nullable(),
 });
 export type Submission = z.infer<typeof submissionSchema>;
@@ -316,7 +325,7 @@ export const cancellationSchema = z.strictObject({
   reason: cancellationReasonSchema,
 });
 
-// Agentへ返す質問の状態。回答案（draft）は含めない（仕様11.3）。確定した回答だけを返す。
+// Question state returned to the agent. Excludes the draft answer (spec 11.3). Only the submitted answer is returned.
 export const feedbackForAgentSchema = z.strictObject({
   requestId: requestIdSchema,
   documentId: documentIdSchema,
@@ -330,14 +339,14 @@ export const feedbackForAgentSchema = z.strictObject({
 });
 export type FeedbackForAgent = z.infer<typeof feedbackForAgentSchema>;
 
-// 管理UIへ返す質問の状態。質問定義と回答案、文書の現在の版を含む。
+// Question state returned to the management UI. Includes the question definition, the draft answer and the document's current revision.
 export const feedbackForUiSchema = feedbackForAgentSchema.extend({
   questionnaire: questionnaireSchema,
-  // 質問を作ったときに固定した表示方法。interactiveなら、HTMLから回答案を送れる。
+  // The HTML mode pinned when the question was created. With interactive, the HTML can send draft answers.
   renderMode: htmlModeSchema,
   draftVersion: z.number().int().nonnegative(),
   draftAnswers: answersSchema,
-  // 文書の現在の版。固定した版と違えば、新しい版がある。
+  // The document's current revision. If it differs from the pinned revision, a newer revision exists.
   currentRevision: revisionSchema.nullable(),
   documentOpen: z.boolean(),
 });
@@ -346,25 +355,28 @@ export type FeedbackForUi = z.infer<typeof feedbackForUiSchema>;
 export const feedbackCreateParamsSchema = z
   .strictObject({
     cwd: z.string().min(1),
-    // 質問定義のJSONの原文。重複したkeyを見つけるため、daemonが原文から読む。
+    // Raw JSON text of the question definition. The daemon parses the raw text to detect duplicate keys.
     questionnaire: z.string(),
-    // 既存の開いている文書へ質問する。
+    // Ask about an already open document.
     documentId: documentIdSchema.optional(),
     revision: revisionSchema.optional(),
-    // 文書を開いてから、その版へ質問する。
+    // Open a document, then ask about that revision.
     view: z.string().min(1).optional(),
     htmlMode: htmlModeSchema.optional(),
     assetsRoot: z.string().min(1).optional(),
     assets: z.array(z.string().min(1)).max(LIMITS.documentAssets).default([]),
-    // 再試行で同じ質問を重ねて作らないための識別子。
+    // Identifier that keeps a retry from creating the same question twice.
     operationId: z.uuid().optional(),
   })
   .superRefine((params, context) => {
     if (params.documentId !== undefined && params.view !== undefined) {
-      context.addIssue({ code: 'custom', message: '--documentと--viewは同時に指定できません。' });
+      context.addIssue({
+        code: 'custom',
+        message: '--document and --view cannot be used together.',
+      });
     }
     if (params.revision !== undefined && params.documentId === undefined) {
-      context.addIssue({ code: 'custom', message: '--revisionは--documentと一緒に指定します。' });
+      context.addIssue({ code: 'custom', message: '--revision requires --document.' });
     }
     const viewOnly =
       params.htmlMode !== undefined || params.assetsRoot !== undefined || params.assets.length > 0;
@@ -372,7 +384,7 @@ export const feedbackCreateParamsSchema = z
       context.addIssue({
         code: 'custom',
         message:
-          '--html-mode・--assets-root・--assetは、--viewで新しく開く文書にだけ指定できます。',
+          '--html-mode, --assets-root and --asset apply only to a document newly opened with --view.',
       });
     }
   });
@@ -380,7 +392,7 @@ export type FeedbackCreateParams = z.input<typeof feedbackCreateParamsSchema>;
 
 export const feedbackCreateResultSchema = z.strictObject({
   request: feedbackForAgentSchema,
-  // 同じoperation IDの再送で、前に作った質問を返したか。
+  // Whether a resend with the same operation ID returned the previously created question.
   replayed: z.boolean(),
 });
 export type FeedbackCreateResult = z.infer<typeof feedbackCreateResultSchema>;
@@ -397,7 +409,7 @@ export const feedbackIdParamsSchema = z.strictObject({ requestId: requestIdSchem
 
 export const feedbackWaitParamsSchema = z.strictObject({
   requestId: requestIdSchema,
-  // 待つ上限。CLIが残り時間を渡す。
+  // Maximum time to wait. The CLI passes the remaining time.
   timeoutMs: z
     .number()
     .int()
@@ -412,7 +424,7 @@ export const feedbackAckParamsSchema = z.strictObject({
 
 export const feedbackForgetParamsSchema = z.strictObject({
   requestId: requestIdSchema,
-  // 消すことの明示的な確認（`--yes`）。
+  // Explicit confirmation to delete (`--yes`).
   confirmed: z.boolean(),
 });
 
@@ -424,16 +436,16 @@ export const feedbackDraftParamsSchema = z.strictObject({
 export const feedbackSubmitParamsSchema = z.strictObject({
   submissionId: submissionIdSchema,
   expectedDraftVersion: z.number().int().nonnegative(),
-  // 質問を作ったときに固定した版。
+  // The revision pinned when the question was created.
   revision: revisionSchema,
-  // 送信の画面で確認した、文書の現在の版。
+  // The document's current revision as confirmed on the submit screen.
   currentRevision: revisionSchema.nullable(),
-  // 新しい版があると確認したうえで、固定した版への回答として送る。管理UIの操作でだけ設定する。
+  // Submit as an answer to the pinned revision after confirming a newer revision exists. Set only by an action in the management UI.
   confirmOlderRevision: z.boolean().default(false),
 });
 export type FeedbackSubmitParams = z.input<typeof feedbackSubmitParamsSchema>;
 
 export const feedbackCancelParamsSchema = z.strictObject({
-  // 中止の確認（管理UIで確認したこと）。
+  // Confirmation of the cancel (confirmed in the management UI).
   confirmed: z.literal(true),
 });

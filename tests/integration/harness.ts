@@ -23,7 +23,7 @@ export interface RunResult {
   exitCode: number | null;
   stdout: string;
   stderr: string;
-  // stdoutが「JSON 1個＋改行」だけであることを確かめて返す。
+  // Checks that stdout is exactly one JSON value plus a newline, and returns it.
   json: <T = Record<string, unknown>>() => JsonEnvelope<T>;
 }
 
@@ -38,7 +38,7 @@ export interface JsonEnvelope<T> {
 
 export interface RunOptions {
   cwd?: string;
-  // stdinへredirectする内容。未指定なら/dev/null相当（入力なし）。
+  // Content redirected to stdin. If omitted, equivalent to /dev/null (no input).
   stdin?: string | Buffer;
   env?: Record<string, string>;
 }
@@ -50,13 +50,13 @@ export interface TerminalResult {
 }
 
 export interface TestHome {
-  // 試験専用のstate root。本物のstateには触れない。
+  // State root dedicated to the test. The real state is not touched.
   home: string;
-  // fixtureを置く作業directory。CLIのcwdにもなる。
+  // Working directory for fixtures. Also the CLI's cwd.
   work: string;
   run: (args: string[], options?: RunOptions) => Promise<RunResult>;
-  // stdoutが端末である条件でCLIを実行する。子processでは端末を再現できないので、同じprocessで動かす。
-  // 本物のbrowserを開かないよう、browserとして実行するfileの指定を必須にする。
+  // Runs the CLI as if stdout were a terminal. A child process cannot reproduce a terminal, so it runs in the same process.
+  // To avoid opening a real browser, the file to run as the browser is required.
   runAsTerminal: (args: string[], browser: string) => Promise<TerminalResult>;
   write: (relativePath: string, content: string | Buffer) => string;
   cleanup: () => Promise<void>;
@@ -90,7 +90,9 @@ function execute(
         stderr,
         json: <T>() => {
           if (!stdout.endsWith('\n') || stdout.slice(0, -1).includes('\n')) {
-            throw new Error(`stdoutがJSON 1個ではありません: ${JSON.stringify(stdout)}\n${stderr}`);
+            throw new Error(
+              `stdout is not exactly one JSON value: ${JSON.stringify(stdout)}\n${stderr}`,
+            );
           }
           return JSON.parse(stdout) as JsonEnvelope<T>;
         },
@@ -162,7 +164,7 @@ export function createTestHome(): TestHome {
       return path;
     },
     async cleanup() {
-      // この試験が起動したdaemonだけを止める。pidは試験用state rootのpointerから読む。
+      // Stop only the daemon this test started. Read the pid from the pointer in the test state root.
       let pid: number | null = null;
       try {
         pid = (
@@ -177,10 +179,10 @@ export function createTestHome(): TestHome {
           process.kill(pid, 0);
           process.kill(pid, 'SIGKILL');
         } catch {
-          // すでに停止している。
+          // Already stopped.
         }
       }
-      // 試験用homeに対応するruntime directoryを残さない。
+      // Do not leave the runtime directory for the test home behind.
       const { runtimeDir } = resolveRuntimeLocation(home, {
         env: {},
         platform: process.platform,

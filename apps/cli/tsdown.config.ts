@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown';
 
-// bundleに入れたmoduleの一覧を、配布物の外へ出す前の中間fileとして書く。
-// scripts/build.tsが、これからlicense noticeを作り、fileは消す。
+// Write the list of bundled modules as an intermediate file that stays out of the distributed package.
+// scripts/build.ts builds the license notice from it and then deletes the file.
 const recordBundledModules = {
   name: 'vde-open:record-bundled-modules',
   generateBundle(
@@ -36,7 +36,7 @@ export default defineConfig({
   dts: false,
   plugins: [recordBundledModules],
   fixedExtension: false,
-  // 配布物はruntime依存を持たない。bundleしてよい外部packageをここで列挙する。
+  // The distributed package has no runtime dependencies. External packages that may be bundled are listed here.
   deps: {
     onlyBundle: [
       '@hono/node-server',

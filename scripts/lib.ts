@@ -28,8 +28,8 @@ interface Invocation {
 
 const cmdMetaChars = /([()\][%!^"`<>&|;, *?])/g;
 
-// cmd.exeへ渡す引数1つをquoteする。cross-spawnと同じ規則。
-// .cmdのshimは内部でもう一度cmd.exeを通るので、meta文字を二重にescapeする。
+// Quote one argument passed to cmd.exe. Same rules as cross-spawn.
+// A .cmd shim goes through cmd.exe once more internally, so escape meta characters twice.
 export function quoteForCmd(argument: string, forCmdShim: boolean): string {
   let quoted = argument.replace(/(\\*)"/g, '$1$1\\"');
   quoted = quoted.replace(/(\\*)$/, '$1$1');
@@ -39,8 +39,8 @@ export function quoteForCmd(argument: string, forCmdShim: boolean): string {
   return quoted;
 }
 
-// Windowsの.cmdはshellなしで起動できない。shell: trueは引数をquoteしないので使わず、
-// quote済みのcommand lineをcmd.exeへそのまま渡す。
+// A .cmd on Windows cannot be started without a shell. shell: true does not quote arguments, so
+// pass the already quoted command line to cmd.exe as is.
 export function cmdShimInvocation(shimPath: string, args: string[]): Invocation {
   const commandLine = [
     shimPath.replace(cmdMetaChars, '^$1'),
@@ -59,12 +59,12 @@ function nodeBinInvocation(packageDir: string, packageName: string, args: string
     bin?: string | Record<string, string>;
   };
   const bin = typeof manifest.bin === 'string' ? manifest.bin : manifest.bin?.[packageName];
-  if (!bin) throw new Error(`${packageName} のbinが見つかりません: ${manifestPath}`);
+  if (!bin) throw new Error(`bin of ${packageName} not found: ${manifestPath}`);
   return { command: process.execPath, args: [join(dirname(manifestPath), bin), ...args] };
 }
 
 function pnpmInvocation(args: string[]): Invocation {
-  // pnpm経由で起動されたときは、その実体をshellなしで呼べる。
+  // When started via pnpm, its executable can be called without a shell.
   const execPath = process.env['npm_execpath'];
   if (execPath && /pnpm/i.test(execPath)) {
     return /\.[cm]?js$/.test(execPath)
@@ -72,20 +72,20 @@ function pnpmInvocation(args: string[]): Invocation {
       : { command: execPath, args };
   }
   if (isWindows) {
-    throw new Error('pnpmの実体を特定できません。`pnpm <script>`の形で実行してください。');
+    throw new Error('Cannot locate the pnpm executable. Run it as `pnpm <script>`.');
   }
   return { command: 'pnpm', args };
 }
 
 function npmInvocation(args: string[]): Invocation {
-  // Nodeに同梱されたnpmのJS入口を直接起動する。npm.cmdを介さない。
+  // Start the JS entry of the npm bundled with Node directly. Do not go through npm.cmd.
   const nodeDir = dirname(process.execPath);
   const candidates = [
     join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
     join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
   ];
   const cli = candidates.find((candidate) => existsSync(candidate));
-  if (!cli) throw new Error(`Node同梱のnpmが見つかりません: ${candidates.join(', ')}`);
+  if (!cli) throw new Error(`npm bundled with Node not found: ${candidates.join(', ')}`);
   return { command: process.execPath, args: [cli, ...args] };
 }
 
@@ -107,7 +107,7 @@ function runInvocation(invocation: Invocation, options: RunOptions): void {
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
-    throw new Error(`${describe(invocation)} が exit ${String(result.status)} で失敗しました`);
+    throw new Error(`${describe(invocation)} failed with exit ${String(result.status)}`);
   }
 }
 
@@ -160,7 +160,7 @@ export function captureInstalledBin(
   return captureInvocation(installedBinInvocation(binDir, name, args), options);
 }
 
-// 導入したbinを並行に起動するための非同期版。
+// Async version for starting installed bins concurrently.
 export function captureInstalledBinAsync(
   binDir: string,
   name: string,

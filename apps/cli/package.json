@@ -2,7 +2,8 @@
   "name": "vde-open",
   "version": "0.1.0",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "author": "Yuki Yano",
   "bin": {
     "vde-open": "dist/cli.js",
     "vo": "dist/cli.js"
@@ -12,7 +13,8 @@
     "README.md",
     "THIRD_PARTY_NOTICES.md",
     "LICENSE",
-    "docs/agent-usage.md"
+    "docs/agent-usage.md",
+    "skills"
   ],
   "type": "module",
   "scripts": {

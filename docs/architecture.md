@@ -1,45 +1,47 @@
-# 構成
+# Architecture
 
-vde-openは、CLI、localのdaemon、browserの管理画面の3つで動きます。状態はdaemonだけが持ち、CLIと管理画面はdaemonへ依頼します。
+[日本語](architecture.ja.md)
+
+vde-open runs as three parts: the CLI, a local daemon, and the management UI in the browser. Only the daemon holds state; the CLI and the management UI send requests to it.
 
 ```text
-CLI（vde-open／vo） ──IPC（Unix socket、鍵で相互確認）──▶ daemon ──▶ state（state.json、blobs/）
-                                                          │
-管理画面（React） ◀──管理listener（127.0.0.1、session token）──┤
-                                                          │
-文書の表示（iframe） ◀──表示listener（127.0.0.1、別port、表示の権限）──┘
+CLI (vde-open / vo) ──IPC (Unix socket, mutual check with a key)──▶ daemon ──▶ state (state.json, blobs/)
+                                                                  │
+Management UI (React) ◀──management listener (127.0.0.1, session token)──┤
+                                                                  │
+Document view (iframe) ◀──preview listener (127.0.0.1, separate port, render grant)──┘
 ```
 
-## workspaceの構成
+## Workspace layout
 
-| path | 役割 |
+| path | role |
 |---|---|
-| `apps/cli` | CLIとdaemon。`dist/`へbundleし、両binと同梱UIを配布する |
-| `apps/web` | 管理画面（React、Tailwind CSS、shadcn/ui、Base UI）。buildして`apps/cli/dist/web`へ同梱する |
-| `packages/shared` | CLI・daemon・管理画面で共有する契約（Zodのschema、error code、上限） |
-| `packages/document` | 文書の解析（見出し、節、title）、HTML・CSSの変換、Markdownの描画。fileやdaemonを知らない |
+| `apps/cli` | The CLI and the daemon. Bundled into `dist/`, which ships both bins and the bundled UI |
+| `apps/web` | The management UI (React, Tailwind CSS, shadcn/ui, Base UI). Built and bundled into `apps/cli/dist/web` |
+| `packages/shared` | Contracts shared by the CLI, the daemon, and the management UI (Zod schemas, error codes, limits) |
+| `packages/document` | Document analysis (headings, sections, titles), HTML and CSS conversion, and Markdown rendering. Knows nothing about files or the daemon |
 
-## daemon
+## Daemon
 
-- 起動: CLIが必要なときに起動する（`apps/cli/src/cli/daemon-control.ts`）。state rootごとに1つだけ動く（世代つきのlock。ADR-0005）。
-- state: `apps/cli/src/persistence/state-store.ts`。変更はtransactionで1件ずつ行い、blobを書いてから`state.json`をatomicに置き換える。
-- 文書: `apps/cli/src/documents/service.ts`。開く・閉じる・読む・版（revision）・監視rule。版は本文と参照するassetの内容から決まる。
-- 監視: `apps/cli/src/watch/watch-service.ts`（Chokidar）。開いている文書の親directoryだけを監視し、保存を反映する。
-- 解析と検索: worker thread（`apps/cli/src/workers/`）。解析は時間と構造の上限つき。検索はMiniSearchで、節ごとに索引する（ADR-0010）。
-- 表示: `apps/cli/src/render/render-service.ts`が、文書・版・表示方法・sessionに結び付いた表示の権限を発行し、`apps/cli/src/server/http/preview.ts`が配信する（ADR-0008、0009、0012）。
-- 質問と回答: `apps/cli/src/feedback/service.ts`（ADR-0011）。
-- 通知: `apps/cli/src/server/event-hub.ts`。SSEで、IDと状態だけを運ぶ（本文は運ばない）。接続ごとの書き終わっていない通知は256件までで、超えた分は捨てて取り直しの合図（`resync-required`）にまとめる（`apps/cli/src/server/http/event-queue.ts`）。sessionの失効・破棄と、書き込みが60秒進まないときは、残りを送らずにsocketまで閉じる（`apps/cli/src/server/http/management.ts`）。
+- Start: the CLI starts it when needed (`apps/cli/src/cli/daemon-control.ts`). Only one runs per state root (a lock with generations; ADR-0005).
+- State: `apps/cli/src/persistence/state-store.ts`. Changes run one transaction at a time; blobs are written first, then `state.json` is replaced atomically.
+- Documents: `apps/cli/src/documents/service.ts`. Open, close, read, revisions, and watch rules. A revision is determined by the text and the content of the assets it references.
+- Watching: `apps/cli/src/watch/watch-service.ts` (Chokidar). Watches only the parent directories of open documents and picks up saves.
+- Analysis and search: worker threads (`apps/cli/src/workers/`). Analysis has time and structure limits. Search uses MiniSearch and indexes each section (ADR-0010).
+- Rendering: `apps/cli/src/render/render-service.ts` issues render grants bound to a document, a revision, a view mode, and a session, and `apps/cli/src/server/http/preview.ts` serves them (ADR-0008, 0009, 0012).
+- Questions and answers: `apps/cli/src/feedback/service.ts` (ADR-0011).
+- Notifications: `apps/cli/src/server/event-hub.ts`. Server-sent events carry only IDs and states, never document text. Each connection holds at most 256 unwritten events; events beyond that are dropped and folded into one `resync-required` event (`apps/cli/src/server/http/event-queue.ts`). When the session expires or is revoked, or writes make no progress for 60 seconds, the connection stops sending and the socket is closed (`apps/cli/src/server/http/management.ts`).
 
-## 管理画面
+## Management UI
 
-- 一回限りのURL（`vo ui`）でsessionを作り、tokenはsessionStorageに置く（URLのfragmentはすぐ消す）。
-- 一覧・表示・検索（`Cmd/Ctrl+K`）・回答panel。通知を受けて一覧と質問を取り直し、通知が欠けたら取り直して合わせる。
-- HTMLの表示は、別のoriginのiframe（`sandbox`）。interactiveの表示とだけ、MessagePortで回答案を受け渡す（`apps/web/src/lib/bridge-host.ts`、`use-bridge.ts`）。
+- A one-time URL (`vo ui`) creates a session; the token is kept in sessionStorage (the URL fragment is removed immediately).
+- The document list, the viewer, search (`Cmd/Ctrl+K`), and the answer panel. Notifications trigger a refetch of the list and questions, and a gap in notifications triggers a full resync.
+- HTML is shown in a sandboxed iframe on a separate origin. Only interactive views exchange draft answers with the management UI, over a MessagePort (`apps/web/src/lib/bridge-host.ts`, `use-bridge.ts`).
 
-## 配布
+## Distribution
 
-`pnpm build`がUIとCLIをbuildし、`pnpm test:pack`がtarballを作って別のdirectoryへ導入して確かめる（`scripts/pack-smoke.ts`）。実行時の依存はすべてbundleし（ADR-0001）、導入時にbuildやscriptを実行しない。bundleに入れた依存（JS・CSS・font）のlicense noticeは、buildがbundleのmoduleの一覧から`THIRD_PARTY_NOTICES.md`へ書き出し、tarballに含める（`scripts/notices.ts`）。
+`pnpm build` builds the UI and the CLI, and `pnpm test:pack` creates the tarball and verifies an install in a separate directory (`scripts/pack-smoke.ts`). All runtime dependencies are bundled (ADR-0001), and installing runs no build or scripts. The build writes license notices for the bundled dependencies (JS, CSS, fonts) to `THIRD_PARTY_NOTICES.md` from the list of bundled modules and includes it in the tarball (`scripts/notices.ts`).
 
-## 設計の判断
+## Design decisions
 
-`docs/adr/`にあります（0001〜0012）。
+See `docs/adr/` (0001 to 0012, in Japanese).

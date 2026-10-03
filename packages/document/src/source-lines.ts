@@ -1,13 +1,13 @@
-// 原文の物理行とbyte範囲（仕様8.3）。
-// 行は1-based。改行はLFで数え、CRLFは1改行。末尾の改行の後に架空の行を数えない。
-// 空のsourceは1つの空行。byte位置は0-basedでend exclusive。
+// Physical lines and byte ranges of the source (spec 8.3).
+// Lines are 1-based. Newlines are counted by LF; CRLF is one newline. No phantom line is counted after a trailing newline.
+// An empty source is one empty line. Byte positions are 0-based and end exclusive.
 
 const LF = 0x0a;
 
 export interface LineIndex {
   byteLength: number;
   lineCount: number;
-  // 各行の先頭byte位置。lineStarts[n - 1]がn行目。
+  // Byte offset where each line starts. lineStarts[n - 1] is line n.
   lineStarts: number[];
 }
 
@@ -24,8 +24,8 @@ export interface ByteRange {
   endByteExclusive: number;
 }
 
-// start〜end行（両端を含む）のbyte範囲。各行の改行も含めるので、
-// 連続する範囲をつなぐと原文を再現できる。endは最終行までに切り詰める。
+// Byte range of lines start to end (inclusive). Each line's newline is included,
+// so joining consecutive ranges reproduces the source. end is clamped to the last line.
 export function byteRangeOfLines(index: LineIndex, start: number, end: number): ByteRange | null {
   if (start < 1 || end < start || start > index.lineCount) return null;
   const lastLine = Math.min(end, index.lineCount);
@@ -36,7 +36,7 @@ export function byteRangeOfLines(index: LineIndex, start: number, end: number): 
   };
 }
 
-// byte位置を含む行番号。
+// Line number containing the byte offset.
 export function lineOfByte(index: LineIndex, byte: number): number {
   let low = 0;
   let high = index.lineStarts.length - 1;
@@ -48,7 +48,7 @@ export function lineOfByte(index: LineIndex, byte: number): number {
   return low + 1;
 }
 
-// [start, end)からmaxBytes以内で、UTF-8のcode pointを壊さない終端を返す。
+// Return an end within maxBytes of [start, end) that does not split a UTF-8 code point.
 export function truncateAtCodePoint(
   source: Uint8Array,
   start: number,
@@ -57,7 +57,7 @@ export function truncateAtCodePoint(
 ): number {
   if (end - start <= maxBytes) return end;
   let cut = start + maxBytes;
-  // 継続byte（10xxxxxx）の途中なら、そのcode pointの先頭まで戻る。
+  // If inside continuation bytes (10xxxxxx), back up to the start of that code point.
   while (cut > start && ((source[cut] as number) & 0xc0) === 0x80) cut -= 1;
   return cut;
 }

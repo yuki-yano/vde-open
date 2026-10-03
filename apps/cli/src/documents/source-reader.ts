@@ -6,11 +6,11 @@ import { basename, dirname, join } from 'node:path';
 import { LIMITS, VdeError } from '@vde-open/shared';
 
 export interface LoadedSource {
-  // symlinkを解決した絶対path。文書のidentityに使う。
+  // Absolute path with symlinks resolved. Used as the document's identity.
   canonicalPath: string;
   bytes: Buffer;
   text: string;
-  // 読み取った時点のfileの状態。監視が「この内容を読んだ後に変わったか」を判定するのに使う。
+  // File state at read time. Watch uses it to decide whether the file changed after this content was read.
   signature: string;
 }
 
@@ -21,11 +21,14 @@ export function statSignature(stats: Stats): string {
 }
 
 function invalid(path: string, reason: string): VdeError {
-  return new VdeError('E_INVALID_SOURCE', `${path} は開けません（${reason}）。`, { path, reason });
+  return new VdeError('E_INVALID_SOURCE', `${path} cannot be opened (${reason}).`, {
+    path,
+    reason,
+  });
 }
 
 function tooLarge(path: string, actual: number): VdeError {
-  return new VdeError('E_LIMIT_EXCEEDED', `${path} は1文書の大きさの上限を超えています。`, {
+  return new VdeError('E_LIMIT_EXCEEDED', `${path} exceeds the size limit for a single document.`, {
     path,
     limit: 'documentBytes',
     max: LIMITS.documentBytes,
@@ -33,7 +36,7 @@ function tooLarge(path: string, actual: number): VdeError {
   });
 }
 
-// 上限まで読む。上限を超える内容があればnull。
+// Reads up to the limit. Returns null if there is content beyond the limit.
 export async function readBounded(handle: FileHandle, limit: number): Promise<Buffer | null> {
   const chunks: Buffer[] = [];
   let total = 0;
@@ -48,8 +51,8 @@ export async function readBounded(handle: FileHandle, limit: number): Promise<Bu
   return Buffer.concat(chunks, total);
 }
 
-// まだ存在するところまでをrealpathで解決し、残りをつなぐ。
-// 削除済みのfileを指すpathでも、登録時のcanonical pathと比べられる。
+// Resolves the existing prefix with realpath and appends the rest.
+// Even a path to a deleted file can be compared with the canonical path from registration.
 export async function canonicalizePath(path: string): Promise<string> {
   const pending: string[] = [];
   let current = path;
@@ -66,15 +69,19 @@ export async function canonicalizePath(path: string): Promise<string> {
   }
 }
 
-// UTF-8の文書として妥当かを確かめる。原文のbytesは変更しない。
+// Checks that the document is valid UTF-8. The source bytes are not modified.
 export function decodeSource(bytes: Buffer, label: string): string {
   if (bytes.byteLength > LIMITS.documentBytes) {
-    throw new VdeError('E_LIMIT_EXCEEDED', `${label} は1文書の大きさの上限を超えています。`, {
-      path: label,
-      limit: 'documentBytes',
-      max: LIMITS.documentBytes,
-      actual: bytes.byteLength,
-    });
+    throw new VdeError(
+      'E_LIMIT_EXCEEDED',
+      `${label} exceeds the size limit for a single document.`,
+      {
+        path: label,
+        limit: 'documentBytes',
+        max: LIMITS.documentBytes,
+        actual: bytes.byteLength,
+      },
+    );
   }
   if (bytes.includes(0)) throw invalid(label, 'contains-nul');
   try {
@@ -84,7 +91,7 @@ export function decodeSource(bytes: Buffer, label: string): string {
   }
 }
 
-// 通常のfileだけを読む。FIFOやdeviceを開いて待ち続けないよう、種別を確かめてから読む。
+// Reads regular files only. Checks the type first so it never blocks on opening a FIFO or device.
 export async function readSourceFile(path: string): Promise<LoadedSource> {
   let canonicalPath: string;
   try {
@@ -92,7 +99,7 @@ export async function readSourceFile(path: string): Promise<LoadedSource> {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'ENOTDIR') {
-      throw new VdeError('E_PATH_NOT_FOUND', `${path} が見つかりません。`, { path });
+      throw new VdeError('E_PATH_NOT_FOUND', `${path} was not found.`, { path });
     }
     if (code === 'EACCES' || code === 'EPERM') throw invalid(path, 'permission-denied');
     throw error;
@@ -104,7 +111,7 @@ export async function readSourceFile(path: string): Promise<LoadedSource> {
   for (let attempt = 0; attempt < READ_ATTEMPTS; attempt += 1) {
     let handle;
     try {
-      // lstatの後に別の種別へ差し替えられても、待たされず、symlinkも辿らない。
+      // Even if replaced by another type after lstat, this does not block and does not follow symlinks.
       handle = await open(
         canonicalPath,
         constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
@@ -113,18 +120,18 @@ export async function readSourceFile(path: string): Promise<LoadedSource> {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === 'EACCES' || code === 'EPERM') throw invalid(path, 'permission-denied');
       if (code === 'ENOENT')
-        throw new VdeError('E_PATH_NOT_FOUND', `${path} が見つかりません。`, { path });
+        throw new VdeError('E_PATH_NOT_FOUND', `${path} was not found.`, { path });
       if (code === 'ELOOP') throw invalid(path, 'not-a-regular-file');
       throw error;
     }
     try {
       const opened = await handle.stat();
       if (!opened.isFile()) throw invalid(path, 'not-a-regular-file');
-      // 検査後にfileが大きくなっても、上限を超えて読み込まない。
+      // Even if the file grows after the check, never read beyond the limit.
       const bytes = await readBounded(handle, LIMITS.documentBytes);
       if (bytes === null) throw tooLarge(path, LIMITS.documentBytes + 1);
       const after = await handle.stat();
-      // 読み取りの前後でfileが変わっていたら、途中の内容を採用せずに読み直す。
+      // If the file changed between before and after the read, discard the partial content and read again.
       const stable =
         opened.ino === after.ino &&
         opened.size === after.size &&
@@ -143,7 +150,7 @@ export async function readSourceFile(path: string): Promise<LoadedSource> {
   }
   throw new VdeError(
     'E_IO',
-    `${path} は読み取り中に変更され続けています。`,
+    `${path} keeps changing while being read.`,
     { path },
     { retryable: true },
   );

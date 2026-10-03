@@ -9,7 +9,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { createE2eHome, type E2eHome } from './harness.ts';
 
 const fixtures = fileURLToPath(new URL('../fixtures/security', import.meta.url));
-// 1x1の、実際に表示できるPNG。
+// A 1x1 PNG that actually renders.
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
@@ -33,7 +33,7 @@ test.afterEach(async () => {
   await t.cleanup();
 });
 
-// 届いたrequestを記録するだけのserver。文書やbackendが外部へ要求していないことを確かめる。
+// A server that only records incoming requests. Confirms that neither the document nor the backend makes outbound requests.
 async function startBeacon(): Promise<string> {
   const server = createServer((request, response) => {
     hits.push(`${request.method ?? ''} ${request.url ?? ''}`);
@@ -47,12 +47,12 @@ async function startBeacon(): Promise<string> {
 
 interface ReleaseRecord {
   grants: string[];
-  // 権限を返す処理を始めた瞬間に、画面に出ていた表示用URL。
+  // The render URL on screen at the moment the release started.
   frame: string | null;
 }
 
-// 権限を返す処理を始めた瞬間に、画面に出ている表示用URLを記録する。
-// 応答を待つ側で記録すると、記録するまでに画面が進んでしまうので、browserの中で同期的に記録する。
+// Record the render URL on screen at the moment a release starts.
+// Recording on the response side is too late (the screen moves on), so record synchronously inside the browser.
 async function recordReleases(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const original = window.fetch.bind(window);
@@ -93,21 +93,21 @@ async function openHostile(page: Page): Promise<string> {
   return origin;
 }
 
-test('P3 gate / SEC-005: 静的表示では、文書のscript・event属性・埋め込みが動かない', async ({
+test('P3 gate / SEC-005: in the Static view, the document scripts, event attributes, and embeds do not run', async ({
   page,
 }) => {
   const requested: string[] = [];
   page.on('request', (request) => requested.push(request.url()));
   const origin = await openHostile(page);
 
-  // 文書は、空のsandboxの中で、管理UIとは別のoriginから表示される。
+  // The document is shown inside an empty sandbox, from an origin different from the management UI.
   const frame = page.getByTestId('document-frame');
   await expect(frame).toHaveAttribute('sandbox', '');
   const src = (await frame.getAttribute('src')) as string;
   expect(new URL(src).origin).not.toBe(new URL(page.url()).origin);
   expect(new URL(src).pathname).toMatch(/^\/r\/[A-Za-z0-9_-]{43}\/files\/index\.html$/);
 
-  // 表示されている内容。scriptが書き換える前の文字のままで、実行される要素は残っていない。
+  // The shown content. The text is as it was before any script rewrote it, and no executable elements remain.
   const inner = page.frameLocator('[data-testid="document-frame"]');
   await expect(inner.locator('#marker')).toHaveText('元の文字');
   await expect(inner.locator('#fallback')).toHaveText('scriptが動かないときの文');
@@ -115,44 +115,48 @@ test('P3 gate / SEC-005: 静的表示では、文書のscript・event属性・�
     await expect(inner.locator(selector), selector).toHaveCount(0);
   }
   await expect(inner.locator('[onload], [onerror], [onclick]')).toHaveCount(0);
-  // 登録済みのCSSと画像は使える。
+  // Registered CSS and images work.
   await expect(inner.locator('#styled')).toHaveCSS('color', 'rgb(0, 128, 0)');
   await expect(inner.locator('#styled')).toHaveCSS('font-weight', '700');
   await expect(inner.locator('#ok')).toHaveJSProperty('naturalWidth', 1);
-  // linkは押せない。文書内の移動だけが残る。
+  // Links cannot be clicked. Only in-document navigation remains.
   await expect(inner.locator('#external')).not.toHaveAttribute('href');
   await expect(inner.locator('#neighbor')).not.toHaveAttribute('href');
   await expect(inner.locator('#inner')).toHaveAttribute('href', '#marker');
 
-  // meta refreshの待ち時間（1秒）を過ぎても、遷移も外部への要求も起きない。
+  // Even after the meta refresh delay (1 second), neither navigation nor an outbound request happens.
   await page.waitForTimeout(2500);
   await expect(inner.locator('#marker')).toHaveText('元の文字');
   expect(await frame.getAttribute('src')).toBe(src);
-  // SEC-006: 外部への要求を、browserの側でもserverの側でも観測していない。
+  // SEC-006: no outbound request was observed on either the browser side or the server side.
   expect(requested.filter((url) => url.startsWith(origin))).toEqual([]);
   expect(hits).toEqual([]);
-  // 記録用のserverそのものは届く状態にある（届かないから0件、ではない）。
+  // The recording server itself is reachable (zero hits is not because it was unreachable).
   await page.request.get(`${origin}/self-check`);
   expect(hits).toEqual(['GET /self-check']);
   hits = [];
 
-  // 取り除いたものと理由を、本体の画面で確かめられる。
+  // What was removed, and why, can be checked in the management UI.
   const diagnostics = page.getByTestId('render-diagnostics');
   await diagnostics.locator('summary').click();
-  await expect(diagnostics).toContainText('scriptを3件取り除きました');
-  await expect(diagnostics).toContainText('文書に直接書かれたSVGを1件取り除きました');
-  await expect(diagnostics).toContainText('iframe・object・embedなどの埋め込みを4件取り除きました');
+  await expect(diagnostics).toContainText('Removed 3 scripts');
+  await expect(diagnostics).toContainText('Removed 1 inline SVG');
+  await expect(diagnostics).toContainText('Removed 4 embedded elements');
   await expect(diagnostics).toContainText('meta refresh');
-  await expect(diagnostics).toContainText('missing.png が見つかりません');
+  await expect(diagnostics).toContainText('missing.png was not found');
   await expect(diagnostics).toContainText(
-    `外部のURL（${origin}/remote-image.png）は読み込みません`,
+    `External URL (${origin}/remote-image.png) is not loaded`,
   );
-  // 枠の中が文書の内容であることと、表示の種類を、常に示す。
-  await expect(page.getByText('ここから下は、開いた文書の内容です')).toBeVisible();
-  await expect(page.getByText('静的表示', { exact: true })).toBeVisible();
+  // Always show that the frame holds the document content, and which view mode is in use.
+  await expect(
+    page.getByText('Below this line is the content of the opened document'),
+  ).toBeVisible();
+  await expect(page.getByText('Static view', { exact: true })).toBeVisible();
 });
 
-test('SEC-004（部分）: 表示用の応答は、sandboxと、scriptを禁じるpolicyを持つ', async ({ page }) => {
+test('SEC-004 (partial): the render response has a sandbox and a policy that forbids scripts', async ({
+  page,
+}) => {
   await openHostile(page);
   const src = (await page.getByTestId('document-frame').getAttribute('src')) as string;
   const response = await page.request.get(src);
@@ -163,13 +167,13 @@ test('SEC-004（部分）: 表示用の応答は、sandboxと、scriptを禁じ�
   expect(csp.split('; ').at(-1)).toBe('sandbox');
   expect(csp).not.toContain('allow-same-origin');
   expect(csp).not.toContain('allow-scripts');
-  // 管理UIは、文書の表示（iframe）と登録済みの画像だけを、表示用のlistenerから読み込める。
+  // The management UI may load only the document view (iframe) and registered images from the render listener.
   const ui = await page.request.get(new URL('/', page.url()).href);
   const uiCsp = ui.headers()['content-security-policy'] ?? '';
   expect(uiCsp).toContain(`frame-src ${new URL(src).origin}`);
   expect(uiCsp).toContain("script-src 'self'");
   expect(uiCsp).toContain("frame-ancestors 'none'");
-  // 表示用のURLを直接開いても、管理UIは表示されず、scriptも動かない。
+  // Opening the render URL directly shows no management UI, and no script runs.
   const direct = await page.context().newPage();
   await direct.goto(src);
   await expect(direct.locator('#marker')).toHaveText('元の文字');
@@ -177,9 +181,11 @@ test('SEC-004（部分）: 表示用の応答は、sandboxと、scriptを禁じ�
   await direct.close();
 });
 
-test('SEC-019: 文書中のlinkは一覧から開き、未登録の文書は確認してから開く', async ({ page }) => {
+test('SEC-019: links in the document open from the list, and unregistered documents are confirmed before opening', async ({
+  page,
+}) => {
   await openHostile(page);
-  const sidebar = page.getByRole('navigation', { name: '開いている文書' });
+  const sidebar = page.getByRole('navigation', { name: 'Open documents' });
   const links = page.getByTestId('render-links');
   await links.locator('summary').click();
   await expect(links.getByRole('link', { name: '外部へのlink' })).toHaveAttribute(
@@ -187,25 +193,25 @@ test('SEC-019: 文書中のlinkは一覧から開き、未登録の文書は確�
     'noopener noreferrer',
   );
 
-  // 確認の画面で開かないを選ぶと、一覧は変わらない。
+  // Choosing "Don't open" in the confirmation leaves the list unchanged.
   await links.getByRole('button', { name: '隣の文書' }).click();
   const dialog = page.getByRole('alertdialog');
-  await expect(dialog).toContainText('この文書を一覧に追加して開きますか');
+  await expect(dialog).toContainText('Add this document to the list and open it?');
   await expect(dialog).toContainText('neighbor.md');
-  await dialog.getByRole('button', { name: '開かない' }).click();
+  await dialog.getByRole('button', { name: "Don't open" }).click();
   await expect(dialog).toBeHidden();
   await expect(sidebar.getByRole('button', { name: '隣の文書', exact: true })).toHaveCount(0);
   expect((await t.json<{ totalDocuments: number }>(['list'])).totalDocuments).toBe(1);
 
-  // 確認して開くと、一覧に加わり、表示が切り替わる。
+  // Confirming adds it to the list and switches the view.
   await links.getByRole('button', { name: '隣の文書' }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: '一覧に追加して開く' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Add to list and open' }).click();
   await expect(sidebar.getByRole('button', { name: '隣の文書', exact: true })).toBeVisible();
   await expect(page.locator('article')).toContainText('隣の文書');
   expect((await t.json<{ totalDocuments: number }>(['list'])).totalDocuments).toBe(2);
 });
 
-test('SEC-019: 確認の画面を出している間に文書が更新されても、開くのは確認した文書', async ({
+test('SEC-019: if the document is updated while the confirmation is shown, the document that was confirmed is the one opened', async ({
   page,
 }) => {
   t.write('site/index.html', '<a href="first.md">link</a>');
@@ -219,20 +225,20 @@ test('SEC-019: 確認の画面を出している間に文書が更新されて�
   const dialog = page.getByRole('alertdialog');
   await expect(dialog).toContainText('first.md');
 
-  // 確認の画面を出したまま、同じ番号のlinkの行き先が変わる。
+  // With the confirmation still shown, the target of the link with the same number changes.
   const before = await page.getByTestId('document-frame').getAttribute('src');
   t.atomicWrite('site/index.html', '<a href="second.md">link</a>');
   await expect(page.getByTestId('document-frame')).not.toHaveAttribute('src', before as string);
   await expect(dialog).toContainText('first.md');
 
-  // 開くのは、画面に示して確認した文書。更新後の行き先は開かない。
-  await dialog.getByRole('button', { name: '一覧に追加して開く' }).click();
-  const sidebar = page.getByRole('navigation', { name: '開いている文書' });
+  // What opens is the document shown and confirmed on screen. The updated target does not open.
+  await dialog.getByRole('button', { name: 'Add to list and open' }).click();
+  const sidebar = page.getByRole('navigation', { name: 'Open documents' });
   await expect(sidebar.getByRole('button', { name: '確認した文書', exact: true })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: '更新後の行き先', exact: true })).toHaveCount(0);
 });
 
-test('Markdownの画像は登録済みのlocal fileだけを表示し、相対linkは確認してから開く', async ({
+test('Markdown images show only registered local files, and relative links are confirmed before opening', async ({
   page,
 }) => {
   const origin = await startBeacon();
@@ -251,36 +257,36 @@ test('Markdownの画像は登録済みのlocal fileだけを表示し、相対li
   expect(new URL((await image.getAttribute('src')) as string).pathname).toMatch(
     /^\/r\/[A-Za-z0-9_-]{43}\/files\/img\/a\.png$/,
   );
-  // 表示できない画像は、代替の文字にする。外部へは要求しない。
-  await expect(page.locator('article [data-blocked-image]')).toHaveText(['[画像: 無い]']);
+  // Images that cannot be shown become placeholder text. No outbound request is made.
+  await expect(page.locator('article [data-blocked-image]')).toHaveText(['[image: 無い]']);
   await expect(page.locator('article')).toContainText('外部');
   const diagnostics = page.getByTestId('render-diagnostics');
   await diagnostics.locator('summary').click();
-  await expect(diagnostics).toContainText('img/missing.png が見つかりません');
-  await expect(diagnostics).toContainText(`外部のURL（${origin}/remote.png）は読み込みません`);
+  await expect(diagnostics).toContainText('img/missing.png was not found');
+  await expect(diagnostics).toContainText(`External URL (${origin}/remote.png) is not loaded`);
   expect(hits).toEqual([]);
 
   await page.locator('article').getByRole('button', { name: '次の文書' }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: '一覧に追加して開く' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Add to list and open' }).click();
   await expect(page.locator('article')).toContainText('次の文書');
   await expect(
     page
-      .getByRole('navigation', { name: '開いている文書' })
+      .getByRole('navigation', { name: 'Open documents' })
       .getByRole('button', { name: '次の文書', exact: true }),
   ).toBeVisible();
 });
 
-test('表示の権限は、必要なときだけ取り直し、表示を差し替えてから前の権限を返す', async ({
+test('render grants are refetched only when needed, and the previous grant is released after the view is replaced', async ({
   page,
 }) => {
   t.write('site/index.html', '<h1 id="h">参照のない文書</h1>');
   await t.json(['open', 'site/index.html']);
 
-  // 権限の発行の応答を制御する。inject: 「参照を調べられなかった」という注意を足す。fail: 失敗させる。
+  // Control the grant-issuing response. inject: add the "references could not be scanned" note. fail: make it fail.
   let mode: 'pass' | 'inject' | 'fail' = 'inject';
   const issued: string[] = [];
   let attempts = 0;
-  // 権限の発行と返却を、起きた順に記録する。
+  // Record grant issues and releases in the order they happen.
   const timeline: string[] = [];
   await page.route('**/_/api/v1/documents/*/render-grants', async (route) => {
     attempts += 1;
@@ -292,7 +298,7 @@ test('表示の権限は、必要なときだけ取り直し、表示を差し�
         body: JSON.stringify({
           schemaVersion: 1,
           ok: false,
-          error: { code: 'E_INTERNAL', message: '失敗', retryable: false, details: {} },
+          error: { code: 'E_INTERNAL', message: 'failed', retryable: false, details: {} },
           warnings: [],
         }),
       });
@@ -315,7 +321,7 @@ test('表示の権限は、必要なときだけ取り直し、表示を差し�
     await route.continue();
   });
   await recordReleases(page);
-  // 版を変えずに、文書の状態（更新時刻）だけを変える。
+  // Change only the document's state (update time), without changing the revision.
   const touch = (title: string) => t.json(['open', 'site/index.html', '--title', title]);
   const heading = (name: string) => page.getByRole('heading', { level: 1, name });
 
@@ -324,16 +330,16 @@ test('表示の権限は、必要なときだけ取り直し、表示を差し�
   const inner = page.frameLocator('[data-testid="document-frame"]');
   const diagnostics = page.getByTestId('render-diagnostics');
   await expect(inner.locator('#h')).toHaveText('参照のない文書');
-  await expect(diagnostics).toContainText('元の文書と表示が異なる点');
+  await expect(diagnostics).toContainText('Differences from the original document');
 
-  // 初回の取得は1回だけ。注意が含まれていても、それを理由に取り直さず、取得した権限も返さない。
+  // The first fetch happens once. Even with the note included, it is not a reason to refetch, and the fetched grant is not released.
   await page.waitForTimeout(700);
   expect(attempts).toBe(1);
   expect(timeline).toEqual(['issued:1']);
   const firstUrl = await frame.getAttribute('src');
   expect((await page.request.get(firstUrl as string)).status()).toBe(200);
 
-  // 取り直しに失敗しても、表示中の権限と内容を保つ。失敗を理由に、取り直しを繰り返さない。
+  // When a refetch fails, the grant and content in use are kept. The failure is not a reason to keep retrying.
   mode = 'fail';
   await touch('名前1');
   await expect(heading('名前1')).toBeVisible();
@@ -346,17 +352,17 @@ test('表示の権限は、必要なときだけ取り直し、表示を差し�
   await expect(diagnostics).toBeVisible();
   expect((await page.request.get(firstUrl as string)).status()).toBe(200);
 
-  // 文書の状態が更新されると、もう一度取り直す。調べ終えていれば、注意が消える。
+  // When the document's state is updated, refetch once more. Once the scan has finished, the note disappears.
   mode = 'pass';
   await touch('名前2');
   await expect(heading('名前2')).toBeVisible();
   await expect(diagnostics).toHaveCount(0);
   await expect(frame).not.toHaveAttribute('src', firstUrl as string);
   await expect(inner.locator('#h')).toHaveText('参照のない文書');
-  // 前の権限を返すのは、新しい権限を受け取った後。
+  // The previous grant is released after the new grant is received.
   await expect.poll(() => timeline).toEqual(['issued:1', 'issue-failed', 'issued:2', 'released:1']);
-  // 返す処理を始めた時点で、画面の表示は新しい権限のURLへ差し替わっている。
-  // 画面に出ている表示の権限を、先に返してはいない。
+  // At the moment the release starts, the on-screen view has already switched to the new grant's URL.
+  // The grant of the view on screen was not released first.
   const releases = await readReleases(page);
   expect(releases).toHaveLength(1);
   expect(releases[0]?.grants).toEqual([issued[0]]);
@@ -364,7 +370,7 @@ test('表示の権限は、必要なときだけ取り直し、表示を差し�
   await expect.poll(async () => (await page.request.get(firstUrl as string)).status()).toBe(404);
   const secondUrl = await frame.getAttribute('src');
 
-  // 調べ終えた文書は、文書の状態が更新されても取り直さない。表示も作り直さない。
+  // A document whose scan finished is not refetched when its state is updated. The view is not rebuilt either.
   await touch('名前3');
   await expect(heading('名前3')).toBeVisible();
   await page.waitForTimeout(700);
@@ -372,11 +378,11 @@ test('表示の権限は、必要なときだけ取り直し、表示を差し�
   expect(await frame.getAttribute('src')).toBe(secondUrl);
   expect((await page.request.get(secondUrl as string)).status()).toBe(200);
 
-  // 別の文書へ切り替えて表示をやめると、使っていた権限を返す。
+  // Switching to another document dismisses the view and releases the grant in use.
   t.write('other.md', '# 別の文書\n');
   await t.json(['open', 'other.md']);
   await page
-    .getByRole('navigation', { name: '開いている文書' })
+    .getByRole('navigation', { name: 'Open documents' })
     .getByRole('button', { name: '別の文書', exact: true })
     .click();
   await expect(page.locator('article')).toContainText('別の文書');
@@ -384,7 +390,9 @@ test('表示の権限は、必要なときだけ取り直し、表示を差し�
   expect(timeline.filter((entry) => entry === 'released:2')).toHaveLength(1);
 });
 
-test('HTMLの文書を更新すると表示を作り直し、原文へ切り替えても文書は動かない', async ({ page }) => {
+test('updating an HTML document rebuilds the view, and switching to Source does not run the document', async ({
+  page,
+}) => {
   t.write('site/index.html', '<h1 id="h">版1</h1><script>document.title = "x"</script>');
   await t.json(['open', 'site/index.html']);
   await recordReleases(page);
@@ -395,18 +403,18 @@ test('HTMLの文書を更新すると表示を作り直し、原文へ切り替�
 
   t.atomicWrite('site/index.html', '<h1 id="h">版2</h1>');
   await expect(inner.locator('#h')).toHaveText('版2');
-  // 版が変わると、表示用のURLも変わる。前のURLは、返した後は使えない。
+  // When the revision changes, the render URL changes too. The previous URL stops working once released.
   const second = await page.getByTestId('document-frame').getAttribute('src');
   expect(second).not.toBe(first);
   await expect.poll(async () => (await page.request.get(first as string)).status()).toBe(404);
-  // 前の版の権限を返し始めた時点で、画面に前の版の表示は残っていない。
+  // At the moment the previous revision's grant release started, the previous revision's view was no longer on screen.
   const releases = await readReleases(page);
   expect(releases).toHaveLength(1);
   expect(first).toContain(`/r/${releases[0]?.grants[0] ?? ''}/`);
   expect(releases[0]?.frame).not.toBe(first);
 
-  // 原文の表示では、HTMLを文字として示す。
-  await page.getByRole('button', { name: '原文' }).click();
+  // The Source view shows the HTML as text.
+  await page.getByRole('button', { name: 'Source' }).click();
   await expect(page.getByTestId('document-frame')).toHaveCount(0);
   await expect(page.getByTestId('document-body')).toContainText('<h1 id="h">版2</h1>');
 });

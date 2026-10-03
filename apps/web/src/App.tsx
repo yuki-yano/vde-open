@@ -40,12 +40,12 @@ function useTheme(): [Theme, (theme: Theme) => void] {
 }
 
 export function Workspace({ api }: { api: Api }) {
-  // 一覧と、その一覧を取得した時点のcatalogVersion。並べ替えの保存で前提として渡す。
+  // The document list and the catalogVersion at the time it was fetched. Passed as the precondition when saving the order.
   const [catalog, setCatalog] = useState<{ documents: DocumentSummary[]; version: number }>({
     documents: [],
     version: 0,
   });
-  // 表示中の文書。initializedは、daemonが覚えている文書を初回に選び終えたか。
+  // The document being shown. initialized is whether the document the daemon remembers has been selected on first load.
   const [selection, setSelection] = useState<{ activeId: string | null; initialized: boolean }>({
     activeId: null,
     initialized: false,
@@ -60,19 +60,19 @@ export function Workspace({ api }: { api: Api }) {
   const [width, setWidth] = usePreference<number>('sidebar-width', SIDEBAR_DEFAULT, isWidth);
   const [theme, setTheme] = useTheme();
   const lastEvent = useRef<{ daemonId: string; sequence: number } | null>(null);
-  // 質問の変更の通知を受け取った回数。回答panelは、これが変わるたびに質問を取り直す。
+  // How many question-change notifications have been received. The answer panel refetches the question each time this changes.
   const [feedbackSignal, setFeedbackSignal] = useState(0);
-  // 表示の中から登録されていないfileを読み込もうとした、という通知を受け取った回数。
+  // How many notifications that the view tried to load an unregistered file have been received.
   const [renderSignal, setRenderSignal] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
-  // 900px未満の画面で、文書の一覧（drawer）を開いているか。
+  // Whether the document list (drawer) is open on screens narrower than 900px.
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // 検索の結果から移動する先の節（検索した時点の版と組で持つ）。
+  // The section to jump to from a search result (kept with the revision that was searched).
   const [sectionTarget, setSectionTarget] = useState<
     (SectionTarget & { documentId: string }) | null
   >(null);
 
-  // Cmd/Ctrl+Kで検索を開く。文字を入力しない組み合わせなので、入力中でも開いてよい。
+  // Cmd/Ctrl+K opens search. The combination types no character, so it may open while typing.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
@@ -93,7 +93,7 @@ export function Workspace({ api }: { api: Api }) {
     }));
   };
 
-  // 一覧をdaemonから取り直す。表示中の文書は、閉じられた場合だけ切り替える。
+  // Refetch the list from the daemon. Switch the shown document only if it was closed.
   const fetchList = useCallback(async () => {
     const [list, status] = await Promise.all([api.documents(), api.status()]);
     setCatalog({ documents: list.documents, version: list.catalogVersion });
@@ -102,7 +102,7 @@ export function Workspace({ api }: { api: Api }) {
         current.activeId !== null &&
         list.documents.some((document) => document.documentId === current.activeId);
       if (stillOpen) return current.initialized ? current : { ...current, initialized: true };
-      // 初回だけ、daemonが覚えている文書を選ぶ。
+      // Only on first load, select the document the daemon remembers.
       const preferred = current.initialized ? null : status.activeDocumentId;
       return {
         activeId: preferred ?? list.documents[0]?.documentId ?? null,
@@ -110,8 +110,8 @@ export function Workspace({ api }: { api: Api }) {
       };
     });
   }, [api]);
-  // 取得は1つずつ行う。並行させると、遅れて届いた古い一覧が新しい一覧を上書きする。
-  // 失敗（接続が切れている間など）は無視し、再接続のときに取り直す。
+  // Fetch one at a time. Running in parallel lets an old list that arrives late overwrite a newer one.
+  // Failures (such as while disconnected) are ignored; refetch on reconnect.
   const load = useMemo(() => createRefresher(fetchList), [fetchList]);
 
   useEffect(() => {
@@ -119,16 +119,16 @@ export function Workspace({ api }: { api: Api }) {
       const previous = lastEvent.current;
       lastEvent.current = { daemonId: event.daemonId, sequence: event.sequence };
       if (event.type === 'daemon-stopping') {
-        setNotice('daemonが停止しました。CLIを実行すると、もう一度開けます。');
+        setNotice('The daemon has stopped. Run the CLI to open it again.');
         return;
       }
-      // 明示的なfocusの指示のときだけ、表示する文書を切り替える。
+      // Switch the shown document only on an explicit focus request.
       if (event.type === 'focus-requested' && event.documentId) setActiveId(event.documentId);
-      // 通知は欠けることがある。どの通知でも、一覧を取り直して現在の状態へ合わせる。
+      // Notifications can be missed. On any notification, refetch the list to match the current state.
       const gap =
         previous !== null &&
         (previous.daemonId !== event.daemonId || event.sequence > previous.sequence + 1);
-      // 質問は、変更の通知のほか、通知が欠けたかもしれないときにも取り直す。
+      // Refetch the question on a change notification, and also when a notification may have been missed.
       if (event.type === 'feedback-changed' || event.type === 'resync-required' || gap) {
         setFeedbackSignal((value) => value + 1);
       }
@@ -137,7 +137,7 @@ export function Workspace({ api }: { api: Api }) {
     };
     const stream = api.events({
       onEvent,
-      // 接続し直した後は、切れていた間の変更を取り込むため、一覧と質問を取り直す。
+      // After reconnecting, refetch the list and the question to pick up changes made while disconnected.
       onConnect: () => {
         setNotice(null);
         setFeedbackSignal((value) => value + 1);
@@ -153,7 +153,7 @@ export function Workspace({ api }: { api: Api }) {
   );
 
   const reorder = (order: string[]) => {
-    // 先に表示を入れ替え、保存に失敗したら取り直す。
+    // Reorder the view first; if saving fails, refetch.
     setCatalog((current) => ({
       ...current,
       documents: order.flatMap((documentId) =>
@@ -178,7 +178,7 @@ export function Workspace({ api }: { api: Api }) {
 
   return (
     <div className="flex h-svh flex-col bg-background text-foreground">
-      {/* 狭い画面では、buttonの文字を隠してiconだけにする（名前は読み上げに残す）。 */}
+      {/* On narrow screens, hide button labels and show only icons (the names stay for screen readers). */}
       <header className="flex min-w-0 items-center justify-between gap-2 border-b px-4 py-2 sm:gap-3">
         <Button
           variant="ghost"
@@ -189,7 +189,7 @@ export function Workspace({ api }: { api: Api }) {
           onClick={() => setDrawerOpen((open) => !open)}
         >
           {drawerOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
-          <span className="max-sm:sr-only">文書の一覧</span>
+          <span className="max-sm:sr-only">Document list</span>
         </Button>
         <p className="shrink-0 text-sm font-semibold">vde-open</p>
         <Button
@@ -200,7 +200,7 @@ export function Workspace({ api }: { api: Api }) {
           aria-keyshortcuts="Meta+K Control+K"
         >
           <Search aria-hidden="true" />
-          <span className="max-sm:sr-only">開いている文書を検索</span>
+          <span className="max-sm:sr-only">Search open documents</span>
           <kbd className="ml-1 text-xs text-muted-foreground max-sm:hidden">⌘K</kbd>
         </Button>
         <ToggleGroup
@@ -210,15 +210,15 @@ export function Workspace({ api }: { api: Api }) {
             if (isTheme(next)) setTheme(next);
           }}
           size="sm"
-          aria-label="配色"
+          aria-label="Color scheme"
         >
-          <ToggleGroupItem value="light" aria-label="ライト">
+          <ToggleGroupItem value="light" aria-label="Light">
             <Sun aria-hidden="true" />
           </ToggleGroupItem>
-          <ToggleGroupItem value="dark" aria-label="ダーク">
+          <ToggleGroupItem value="dark" aria-label="Dark">
             <Moon aria-hidden="true" />
           </ToggleGroupItem>
-          <ToggleGroupItem value="system" aria-label="OSの設定に合わせる">
+          <ToggleGroupItem value="system" aria-label="Match OS setting">
             <Monitor aria-hidden="true" />
           </ToggleGroupItem>
         </ToggleGroup>
@@ -229,7 +229,7 @@ export function Workspace({ api }: { api: Api }) {
         </p>
       )}
       <div className="relative flex min-h-0 flex-1">
-        {/* 900px未満では、一覧をdrawerにする（横に3つの領域を詰めない。仕様13.2）。 */}
+        {/* Below 900px, the list becomes a drawer (do not cram three panes side by side; spec 13.2). */}
         <div
           id="document-list"
           className={`${drawerOpen ? 'block' : 'hidden'} absolute inset-y-0 left-0 z-20 w-72 max-w-[85vw] shrink-0 border-r bg-background shadow-lg min-[900px]:static min-[900px]:block min-[900px]:max-w-none min-[900px]:shadow-none`}
@@ -251,7 +251,7 @@ export function Workspace({ api }: { api: Api }) {
         <div
           role="separator"
           aria-orientation="vertical"
-          aria-label="一覧の幅を変える"
+          aria-label="Resize document list"
           className="hidden w-1 shrink-0 cursor-col-resize hover:bg-border min-[900px]:block"
           onPointerDown={startResize}
         />
@@ -266,7 +266,7 @@ export function Workspace({ api }: { api: Api }) {
           />
         ) : (
           <main className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-            左の一覧から文書を選ぶと、ここに表示します。
+            Select a document from the list on the left to show it here.
           </main>
         )}
       </div>
@@ -297,10 +297,10 @@ export function App() {
   if (!api) {
     return (
       <main className="mx-auto flex min-h-svh max-w-lg flex-col justify-center gap-3 p-8">
-        <h1 className="text-xl font-semibold">CLIから開き直してください</h1>
+        <h1 className="text-xl font-semibold">Open again from the CLI</h1>
         <p className="text-sm text-muted-foreground">
-          この画面は、CLIが発行する一回限りのURLから開く必要があります。端末で{' '}
-          <code className="rounded bg-muted px-1.5 py-0.5">vo ui</code> を実行してください。
+          This UI must be opened from the one-time URL that the CLI issues. Run{' '}
+          <code className="rounded bg-muted px-1.5 py-0.5">vo ui</code> in your terminal.
         </p>
       </main>
     );

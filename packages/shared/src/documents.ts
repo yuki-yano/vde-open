@@ -17,15 +17,15 @@ export type SourceState = z.infer<typeof sourceStateSchema>;
 
 export const searchStateSchema = z.enum(['ready', 'indexing', 'excluded']);
 
-// HTMLの表示方法。static: scriptを動かさない（既定）。interactive: 明示的に許可したときだけscriptを動かす。
+// How HTML is shown. static: scripts never run (default). interactive: scripts run only when explicitly allowed.
 export const htmlModeSchema = z.enum(['static', 'interactive']);
 export type HtmlMode = z.infer<typeof htmlModeSchema>;
 
-// 文書が参照するlocal fileの種別。配信時のheaderと、使える文脈を決める。
+// Kind of a local file the document references. Decides the headers when served and the contexts it can be used in.
 export const assetRoleSchema = z.enum(['image', 'svg', 'style', 'font', 'script', 'data']);
 export type AssetRole = z.infer<typeof assetRoleSchema>;
 
-// 版に含まれるasset。logicalPathは、assets-rootからの相対path（区切りは`/`）。
+// An asset included in a revision. logicalPath is relative to the assets-root (separated by `/`).
 export const assetRecordSchema = z.strictObject({
   logicalPath: z.string().min(1),
   mime: z.string().min(1),
@@ -35,7 +35,7 @@ export const assetRecordSchema = z.strictObject({
 });
 export type AssetRecord = z.infer<typeof assetRecordSchema>;
 
-// 仕様4.2。本文や回答は含めない。
+// Spec 4.2. Contains neither document content nor answers.
 export const documentSummarySchema = z.strictObject({
   documentId: documentIdSchema,
   key: z.string().nullable(),
@@ -51,9 +51,9 @@ export const documentSummarySchema = z.strictObject({
   updatedAt: z.string(),
   order: z.number().int().nonnegative(),
   pendingRequestIds: z.array(z.string()),
-  // HTMLの表示方法の希望。Markdownはnull。
+  // Requested HTML mode. null for Markdown.
   htmlMode: htmlModeSchema.nullable(),
-  // interactiveを希望し、このdaemonでscriptの実行を許可済みか。再起動などで許可が外れたらfalse。
+  // Whether interactive was requested and this daemon has allowed scripts to run. false once the permission is lost, e.g. after a restart.
   interactiveAllowed: z.boolean(),
 });
 export type DocumentSummary = z.infer<typeof documentSummarySchema>;
@@ -77,12 +77,12 @@ export const openParamsSchema = z.strictObject({
   title: titleSchema.optional(),
   key: keySchema.optional(),
   recursive: z.boolean().default(false),
-  // directory／globに新しく現れた文書も登録する。
+  // Also register documents that newly appear in the directory or glob.
   watch: z.boolean().default(false),
   htmlMode: htmlModeSchema.optional(),
-  // local assetを解決できる範囲の上限。指定がなければ、fileの親directory。
+  // Upper bound of where local assets may be resolved. Defaults to the file's parent directory.
   assetsRoot: z.string().min(1).optional(),
-  // 文書の解析では見つからないlocal assetの個別指定（assets-rootからの相対path）。
+  // Local assets that document analysis cannot find, given individually (relative to the assets-root).
   assets: z.array(z.string().min(1)).max(LIMITS.documentAssets).default([]),
 });
 export type OpenParams = z.input<typeof openParamsSchema>;
@@ -90,15 +90,15 @@ export type OpenParams = z.input<typeof openParamsSchema>;
 export const watchRuleSchema = z.strictObject({
   watchId: z.string().regex(/^watch_[0-9a-f-]{36}$/),
   kind: z.enum(['directory', 'glob']),
-  // 監視の起点になるdirectory（絶対path）。
+  // Directory the watch starts from (absolute path).
   root: z.string(),
-  // globのときの指定。directoryのときはnull。
+  // The pattern for glob. null for directory.
   pattern: z.string().nullable(),
   recursive: z.boolean(),
   suppressedPaths: z.array(z.string()),
   createdAt: z.string(),
-  // ruleを登録したときに指定されたassets-root（symlinkを解決済み）。後から見つけた文書にも使う。
-  // 指定がなければnull（文書のあるdirectoryを使う）。
+  // The assets-root given when the rule was registered (symlinks resolved). Also used for documents found later.
+  // null when not given (the document's directory is used).
   assetsRoot: z.string().nullable(),
 });
 export type WatchRule = z.infer<typeof watchRuleSchema>;
@@ -139,7 +139,7 @@ export const readParamsSchema = z.strictObject({
     .default(LIMITS.readMaxBytesDefault),
   cursor: z.string().min(1).optional(),
   outline: z.boolean().default(false),
-  // 抽出した節の本文を取得する。outline・linesとは同時に指定できない。
+  // Read the extracted text of a section. Cannot be combined with outline or lines.
   section: z
     .string()
     .regex(/^sec_\d{4,}$/)
@@ -156,7 +156,7 @@ export const outlineItemSchema = z.strictObject({
 });
 export type OutlineItem = z.infer<typeof outlineItemSchema>;
 
-// 仕様9.5。
+// Spec 9.5.
 export const readResultSchema = z.strictObject({
   documentId: documentIdSchema,
   revision: revisionSchema,
@@ -194,13 +194,13 @@ export const daemonStatusSchema = z.strictObject({
   stateRoot: z.string(),
   openDocuments: z.number().int().nonnegative().nullable(),
   catalogVersion: z.number().int().nonnegative().nullable(),
-  // 管理UIのURL。認証の秘密は含まない。
+  // URL of the management UI. Contains no authentication secret.
   uiUrl: z.string().nullable(),
 });
 export type DaemonStatus = z.infer<typeof daemonStatusSchema>;
 
 export const reorderParamsSchema = z.strictObject({
-  // 開いている全文書のID。重複なし。
+  // IDs of all open documents. No duplicates.
   order: z.array(documentIdSchema),
   expectedCatalogVersion: z.number().int().nonnegative(),
 });
@@ -215,7 +215,7 @@ export type RefreshResult = z.infer<typeof refreshResultSchema>;
 export const watchListResultSchema = z.strictObject({ watchRules: z.array(watchRuleSchema) });
 export type WatchListResult = z.infer<typeof watchListResultSchema>;
 
-// 更新通知（仕様6.5）。IDと版だけを運び、本文は含めない。
+// Change notifications (spec 6.5). Carry only IDs and revisions, never document content.
 export const serverEventSchema = z.strictObject({
   type: z.enum([
     'hello',
@@ -233,7 +233,7 @@ export const serverEventSchema = z.strictObject({
   catalogVersion: z.number().int().nonnegative(),
   documentId: documentIdSchema.optional(),
   revision: revisionSchema.nullable().optional(),
-  // 質問の変更の通知は、質問のIDと状態だけを運ぶ（回答の内容は含めない）。
+  // A question change notification carries only the question ID and status (never the answer content).
   requestId: z.string().optional(),
   status: z.enum(['pending', 'submitted', 'cancelled']).optional(),
   draftVersion: z.number().int().nonnegative().optional(),
@@ -247,13 +247,13 @@ export const uiStatusSchema = z.strictObject({
   catalogVersion: z.number().int().nonnegative(),
   activeDocumentId: documentIdSchema.nullable(),
   openDocuments: z.number().int().nonnegative(),
-  // 文書を表示するlistenerのorigin。秘密は含まない。
+  // Origin of the listener that shows documents. Contains no secret.
   previewOrigin: z.string(),
 });
 export type UiStatus = z.infer<typeof uiStatusSchema>;
 
 export const bootstrapResultSchema = z.strictObject({
-  // 一回限りのticketをfragmentに含むURL。秘密として扱う。
+  // URL whose fragment holds a one-time ticket. Treated as a secret.
   bootstrapUrl: z.string(),
   uiUrl: z.string(),
 });
@@ -267,23 +267,23 @@ export type SessionResult = z.infer<typeof sessionResultSchema>;
 
 export const renderGrantParamsSchema = z.strictObject({
   documentId: documentIdSchema,
-  // 表示する版。指定がなければ現在の版。
+  // Revision to show. Defaults to the current revision.
   revision: revisionSchema.optional(),
   mode: htmlModeSchema.default('static'),
 });
 export type RenderGrantParams = z.input<typeof renderGrantParamsSchema>;
 
-// 文書中のlink。hrefは表示用で、開く操作にはlinkIdだけを使う。
+// A link in the document. href is for display; opening uses only linkId.
 export const renderLinkSchema = z.strictObject({
   linkId: z.string().regex(/^lnk_\d{4,}$/),
   href: z.string(),
   text: z.string(),
-  // external: http(s)・mailto。document: localの文書への相対link。other: 開けないlink。
+  // external: http(s) and mailto. document: relative link to a local document. other: a link that cannot be opened.
   kind: z.enum(['external', 'document', 'other']),
 });
 export type RenderLink = z.infer<typeof renderLinkSchema>;
 
-// 元の文書と表示が異なる理由。codeが種類、targetが対象（URLやpath）。
+// Why the view differs from the original document. code is the kind, target is the subject (URL or path).
 export const renderDiagnosticSchema = z.strictObject({
   code: z.string(),
   target: z.string().nullable(),
@@ -292,34 +292,34 @@ export const renderDiagnosticSchema = z.strictObject({
 export type RenderDiagnostic = z.infer<typeof renderDiagnosticSchema>;
 
 export const renderGrantResultSchema = z.strictObject({
-  // 表示用URLに含まれる秘密。この文書・この版の閲覧だけに使える。
+  // Secret included in the view URL. Usable only to view this document at this revision.
   grant: z.string(),
   documentId: documentIdSchema,
   revision: revisionSchema,
   format: documentFormatSchema,
   mode: htmlModeSchema,
-  // iframeで開くURL。Markdownはnull（本体で描画し、画像だけをfilesBaseUrlから読む）。
+  // URL to open in the iframe. null for Markdown (rendered by the host; only images are read from filesBaseUrl).
   documentUrl: z.string().nullable(),
-  // 登録済みassetの配信元。末尾は`/`。
+  // Base URL that serves registered assets. Ends with `/`.
   filesBaseUrl: z.string(),
-  // 文書の位置（assets-rootからの相対path）。相対参照を解決する基準になる。
+  // Location of the document (relative to the assets-root). Base for resolving relative references.
   documentLogicalPath: z.string(),
-  // 配信できるassetと、その種別。
+  // Assets that can be served, with their roles.
   assets: z.array(z.strictObject({ logicalPath: z.string(), role: assetRoleSchema })),
   links: z.array(renderLinkSchema),
   diagnostics: z.array(renderDiagnosticSchema),
-  // HTMLと本体の間の通信。HTMLへ同梱SDKを入れた表示だけにある。instanceIdは、この表示の識別子。
+  // Communication between the HTML and the host. Present only for views that embed the bundled SDK into the HTML. instanceId identifies this view.
   bridge: z.strictObject({ instanceId: z.string(), requestId: z.string() }).nullable(),
 });
 export type RenderGrantResult = z.infer<typeof renderGrantResultSchema>;
 
-// 表示の中から読み込もうとした、登録されていないfile（仕様10.3）。
+// Unregistered files the view tried to load (spec 10.3).
 export const renderMissingResultSchema = z.strictObject({
   missing: z.array(z.string()),
 });
 export type RenderMissingResult = z.infer<typeof renderMissingResultSchema>;
 
-// HTMLの表示方法を、管理UIの明示的な操作で変える。interactiveにするときは確認が必要。
+// Change the HTML mode by an explicit action in the management UI. Switching to interactive requires confirmation.
 export const htmlModeChangeParamsSchema = z.strictObject({
   documentId: documentIdSchema,
   mode: htmlModeSchema,
@@ -331,14 +331,14 @@ export const linkOpenParamsSchema = z.strictObject({
   documentId: documentIdSchema,
   revision: revisionSchema,
   linkId: z.string().regex(/^lnk_\d{4,}$/),
-  // 未登録の文書を開く確認の識別子。確認を求める応答で受け取ったものを、そのまま送る。
-  // 確認した文書・版・link・行き先に結び付いていて、1回だけ使える。
+  // Identifier of the confirmation to open an unregistered document. Send back what the confirmation-required response returned, unchanged.
+  // Bound to the confirmed document, revision, link and target, and usable only once.
   confirmation: z.string().min(1).max(64).optional(),
 });
 export type LinkOpenParams = z.input<typeof linkOpenParamsSchema>;
 
 export const linkOpenResultSchema = z.strictObject({
-  // focused: すでに開いていた文書へ切り替えた。opened: 確認を経て新しく開いた。
+  // focused: switched to a document that was already open. opened: newly opened after confirmation.
   status: z.enum(['focused', 'opened']),
   documentId: documentIdSchema,
 });
@@ -349,10 +349,10 @@ export type SearchMode = z.infer<typeof searchModeSchema>;
 
 export const searchParamsSchema = z.strictObject({
   query: z.string().min(1),
-  // text: 語の一致。exact: 連続した文字列の一致だけ。path: file名とpathだけ。
+  // text: word matches. exact: only matches of the contiguous string. path: file names and paths only.
   mode: searchModeSchema.default('text'),
   limit: z.number().int().min(1).max(LIMITS.searchLimitMax).default(LIMITS.searchLimitDefault),
-  // 対象を絞る文書ID。指定がなければ、開いている文書のすべて。
+  // Document IDs to narrow the search. Defaults to all open documents.
   documents: z.array(documentIdSchema).max(LIMITS.openDocuments).default([]),
   maxBytes: z
     .number()
@@ -371,26 +371,26 @@ export const searchHitSchema = z.strictObject({
   displayPath: z.string().nullable(),
   sectionId: z.string(),
   headingPath: z.array(z.string()),
-  // 抽出した本文の実際の抜粋。要約や言い換えではない。
+  // An actual excerpt of the extracted text. Not a summary or paraphrase.
   excerpt: z.string(),
   matchKind: z.enum(['path-exact', 'phrase', 'text', 'prefix', 'fuzzy']),
-  // 検索engineの中での相対的な値。確率や、意味の近さの精度ではない。
+  // A relative value inside the search engine. Not a probability or a measure of semantic similarity.
   score: z.number(),
   sourceRange: sourceRangeSchema.nullable(),
   extraction: z.enum(['markdown', 'static-html']),
 });
 export type SearchHit = z.infer<typeof searchHitSchema>;
 
-// 仕様9.4。検索は、公開済みの内容に対するもの。
+// Spec 9.4. Search runs over published content.
 export const searchResultSchema = z.strictObject({
   query: z.string(),
   mode: searchModeSchema,
   catalogVersion: z.number().int().nonnegative(),
-  // 開いている文書の数と、そのうち検索できた文書の数。
+  // Number of open documents, and how many of them could be searched.
   registeredDocuments: z.number().int().nonnegative(),
   searchedDocuments: z.number().int().nonnegative(),
   indexedAt: z.string(),
-  // 検索できなかった文書がある。全件を検索した結果ではない。
+  // Some documents could not be searched. The result does not cover every document.
   incomplete: z.boolean(),
   failedDocuments: z.array(z.strictObject({ documentId: documentIdSchema, code: z.string() })),
   indexingDocuments: z.array(documentIdSchema),

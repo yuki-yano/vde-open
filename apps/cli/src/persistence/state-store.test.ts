@@ -15,12 +15,12 @@ type Fault = (operation: Operation, path: string) => void;
 
 class SimulatedCrash extends Error {}
 
-// 各file操作の直前でfaultを呼ぶ。faultが投げれば、その操作は実行されない。
+// Calls fault right before each file operation. If fault throws, the operation is not performed.
 function faultyFs(fault: Fault): StoreFs {
   const wrap =
     <K extends Operation>(operation: K) =>
     (...args: Parameters<StoreFs[K]>): ReturnType<StoreFs[K]> => {
-      // renameは置換先のpathで判定する。
+      // rename is judged by the destination path.
       fault(operation, (operation === 'rename' ? args[1] : args[0]) as string);
       return (nodeStoreFs[operation] as (...a: unknown[]) => ReturnType<StoreFs[K]>)(...args);
     };
@@ -107,11 +107,11 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-describe('StateStoreの基本動作', () => {
-  it('commitした内容を再起動後に復元する', async () => {
+describe('StateStore basics', () => {
+  it('restores committed content after a restart', async () => {
     const store = await StateStore.open({ root, fs: nodeStoreFs });
     expect(store.payload.openOrder).toEqual([]);
-    const documentId = await store.transaction((tx) => addDocument(tx, '# 一つ目\n'));
+    const documentId = await store.transaction((tx) => addDocument(tx, '# first\n'));
     expect(store.storeVersion).toBe(1);
 
     const reopened = await StateStore.open({ root, fs: nodeStoreFs });
@@ -120,30 +120,30 @@ describe('StateStoreの基本動作', () => {
     expect(reopened.payload.openOrder).toEqual([documentId]);
   });
 
-  it('内容が変わらないtransactionはcommitしない', async () => {
+  it('does not commit a transaction that changes nothing', async () => {
     const store = await StateStore.open({ root, fs: nodeStoreFs });
     await store.transaction((tx) => addDocument(tx, 'a'));
     await store.transaction(() => undefined);
     expect(store.storeVersion).toBe(1);
   });
 
-  it('mutateが失敗したらstateを変えない', async () => {
+  it('leaves the state unchanged when mutate fails', async () => {
     const store = await StateStore.open({ root, fs: nodeStoreFs });
     await expect(
       store.transaction((tx) => {
         addDocument(tx, 'a');
-        throw new Error('中断');
+        throw new Error('aborted');
       }),
-    ).rejects.toThrow('中断');
+    ).rejects.toThrow('aborted');
     expect(store.payload.openOrder).toEqual([]);
     expect(store.storeVersion).toBe(0);
   });
 
-  it('同時に依頼された変更を1件ずつ順にcommitする', async () => {
+  it('commits concurrently requested changes one at a time in order', async () => {
     const store = await StateStore.open({ root, fs: nodeStoreFs });
     const ids = await Promise.all(
       Array.from({ length: 8 }, (_, index) =>
-        store.transaction((tx) => addDocument(tx, `文書 ${String(index)}`)),
+        store.transaction((tx) => addDocument(tx, `document ${String(index)}`)),
       ),
     );
     expect(store.payload.openOrder).toEqual(ids);
@@ -151,15 +151,15 @@ describe('StateStoreの基本動作', () => {
     expect((await assertConsistent(root)).openOrder).toEqual(ids);
   });
 
-  it('直前のstateが参照するblobはGCで消さない', async () => {
+  it('GC keeps blobs referenced by the previous state', async () => {
     const store = await StateStore.open({ root, fs: nodeStoreFs });
-    const first = await store.transaction((tx) => addDocument(tx, '残す内容'));
+    const first = await store.transaction((tx) => addDocument(tx, 'kept content'));
     await store.transaction((tx) => {
       delete tx.state.documents[first];
       tx.state.openOrder = [];
       tx.state.catalogVersion += 1;
     });
-    // state.prev.jsonがまだ最初の文書を参照している。
+    // state.prev.json still references the first document.
     expect(await store.collectGarbage()).toBe(0);
     await store.transaction((tx) => {
       tx.state.catalogVersion += 1;
@@ -169,8 +169,8 @@ describe('StateStoreの基本動作', () => {
   });
 });
 
-describe('StateStoreのclose', () => {
-  it('進行中のcommitを待ち、以後の変更を受け付けない', async () => {
+describe('StateStore close', () => {
+  it('waits for the in-progress commit and rejects further changes', async () => {
     let release: () => void = () => undefined;
     let block = false;
     const fs = faultyFs(() => undefined);
@@ -187,7 +187,7 @@ describe('StateStoreのclose', () => {
     };
     const store = await StateStore.open({ root, fs: slowFs });
     block = true;
-    const pending = store.transaction((tx) => addDocument(tx, '進行中'));
+    const pending = store.transaction((tx) => addDocument(tx, 'in progress'));
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     let closed = false;
@@ -201,32 +201,32 @@ describe('StateStoreのclose', () => {
     await closing;
     const documentId = await pending;
     expect(store.payload.openOrder).toEqual([documentId]);
-    await expect(store.transaction((tx) => addDocument(tx, '閉じた後'))).rejects.toMatchObject({
+    await expect(store.transaction((tx) => addDocument(tx, 'after close'))).rejects.toMatchObject({
       code: 'E_DAEMON_STOPPING',
     });
     expect((await assertConsistent(root)).openOrder).toEqual([documentId]);
   });
 });
 
-describe('SYS-010 保存の失敗（部分検証を含む）', () => {
+describe('SYS-010 save failures (including partial verification)', () => {
   it.each([
-    ['blobの書込みでdisk full', 'writeFileDurable', /blobs/, 'ENOSPC'],
-    ['state.prev.jsonの更新に失敗', 'rename', /state\.prev\.json$/, 'EIO'],
-    ['次stateの一時fileでfsync失敗', 'writeFileDurable', /\.tmp-state-/, 'EIO'],
-    ['state.jsonへのrename失敗', 'rename', /state\.json$/, 'EIO'],
+    ['disk full while writing a blob', 'writeFileDurable', /blobs/, 'ENOSPC'],
+    ['failure updating state.prev.json', 'rename', /state\.prev\.json$/, 'EIO'],
+    ['fsync failure on the next state temporary file', 'writeFileDurable', /\.tmp-state-/, 'EIO'],
+    ['rename failure onto state.json', 'rename', /state\.json$/, 'EIO'],
   ] as const)(
-    'replace前の失敗（%s）は成功を返さず、元stateのまま運転を続ける',
+    'a failure before the replace (%s) does not report success and keeps running on the original state',
     async (_name, operation, pathPattern, code) => {
       let armed = false;
       const fs = faultyFs((op, path) => {
         if (armed && op === operation && pathPattern.test(path)) throw errno(code);
       });
       const store = await StateStore.open({ root, fs });
-      const first = await store.transaction((tx) => addDocument(tx, '元の内容'));
+      const first = await store.transaction((tx) => addDocument(tx, 'original'));
       const before = readFileSync(join(root, 'state.json'));
 
       armed = true;
-      await expect(store.transaction((tx) => addDocument(tx, '新しい内容'))).rejects.toMatchObject({
+      await expect(store.transaction((tx) => addDocument(tx, 'changed'))).rejects.toMatchObject({
         code: 'E_STORAGE_WRITE_FAILED',
       });
       expect(store.payload.openOrder).toEqual([first]);
@@ -234,51 +234,51 @@ describe('SYS-010 保存の失敗（部分検証を含む）', () => {
       expect(store.fatalError).toBeNull();
 
       armed = false;
-      const second = await store.transaction((tx) => addDocument(tx, '再実行'));
+      const second = await store.transaction((tx) => addDocument(tx, 'retry'));
       expect(store.payload.openOrder).toEqual([first, second]);
       expect((await assertConsistent(root)).openOrder).toEqual([first, second]);
     },
   );
 
-  it('replace後のdirectory sync失敗はE_COMMIT_INDETERMINATEで、以後の書込みを止める', async () => {
+  it('a directory sync failure after the replace is E_COMMIT_INDETERMINATE and stops further writes', async () => {
     let armed = false;
     const fs = faultyFs((op, path) => {
       if (armed && op === 'syncDirectory' && path === root) throw errno('EIO');
     });
     const store = await StateStore.open({ root, fs });
-    const first = await store.transaction((tx) => addDocument(tx, '元の内容'));
+    const first = await store.transaction((tx) => addDocument(tx, 'original'));
     const fatal: string[] = [];
     store.onFatal((error) => fatal.push(error.code));
 
     armed = true;
-    await expect(store.transaction((tx) => addDocument(tx, '新しい内容'))).rejects.toMatchObject({
+    await expect(store.transaction((tx) => addDocument(tx, 'changed'))).rejects.toMatchObject({
       code: 'E_COMMIT_INDETERMINATE',
       retryable: true,
     });
-    // memoryは旧stateのまま。新旧どちらかへ決め打ちしない。
+    // Memory stays on the old state. It is not committed to either old or new.
     expect(store.payload.openOrder).toEqual([first]);
     expect(fatal).toEqual(['E_COMMIT_INDETERMINATE']);
 
     armed = false;
-    await expect(store.transaction((tx) => addDocument(tx, '続行'))).rejects.toMatchObject({
+    await expect(store.transaction((tx) => addDocument(tx, 'continue'))).rejects.toMatchObject({
       code: 'E_DAEMON_STOPPING',
     });
 
-    // 結果を保証できない状態では、memoryの旧stateを根拠にblobを消さない。
+    // When the outcome cannot be guaranteed, blobs are not deleted based on the old in-memory state.
     const blobsBefore = readdirSync(join(root, 'blobs')).toSorted();
     await expect(store.collectGarbage()).rejects.toMatchObject({ code: 'E_DAEMON_STOPPING' });
     expect(readdirSync(join(root, 'blobs')).toSorted()).toEqual(blobsBefore);
 
-    // 再起動後はディスクの整合したstateを正とする。
+    // After a restart, the consistent state on disk is authoritative.
     const restored = await assertConsistent(root);
     expect(restored.openOrder).toHaveLength(2);
     expect(restored.openOrder[0]).toBe(first);
   });
 });
 
-describe('SYS-009 commit途中のkill（state store単位の部分検証）', () => {
-  it('どのfile操作の直前で止まっても、復元後は旧または新の整合したstateになる', async () => {
-    // 障害なしで1回commitし、file操作の回数を数える。
+describe('SYS-009 kill during commit (partial verification at the state store level)', () => {
+  it('whichever file operation it stops before, the restored state is consistent and either old or new', async () => {
+    // Commit once without faults and count the file operations.
     let operations = 0;
     const counting = faultyFs(() => {
       operations += 1;
@@ -286,9 +286,9 @@ describe('SYS-009 commit途中のkill（state store単位の部分検証）', ()
     const probeRoot = mkdtempSync(join(tmpdir(), 'vde-open-store-probe-'));
     try {
       const probe = await StateStore.open({ root: probeRoot, fs: counting });
-      await probe.transaction((tx) => addDocument(tx, '元の内容'));
+      await probe.transaction((tx) => addDocument(tx, 'original'));
       operations = 0;
-      await probe.transaction((tx) => addDocument(tx, '新しい内容'));
+      await probe.transaction((tx) => addDocument(tx, 'changed'));
     } finally {
       rmSync(probeRoot, { recursive: true, force: true });
     }
@@ -303,12 +303,13 @@ describe('SYS-009 commit途中のkill（state store単位の部分検証）', ()
         const fs = faultyFs(() => {
           if (!armed) return;
           count += 1;
-          if (count === crashAt) throw new SimulatedCrash(`操作 ${String(crashAt)} の直前で停止`);
+          if (count === crashAt)
+            throw new SimulatedCrash(`stopped right before operation ${String(crashAt)}`);
         });
         const store = await StateStore.open({ root: caseRoot, fs });
-        const first = await store.transaction((tx) => addDocument(tx, '元の内容'));
+        const first = await store.transaction((tx) => addDocument(tx, 'original'));
         armed = true;
-        await expect(store.transaction((tx) => addDocument(tx, '新しい内容'))).rejects.toThrow();
+        await expect(store.transaction((tx) => addDocument(tx, 'changed'))).rejects.toThrow();
         armed = false;
 
         const restored = await assertConsistent(caseRoot);
@@ -319,19 +320,19 @@ describe('SYS-009 commit途中のkill（state store単位の部分検証）', ()
         rmSync(caseRoot, { recursive: true, force: true });
       }
     }
-    // 停止位置によって、旧stateに留まる場合と新stateへ進む場合の両方がある。
+    // Depending on where it stops, it either stays on the old state or advances to the new one.
     expect([...outcomes].toSorted()).toEqual([1, 2]);
   });
 });
 
-describe('SYS-011 stateの破損と未知の版', () => {
+describe('SYS-011 state corruption and unknown versions', () => {
   async function seed(): Promise<Buffer> {
     const store = await StateStore.open({ root, fs: nodeStoreFs });
-    await store.transaction((tx) => addDocument(tx, '内容'));
+    await store.transaction((tx) => addDocument(tx, 'content'));
     return readFileSync(join(root, 'state.json'));
   }
 
-  it('checksumが一致しないstateでは起動を止め、fileを書き換えない', async () => {
+  it('refuses to start on a checksum mismatch and does not rewrite the file', async () => {
     const original = JSON.parse((await seed()).toString('utf8')) as { payload: StatePayload };
     original.payload.catalogVersion += 100;
     const tampered = Buffer.from(JSON.stringify(original));
@@ -343,7 +344,7 @@ describe('SYS-011 stateの破損と未知の版', () => {
     expect(readFileSync(join(root, 'state.json')).equals(tampered)).toBe(true);
   });
 
-  it('JSONとして読めないstateでは起動を止める', async () => {
+  it('refuses to start when the state is not valid JSON', async () => {
     await seed();
     writeFileSync(join(root, 'state.json'), '{"formatVersion":1,');
     await expect(StateStore.open({ root, fs: nodeStoreFs })).rejects.toMatchObject({
@@ -351,7 +352,7 @@ describe('SYS-011 stateの破損と未知の版', () => {
     });
   });
 
-  it('未知のformatVersionでは起動を止め、空stateで上書きしない', async () => {
+  it('refuses to start on an unknown formatVersion and does not overwrite with an empty state', async () => {
     const file = JSON.parse((await seed()).toString('utf8')) as Record<string, unknown>;
     file['formatVersion'] = 2;
     const future = Buffer.from(JSON.stringify(file));
@@ -363,10 +364,10 @@ describe('SYS-011 stateの破損と未知の版', () => {
     expect(readFileSync(join(root, 'state.json')).equals(future)).toBe(true);
   });
 
-  it('state.jsonが消えてstate.prev.jsonだけ残る場合、勝手に過去へ戻さない', async () => {
+  it('does not roll back on its own when only state.prev.json remains after state.json is lost', async () => {
     const store = await StateStore.open({ root, fs: nodeStoreFs });
-    await store.transaction((tx) => addDocument(tx, '一つ目'));
-    await store.transaction((tx) => addDocument(tx, '二つ目'));
+    await store.transaction((tx) => addDocument(tx, 'first'));
+    await store.transaction((tx) => addDocument(tx, 'second'));
     rmSync(join(root, 'state.json'));
 
     await expect(StateStore.open({ root, fs: nodeStoreFs })).rejects.toMatchObject({
@@ -376,7 +377,7 @@ describe('SYS-011 stateの破損と未知の版', () => {
     expect(readdirSync(root)).not.toContain('state.json');
   });
 
-  it('stateが参照するblobが欠けていたら起動を止める', async () => {
+  it('refuses to start when a blob referenced by the state is missing', async () => {
     await seed();
     for (const name of readdirSync(join(root, 'blobs'))) rmSync(join(root, 'blobs', name));
     await expect(StateStore.open({ root, fs: nodeStoreFs })).rejects.toMatchObject({
@@ -384,7 +385,7 @@ describe('SYS-011 stateの破損と未知の版', () => {
     });
   });
 
-  it('checksumはcanonical JSONに対して計算される', async () => {
+  it('computes the checksum over canonical JSON', async () => {
     const file = JSON.parse((await seed()).toString('utf8')) as {
       formatVersion: number;
       storeVersion: number;

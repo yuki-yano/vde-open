@@ -1,9 +1,9 @@
-// 最上位のfile引数をopenへ委譲する（仕様5.1）。
-// 最初の位置引数が既知のsubcommandでなければ、先頭に`open`を補う。
+// Delegate top-level file arguments to open (spec 5.1).
+// If the first positional argument is not a known subcommand, prepend `open`.
 
 export interface ArgvRules {
   subcommands: ReadonlySet<string>;
-  // openのoptionのうち、値を取るもの（例: --title）。値を位置引数と取り違えないために使う。
+  // Options of open that take a value (for example --title). Used so the value is not mistaken for a positional argument.
   valueOptions: ReadonlySet<string>;
 }
 
@@ -11,10 +11,10 @@ export function normalizeArgv(argv: string[], stdinIsPiped: boolean, rules: Argv
   let firstPositional: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index] as string;
-    // `--`の後は、subcommandと同名でもfileとして扱う。`-`はstdinの指定。
+    // After `--`, even a token named like a subcommand is a file. `-` means stdin.
     if (token === '--' || token === '-') return ['open', ...argv];
     if (token.startsWith('-')) {
-      // `--title read`のreadはoptionの値。`--title=read`は1つのtokenなので読み飛ばさない。
+      // In `--title read`, read is the option value. `--title=read` is a single token, so nothing is skipped.
       if (rules.valueOptions.has(token)) index += 1;
       continue;
     }
@@ -25,7 +25,7 @@ export function normalizeArgv(argv: string[], stdinIsPiped: boolean, rules: Argv
     return rules.subcommands.has(firstPositional) ? argv : ['open', ...argv];
   }
   const asksForInfo = argv.some((token) => ['-h', '--help', '-V', '--version'].includes(token));
-  // 位置引数がなく、stdinがpipeなら、stdinから開く。
+  // With no positional argument and a piped stdin, open from stdin.
   if (stdinIsPiped && !asksForInfo) return ['open', ...argv];
   return argv;
 }

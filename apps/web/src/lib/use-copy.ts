@@ -5,11 +5,11 @@ export interface CopyResult {
   message: string;
 }
 
-// 成功の表示は短く、失敗の表示は読める長さだけ残す。
+// Show success briefly; keep failures long enough to read.
 const SUCCESS_MS = 3000;
 const FAILURE_MS = 10_000;
 
-// 文字列をclipboardへcopyし、結果を示す（仕様13.2）。labelは、copyしたものの名前。
+// Copy a string to the clipboard and report the result (spec 13.2). label names what was copied.
 export function useCopy(): {
   result: CopyResult | null;
   copy: (label: string, text: string) => Promise<void>;
@@ -25,15 +25,15 @@ export function useCopy(): {
   const copy = useCallback(async (label: string, text: string) => {
     let next: CopyResult;
     try {
-      // 安全な接続（127.0.0.1を含む）でないと、clipboardは使えない。
+      // The clipboard is available only on a secure connection (including 127.0.0.1).
       if (typeof navigator.clipboard?.writeText !== 'function') {
-        throw new Error('このbrowserでは、clipboardへ書き込めません');
+        throw new Error('This browser cannot write to the clipboard');
       }
       await navigator.clipboard.writeText(text);
-      next = { ok: true, message: `${label}をcopyしました。` };
+      next = { ok: true, message: `Copied the ${label}.` };
     } catch (reason) {
-      const detail = reason instanceof Error ? reason.message : '理由は分かりません';
-      next = { ok: false, message: `${label}をcopyできませんでした（${detail}）。` };
+      const detail = reason instanceof Error ? reason.message : 'unknown reason';
+      next = { ok: false, message: `Could not copy the ${label} (${detail}).` };
     }
     setResult(next);
     if (timer.current) clearTimeout(timer.current);

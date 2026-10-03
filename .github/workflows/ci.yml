@@ -1,4 +1,4 @@
-# 仕様14.3の必須CI。pushしていないので未実行（docs/implementation-status.mdではNOT RUN）。
+# Required CI (spec 14.3).
 name: ci
 
 on:
@@ -17,8 +17,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: jdx/mise-action@v2
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm lint
@@ -34,8 +34,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: jdx/mise-action@v2
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test:pack

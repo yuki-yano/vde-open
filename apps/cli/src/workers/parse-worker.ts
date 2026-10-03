@@ -1,4 +1,4 @@
-// 文書の構造を解析するworker。原文をdataとして受け取るだけで、文書中のJSやimportは実行しない。
+// A worker that parses document structure. It only receives the source as data; it never runs JS or imports in the document.
 import { parentPort } from 'node:worker_threads';
 
 import { analyzeDocument, ParseLimitError } from '@vde-open/document';
@@ -18,7 +18,7 @@ export type ParseRequest =
   | { id: number; op: 'diagnostics'; collectGarbage: boolean };
 
 function run(request: ParseRequest): unknown {
-  // 解析のworkerは、依頼の間に状態を持たない。heapだけを返す。
+  // The parse worker keeps no state between requests. Returns only the heap.
   if (request.op === 'diagnostics') {
     return { heapUsedBytes: measureHeap(request.collectGarbage), retained: {} };
   }

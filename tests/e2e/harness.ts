@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { resolveRuntimeLocation } from '../../apps/cli/src/persistence/paths.ts';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
-// 配布物のentry。sourceではなく、ビルド結果を試す。
+// The distribution entry point. Test the build output, not the source.
 const cliEntry = join(repoRoot, 'apps', 'cli', 'dist', 'cli.js');
 
 export interface CliResult {
@@ -30,18 +30,18 @@ export interface E2eHome {
   run: (args: string[]) => Promise<CliResult>;
   json: <T>(args: string[]) => Promise<T>;
   write: (relativePath: string, content: string | Buffer) => string;
-  // editorの保存と同じく、一時fileへ書いてからrenameで置き換える。
+  // Like an editor save: write to a temporary file, then replace by rename.
   atomicWrite: (relativePath: string, content: string) => void;
-  // 一回限りのticketを含むURL。
+  // A URL containing a one-time ticket.
   bootstrapUrl: () => Promise<string>;
   uiUrl: () => Promise<string>;
   cleanup: () => Promise<void>;
 }
 
-// extraEnvは、daemonとCLIへ渡す追加の環境変数（開発用の設定が配布物で無効なことの確認などに使う）。
+// extraEnv is extra environment variables passed to the daemon and CLI (used, for example, to check that development settings are disabled in the distribution).
 export function createE2eHome(extraEnv: Record<string, string> = {}): E2eHome {
   if (!existsSync(cliEntry)) {
-    throw new Error('apps/cli/dist/cli.js がありません。先に pnpm build を実行してください。');
+    throw new Error('apps/cli/dist/cli.js not found. Run pnpm build first.');
   }
   const base = mkdtempSync(join(tmpdir(), 'vde-open-e2e-'));
   const home = join(base, 'home');
@@ -71,7 +71,7 @@ export function createE2eHome(extraEnv: Record<string, string> = {}): E2eHome {
   const json = async <T>(args: string[]): Promise<T> => {
     const result = await run([...args, '--json']);
     const envelope = JSON.parse(result.stdout) as { ok: boolean; data: T };
-    if (!envelope.ok) throw new Error(`${args.join(' ')} が失敗しました: ${result.stdout}`);
+    if (!envelope.ok) throw new Error(`${args.join(' ')} failed: ${result.stdout}`);
     return envelope.data;
   };
 
@@ -95,7 +95,7 @@ export function createE2eHome(extraEnv: Record<string, string> = {}): E2eHome {
     async bootstrapUrl() {
       const result = await run(['ui', '--print-url']);
       const url = result.stdout.trim();
-      if (!url.includes('#bootstrap=')) throw new Error(`URLを取得できません: ${result.stderr}`);
+      if (!url.includes('#bootstrap=')) throw new Error(`Could not get the URL: ${result.stderr}`);
       return url;
     },
     async uiUrl() {
@@ -116,7 +116,7 @@ export function createE2eHome(extraEnv: Record<string, string> = {}): E2eHome {
           process.kill(pid, 0);
           process.kill(pid, 'SIGKILL');
         } catch {
-          // すでに停止している。
+          // Already stopped.
         }
       }
       const { runtimeDir } = resolveRuntimeLocation(home, {

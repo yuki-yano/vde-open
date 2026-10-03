@@ -1,5 +1,5 @@
-// CSSの参照（url()、@import）を構文木から取り出し、許可されないものを取り除く（仕様10.4）。
-// 文字列の置換ではなく、css-treeの構文木を書き換えてから出力する。
+// Extract CSS references (url(), @import) from the syntax tree and remove the ones not allowed (spec 10.4).
+// Rewrites the css-tree syntax tree and serializes it, instead of replacing strings.
 import type {
   CssNode,
   Declaration,
@@ -10,53 +10,53 @@ import type {
   walk as WalkFn,
   WalkContext,
 } from 'css-tree';
-// css-treeの本体のentryは構文dataをfilesystemから読むため、配布物へbundleできない。
-// 解析・走査・出力だけの単体entryを使う。単体entryには型宣言がないので、本体の型を当てる。
-// @ts-expect-error 型宣言のない単体entry
+// The main css-tree entry reads syntax data from the filesystem, so it cannot be bundled into the distribution.
+// Use the standalone entries for parse, walk and generate only. They have no type declarations, so the main entry's types are applied.
+// @ts-expect-error standalone entry without type declarations
 import generateUntyped from 'css-tree/generator';
-// @ts-expect-error 型宣言のない単体entry
+// @ts-expect-error standalone entry without type declarations
 import parseUntyped from 'css-tree/parser';
-// @ts-expect-error 型宣言のない単体entry
+// @ts-expect-error standalone entry without type declarations
 import walkUntyped from 'css-tree/walker';
 
 const parse = parseUntyped as typeof ParseFn;
 const walk = walkUntyped as typeof WalkFn;
 const generate = generateUntyped as typeof GenerateFn;
 
-// stylesheetはCSS fileとstyle要素、declarationsはstyle属性。
+// stylesheet is a CSS file or a style element; declarations is a style attribute.
 export type CssKind = 'stylesheet' | 'declarations';
 
 export type CssReferenceContext = 'style' | 'font' | 'css-url';
 
-// 参照を残すなら出力するURL、取り除くならnullを返す。
+// Returns the URL to output when the reference is kept, or null to remove it.
 export type CssUrlResolver = (url: string, context: CssReferenceContext) => string | null;
 
 export interface CssTransformResult {
   css: string;
-  // 解析できないために無効化した部分の数。
+  // Number of parts disabled because they could not be parsed.
   invalid: number;
 }
 
-// 文字列でURLを受け取る関数。
+// Functions that take a URL as a string.
 const STRING_URL_FUNCTIONS = new Set(['image-set', '-webkit-image-set', 'image', 'src']);
-// 値を後から差し込む関数。URLを受け取る関数の中にあると、何を取得するかを判定できない。
+// Functions that substitute a value later. Inside a URL-taking function, what gets fetched cannot be determined.
 const INDIRECT_FUNCTIONS = new Set(['var', 'env', 'attr']);
-// 取得や実行を起こす、古い仕組み。宣言ごと取り除く。
+// Legacy mechanisms that fetch or execute. The whole declaration is removed.
 const BLOCKED_FUNCTIONS = new Set(['expression']);
 const BLOCKED_PROPERTIES = new Set(['behavior', '-moz-binding']);
-// 構文木にできなかった値のうち、関数やescapeを含むものは、url()が隠れているかもしれない。
+// A value that could not be parsed and contains a function or an escape may hide a url().
 const OPAQUE_VALUE = /[(\\]/;
 
-// keep: 残す。drop: 許可されない参照を含むので取り除く。invalid: 何を取得するか判定できないので無効化する。
+// keep: keep it. drop: remove it because it contains a reference that is not allowed. invalid: disable it because what gets fetched cannot be determined.
 type DeclarationVerdict = 'keep' | 'drop' | 'invalid';
 
-// 宣言の値に含まれる参照を調べ、残せるなら書き換える。
+// Inspect the references in a declaration value and rewrite them when the declaration can be kept.
 function rewriteDeclaration(
   declaration: Declaration,
   inFontFace: boolean,
   resolve: CssUrlResolver,
 ): DeclarationVerdict {
-  // 名前をescapeで書いた宣言は、browserが別の名前として解釈する。判定できないので無効化する。
+  // A declaration whose name uses escapes is read by the browser as a different name. It cannot be judged, so it is disabled.
   if (declaration.property.includes('\\')) return 'invalid';
   const property = declaration.property.toLowerCase();
   if (BLOCKED_PROPERTIES.has(property)) return 'drop';
@@ -80,7 +80,7 @@ function rewriteDeclaration(
         node.children.forEach((child) => {
           if (child.type === 'String') child.value = visit(child.value);
         });
-        // custom propertyなどから差し込まれる値は、文字列でもURLとして取得される。
+        // A value substituted from a custom property or similar is fetched as a URL even when it is a string.
         walk(node, (inner: CssNode) => {
           if (inner.type === 'Function' && INDIRECT_FUNCTIONS.has(inner.name.toLowerCase())) {
             verdict = 'invalid';
@@ -103,7 +103,7 @@ export function transformCss(
     ast = parse(source, {
       context: kind === 'stylesheet' ? 'stylesheet' : 'declarationList',
       positions: false,
-      // custom propertyの値も構文木にする。しないと、値の中のurl()を見落とす。
+      // Parse custom property values too. Otherwise a url() inside the value is missed.
       parseCustomProperty: true,
       onParseError: () => {
         invalid += 1;
@@ -124,14 +124,14 @@ export function transformCss(
           return this.skip;
         }
         if (node.type === 'Atrule') {
-          // 名前をescapeで書いた規則（`@\69mport`など）は、browserが別の規則として解釈する。
+          // A rule whose name uses escapes (such as `@\69mport`) is read by the browser as a different rule.
           if (node.name.includes('\\')) {
             invalid += 1;
             if (item && list) list.remove(item);
             return this.skip;
           }
           const name = node.name.toLowerCase();
-          // @namespaceのURLは名前であって、取得先ではない。
+          // The URL of @namespace is a name, not a fetch target.
           if (name === 'namespace') return this.skip;
           if (name === 'import') {
             const prelude = node.prelude;
@@ -155,13 +155,13 @@ export function transformCss(
           }
           return undefined;
         }
-        // selectorを構文木にできなかった規則は、規則ごと無効化する。
+        // A rule whose selector could not be parsed is disabled as a whole.
         if (node.type === 'Rule' && node.prelude.type === 'Raw') {
           invalid += 1;
           if (item && list) list.remove(item);
           return this.skip;
         }
-        // 規則や宣言の並びに直接現れた、構文木にできなかった部分。無効化する。
+        // An unparsed part that appears directly in a list of rules or declarations. Disabled.
         if (
           node.type === 'Raw' &&
           item &&
@@ -176,10 +176,10 @@ export function transformCss(
         return undefined;
       },
     });
-    // style要素の中へ出力するので、要素を閉じる文字列を作れないようにする。
+    // The output goes inside a style element, so make it impossible to form a closing tag.
     return { css: generate(ast).replaceAll('<', String.raw`\3c `), invalid };
   } catch {
-    // 構文木を作れないCSSは、全体を無効にする。
+    // CSS that cannot be parsed into a tree is disabled as a whole.
     return { css: '', invalid: invalid + 1 };
   }
 }
@@ -189,7 +189,7 @@ export interface CssReference {
   context: CssReferenceContext;
 }
 
-// CSSが参照するURLを、書き換えずに集める。
+// Collect the URLs the CSS references, without rewriting.
 export function scanCssReferences(source: string, kind: CssKind): CssReference[] {
   const references: CssReference[] = [];
   transformCss(source, kind, (url, context) => {

@@ -20,21 +20,21 @@ import { z } from 'zod';
 
 export const revisionRecordSchema = z.strictObject({
   revision: revisionSchema,
-  // この版を解析した形式。文書の形式が後から変わっても、版ごとの解析条件は変えない。
+  // The format this revision was parsed as. Even if the document format changes later, each revision's parse conditions stay fixed.
   format: documentFormatSchema,
   sourceSha256: sha256Schema,
   byteLength: z.number().int().nonnegative(),
   parserProfileVersion: z.string().min(1),
   createdAt: z.string(),
-  // この版の文書の位置（assets-rootからの相対path）と、参照しているlocal file。
+  // Location of this revision's document (path relative to assets-root) and the local files it references.
   documentLogicalPath: z.string().min(1),
   assets: z.array(assetRecordSchema),
-  // 文書が参照するfileを調べ終えたか。failedなら、assetは集められていない（参照がないのとは違う）。
+  // Whether scanning the files referenced by the document finished. If failed, assets were not collected (which differs from having no references).
   assetScan: z.enum(['complete', 'failed']),
 });
 export type RevisionRecord = z.infer<typeof revisionRecordSchema>;
 
-// 文書のidentity。閉じた後も残し、同じpath／keyで開き直したときにIDを再利用する。
+// Document identity. Kept after closing, so reopening by the same path/key reuses the ID.
 export const documentRecordSchema = z.strictObject({
   documentId: documentIdSchema,
   sourceKind: sourceKindSchema,
@@ -51,15 +51,15 @@ export const documentRecordSchema = z.strictObject({
   sourceState: sourceStateSchema,
   currentRevision: revisionSchema.nullable(),
   revisions: z.array(revisionRecordSchema),
-  // local assetを解決できる範囲の上限（symlinkを解決済みのdirectory）。nullなら、local assetは使えない。
+  // Upper bound of where local assets can be resolved (a directory with symlinks resolved). If null, local assets are unavailable.
   assetsRoot: z.string().nullable(),
-  // 利用者が個別に指定したasset（assets-rootからの相対path）。
+  // Assets the user registered individually (paths relative to assets-root).
   extraAssets: z.array(z.string()),
   htmlMode: htmlModeSchema,
 });
 export type DocumentRecord = z.infer<typeof documentRecordSchema>;
 
-// 質問と回答（仕様11.3）。質問は、作ったときの文書の版に固定する。
+// Questions and answers (spec 11.3). A question is pinned to the document revision at creation time.
 export const feedbackRecordSchema = z.strictObject({
   requestId: requestIdSchema,
   documentId: documentIdSchema,
@@ -70,13 +70,13 @@ export const feedbackRecordSchema = z.strictObject({
   status: feedbackStatusSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
-  // 再試行で同じ質問を重ねて作らないための識別子と、そのときの依頼内容のhash。
+  // Identifier that keeps retries from creating the same question twice, and the hash of the request contents at that time.
   operationId: z.string().nullable(),
   operationDigest: sha256Schema.nullable(),
   draftVersion: z.number().int().nonnegative(),
   draftAnswers: answersSchema,
   submission: submissionSchema.nullable(),
-  // 送信の条件のhash。同じ送信IDの再送が、同じ条件かを確かめる。
+  // Hash of the submit conditions. Verifies that a resend with the same submission ID has the same conditions.
   submissionDigest: sha256Schema.nullable(),
   cancellation: cancellationSchema.nullable(),
   acknowledgedAt: z.string().nullable(),
@@ -111,60 +111,60 @@ export function emptyStatePayload(): StatePayload {
   };
 }
 
-// schemaでは表せない参照の整合性。違反はstate破損として扱う。
+// Referential integrity that the schema cannot express. A violation is treated as state corruption.
 export function findIntegrityProblem(payload: StatePayload): string | null {
   const seen = new Set<string>();
   for (const documentId of payload.openOrder) {
-    if (seen.has(documentId)) return `openOrderに重複があります: ${documentId}`;
+    if (seen.has(documentId)) return `openOrder has a duplicate: ${documentId}`;
     seen.add(documentId);
     const record = payload.documents[documentId];
-    if (!record) return `openOrderが未知の文書を指しています: ${documentId}`;
-    if (!record.isOpen) return `openOrderに閉じた文書があります: ${documentId}`;
+    if (!record) return `openOrder refers to an unknown document: ${documentId}`;
+    if (!record.isOpen) return `openOrder contains a closed document: ${documentId}`;
   }
   for (const [documentId, record] of Object.entries(payload.documents)) {
-    if (record.documentId !== documentId) return `文書IDがkeyと一致しません: ${documentId}`;
+    if (record.documentId !== documentId) return `documentId does not match the key: ${documentId}`;
     if (record.isOpen && !seen.has(documentId)) {
-      return `open中の文書がopenOrderにありません: ${documentId}`;
+      return `An open document is missing from openOrder: ${documentId}`;
     }
     if (
       record.currentRevision !== null &&
       !record.revisions.some((entry) => entry.revision === record.currentRevision)
     ) {
-      return `currentRevisionが保持中の版にありません: ${documentId}`;
+      return `currentRevision is not among the retained revisions: ${documentId}`;
     }
   }
   if (payload.activeDocumentId !== null && !seen.has(payload.activeDocumentId)) {
-    return `activeDocumentIdがopen中の文書を指していません: ${payload.activeDocumentId}`;
+    return `activeDocumentId does not refer to an open document: ${payload.activeDocumentId}`;
   }
   const pendingDocuments = new Set<string>();
   const operations = new Set<string>();
   for (const [requestId, request] of Object.entries(payload.feedbackRequests)) {
-    if (request.requestId !== requestId) return `質問IDがkeyと一致しません: ${requestId}`;
+    if (request.requestId !== requestId) return `requestId does not match the key: ${requestId}`;
     const record = payload.documents[request.documentId];
-    if (!record) return `質問が未知の文書を指しています: ${requestId}`;
-    // 質問に固定した版は、質問を消すまで保持する。
+    if (!record) return `A question refers to an unknown document: ${requestId}`;
+    // The revision pinned by a question is retained until the question is deleted.
     if (!record.revisions.some((entry) => entry.revision === request.revision)) {
-      return `質問に固定した版が保持されていません: ${requestId}`;
+      return `The revision pinned by a question is not retained: ${requestId}`;
     }
     if ((request.status === 'submitted') !== (request.submission !== null)) {
-      return `質問の状態と回答が一致しません: ${requestId}`;
+      return `Question status and answer do not match: ${requestId}`;
     }
     if ((request.status === 'cancelled') !== (request.cancellation !== null)) {
-      return `質問の状態と中止の記録が一致しません: ${requestId}`;
+      return `Question status and cancellation record do not match: ${requestId}`;
     }
     if (request.acknowledgedAt !== null && request.status !== 'submitted') {
-      return `回答のない質問に取得済みの記録があります: ${requestId}`;
+      return `A question without an answer has an acknowledge record: ${requestId}`;
     }
     if (request.status === 'pending') {
-      if (!record.isOpen) return `閉じた文書に回答待ちの質問があります: ${requestId}`;
+      if (!record.isOpen) return `A closed document has a pending question: ${requestId}`;
       if (pendingDocuments.has(request.documentId)) {
-        return `1つの文書に回答待ちの質問が複数あります: ${request.documentId}`;
+        return `A document has more than one pending question: ${request.documentId}`;
       }
       pendingDocuments.add(request.documentId);
     }
     if (request.operationId !== null) {
       if (operations.has(request.operationId)) {
-        return `同じoperation IDの質問が複数あります: ${requestId}`;
+        return `Multiple questions share the same operation ID: ${requestId}`;
       }
       operations.add(request.operationId);
     }
@@ -172,7 +172,7 @@ export function findIntegrityProblem(payload: StatePayload): string | null {
   return null;
 }
 
-// 質問が固定している版。文書の版を整理するときに残す。
+// Revisions pinned by questions. Kept when pruning a document's revisions.
 export function pinnedRevisions(payload: StatePayload, documentId: string): Set<string> {
   const pinned = new Set<string>();
   for (const request of Object.values(payload.feedbackRequests)) {
@@ -181,7 +181,7 @@ export function pinnedRevisions(payload: StatePayload, documentId: string): Set<
   return pinned;
 }
 
-// 文書の回答待ちの質問（1件まで）。
+// The document's pending questions (at most one).
 export function pendingRequestIdsOf(payload: StatePayload, documentId: string): string[] {
   return Object.values(payload.feedbackRequests)
     .filter((request) => request.documentId === documentId && request.status === 'pending')

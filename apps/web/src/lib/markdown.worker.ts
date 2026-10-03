@@ -1,4 +1,4 @@
-// Markdownの解析をUIのthreadから分ける。原文をdataとして受け取るだけで、文書中のscriptは実行しない。
+// Parse Markdown off the UI thread. The source is received only as data; scripts in the document never run.
 import { parseMarkdownDocument, ParseLimitError } from '@vde-open/document';
 
 interface ParseRequest {

@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 
-// StateStoreが使うfile操作。障害注入のため、testではこのinterfaceを差し替える。
+// File operations used by StateStore. Tests replace this interface for fault injection.
 export interface StoreFs {
   mkdir(path: string, mode: number): Promise<void>;
   readFile(path: string): Promise<Buffer | null>;
@@ -50,7 +50,7 @@ export const nodeStoreFs: StoreFs = {
   },
 
   async syncDirectory(path) {
-    // Windowsはdirectoryをfsyncできない。対応する範囲でだけ行う（仕様7.2）。
+    // Windows cannot fsync a directory. Do it only where supported (spec 7.2).
     if (process.platform === 'win32') return;
     const handle = await open(path, constants.O_RDONLY);
     try {

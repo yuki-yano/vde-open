@@ -1,5 +1,5 @@
-// 表示のための変換（daemonの解析workerで使う）。parse5とcss-treeを読み込むので、
-// 管理UIのbundleへ入れないよう、解析の入口（index.ts）とは別のentryにしている。
+// Transforms for the view (used by the daemon's analysis worker). They load parse5 and css-tree,
+// so they live in a separate entry from the analysis entry (index.ts) to keep them out of the management UI bundle.
 export * from './css-transform.ts';
 export * from './html-static.ts';
 export * from './markdown-render.ts';

@@ -15,11 +15,11 @@ function ready(codes: string[]): GrantState {
 const T0 = '2026-10-03T00:00:00.000Z';
 const T1 = '2026-10-03T00:00:05.000Z';
 
-describe('表示の権限を、版が同じまま取り直す条件', () => {
-  it('取得した結果そのものは、取り直しの理由にならない', () => {
-    // 取得の前は、いまの更新時刻に対して取得する。
+describe('when to refetch a render grant for the same revision', () => {
+  it('the fetched result itself is not a reason to refetch', () => {
+    // Before the fetch, fetch for the current update time.
     expect(fetchTokenOf(null, T0)).toBe(T0);
-    // 取得した直後（更新時刻は取得したときと同じ）は、値が変わらない。結果が何であっても同じ。
+    // Right after the fetch (the update time is the same as at fetch), the value does not change, whatever the result.
     for (const state of [
       ready(['asset-scan-failed']),
       ready(['script-removed']),
@@ -30,16 +30,16 @@ describe('表示の権限を、版が同じまま取り直す条件', () => {
     }
   });
 
-  it('参照を調べられなかった文書は、取得の後に文書の状態が更新されたら取り直す', () => {
+  it("a document whose references could not be scanned is refetched when the document's state is updated after the fetch", () => {
     const failed = { updatedAt: T0, state: ready(['script-removed', 'asset-scan-failed']) };
     expect(fetchTokenOf(failed, T1)).toBe(T1);
-    // 取り直した後（取得したときの更新時刻がT1）は、また変わらない。
+    // After the refetch (the update time at fetch is T1), it does not change again.
     expect(fetchTokenOf({ ...failed, updatedAt: T1 }, T1)).toBe(T1);
-    // 取り直しに失敗して前の結果を保っている場合も、試みた時点を記録していれば繰り返さない。
+    // Even when the refetch failed and the previous result is kept, recording the attempt time prevents repeating.
     expect(fetchTokenOf({ updatedAt: T1, state: failed.state }, T1)).toBe(T1);
   });
 
-  it('調べ終えた文書は、文書の状態が更新されても取り直さない（表示を作り直さない）', () => {
+  it("a document whose scan finished is not refetched when the document's state is updated (the view is not rebuilt)", () => {
     expect(fetchTokenOf({ updatedAt: T0, state: ready(['script-removed']) }, T1)).toBe(T0);
     expect(fetchTokenOf({ updatedAt: T0, state: { status: 'failed', message: 'x' } }, T1)).toBe(T0);
   });

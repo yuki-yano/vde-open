@@ -1,10 +1,10 @@
-// 文書中の参照（URL）を分類し、local fileへの参照をassets-rootからの相対path（logical path）へ解決する。
-// filesystemには触れない。ここで決めるのは、文字列としての参照がどこを指すかだけ（仕様10.3）。
+// Classify references (URLs) in a document and resolve references to local files into paths relative to the assets-root (logical paths).
+// Never touches the filesystem. This only decides where a reference, as a string, points (spec 10.3).
 
 export type AssetRole = 'image' | 'svg' | 'style' | 'font' | 'script' | 'data';
 
-// 参照が現れた文脈。使えるassetの種別が決まる。
-// explicitは、利用者が`--asset`で個別に指定したもの。
+// Context the reference appeared in. Decides which asset roles can be used.
+// explicit is one the user gave individually with `--asset`.
 export type ReferenceContext = 'image' | 'style' | 'script' | 'font' | 'css-url' | 'explicit';
 
 export type ReferenceRejection =
@@ -18,7 +18,7 @@ export type ReferenceRejection =
   | 'directory';
 
 export type Reference =
-  // suffixは`?query#fragment`。配信はpathだけで決めるので、解決には使わない。
+  // suffix is `?query#fragment`. Serving is decided by the path alone, so it is not used for resolution.
   | { kind: 'local'; logicalPath: string; suffix: string }
   | { kind: 'fragment' }
   | { kind: 'remote' }
@@ -30,7 +30,7 @@ export interface AssetType {
   role: AssetRole;
 }
 
-// 配信できるassetの種別（仕様10.3）。拡張子で決め、内容からの推測はしない。
+// Asset types that can be served (spec 10.3). Decided by extension, never guessed from content.
 const ASSET_TYPES: Record<string, AssetType> = {
   png: { mime: 'image/png', role: 'image' },
   jpg: { mime: 'image/jpeg', role: 'image' },
@@ -47,7 +47,7 @@ const ASSET_TYPES: Record<string, AssetType> = {
   json: { mime: 'application/json; charset=utf-8', role: 'data' },
 };
 
-// 変換後のHTMLへ残してよいdata URLの画像形式。SVGは含めない。
+// Image formats of data URLs allowed to stay in the transformed HTML. SVG is excluded.
 const RASTER_DATA_MIMES = new Set([
   'image/png',
   'image/jpeg',
@@ -77,7 +77,7 @@ export function roleAllowed(context: ReferenceContext, role: AssetRole): boolean
   return ALLOWED_ROLES[context].includes(role);
 }
 
-// `.`で始まる名前（.env、.gitなど）を含むpathは、assetとして扱わない。
+// A path containing a name starting with `.` (.env, .git and so on) is not treated as an asset.
 export function hasHiddenSegment(logicalPath: string): boolean {
   return logicalPath.split('/').some((segment) => segment.startsWith('.'));
 }
@@ -93,7 +93,7 @@ function hasCharCode(text: string, code: number): boolean {
   return false;
 }
 
-// browserのURL解析と同じく、途中のtab・改行と、前後の空白・制御文字を除く。
+// As in browser URL parsing, strip tabs and newlines inside, and whitespace and control characters at both ends.
 function stripUrlWhitespace(raw: string): string {
   let text = '';
   for (let index = 0; index < raw.length; index += 1) {
@@ -112,7 +112,7 @@ const SCHEME = /^([a-zA-Z][a-zA-Z0-9+.-]*):/;
 const ENCODED_SEPARATOR_OR_NUL = /%(2f|5c|00)/i;
 const PERCENT_ESCAPE = /%[0-9a-f]{2}/i;
 
-// logical pathとして正しい形か。区切りは`/`で、`.`や`..`、空の要素を含まない。
+// Whether this is a well-formed logical path: separated by `/`, with no `.`, `..` or empty segments.
 export function isValidLogicalPath(logicalPath: string): boolean {
   if (logicalPath === '') return false;
   return logicalPath.split('/').every((segment) => {
@@ -121,13 +121,13 @@ export function isValidLogicalPath(logicalPath: string): boolean {
   });
 }
 
-// baseDirは、参照を含むfileのdirectory（logical path。rootなら空文字）。
+// baseDir is the directory of the file containing the reference (a logical path; empty string for the root).
 export function classifyReference(raw: string, baseDir: string): Reference {
   const cleaned = stripUrlWhitespace(raw);
   if (cleaned === '') return { kind: 'rejected', reason: 'empty' };
   if (cleaned.startsWith('#')) return { kind: 'fragment' };
   if (hasCharCode(cleaned, 0)) return { kind: 'rejected', reason: 'nul' };
-  // browserは`\`を`/`として扱うことがあり、UNCも`\\`で始まる。解釈が分かれるので受け付けない。
+  // Browsers sometimes treat `\` as `/`, and UNC paths start with `\\`. Interpretations differ, so it is rejected.
   if (cleaned.includes('\\')) return { kind: 'rejected', reason: 'backslash' };
 
   const scheme = SCHEME.exec(cleaned)?.[1]?.toLowerCase();
@@ -139,7 +139,7 @@ export function classifyReference(raw: string, baseDir: string): Reference {
       return { kind: 'data', mime };
     }
     if (scheme === 'file') return { kind: 'rejected', reason: 'file-url' };
-    // javascript:、blob:、Windowsのdrive letter（C:）など。
+    // javascript:, blob:, a Windows drive letter (C:) and so on.
     return { kind: 'rejected', reason: 'scheme' };
   }
   if (cleaned.startsWith('//')) return { kind: 'remote' };
@@ -149,9 +149,9 @@ export function classifyReference(raw: string, baseDir: string): Reference {
   const queryAt = beforeHash.indexOf('?');
   const rawPath = queryAt === -1 ? beforeHash : beforeHash.slice(0, queryAt);
   const suffix = cleaned.slice(rawPath.length);
-  // pathのない参照（`?x`など）は、文書自身を指す。
+  // A reference without a path (such as `?x`) points at the document itself.
   if (rawPath === '') return { kind: 'rejected', reason: 'empty' };
-  // 区切りやNULをencodeした形は、decodeの段階によって指す先が変わる。
+  // An encoded separator or NUL points somewhere different depending on the decoding stage.
   if (ENCODED_SEPARATOR_OR_NUL.test(rawPath)) return { kind: 'rejected', reason: 'encoded' };
 
   const stack = rawPath.startsWith('/') ? [] : baseDir.split('/').filter((part) => part !== '');
@@ -164,7 +164,7 @@ export function classifyReference(raw: string, baseDir: string): Reference {
       return { kind: 'rejected', reason: 'encoded' };
     }
     if (hasCharCode(decoded, 0)) return { kind: 'rejected', reason: 'nul' };
-    // 1回のdecodeで終わらない形（二重のencode）は受け付けない。
+    // A form that one decode does not finish (double encoding) is rejected.
     if (decoded.includes('/') || decoded.includes('\\') || PERCENT_ESCAPE.test(decoded)) {
       return { kind: 'rejected', reason: 'encoded' };
     }
@@ -183,7 +183,7 @@ export function classifyReference(raw: string, baseDir: string): Reference {
   return { kind: 'local', logicalPath: stack.join('/'), suffix };
 }
 
-// schemeやhostを持たない、文書からの相対参照の形か。どこを指すかは、文書の位置が決まってから調べる。
+// Whether this has the form of a relative reference from the document, with no scheme or host. Where it points is checked once the document's location is known.
 export function isRelativeReference(raw: string): boolean {
   const cleaned = stripUrlWhitespace(raw);
   if (cleaned === '' || cleaned.startsWith('#') || cleaned.startsWith('//')) return false;
@@ -200,7 +200,7 @@ export function encodeLogicalPath(logicalPath: string): string {
   return logicalPath.split('/').map(encodeURIComponent).join('/');
 }
 
-// fromDirにあるfileから、logical pathを指す相対URL。発行した表示用URLの中だけで解決される。
+// Relative URL from a file in fromDir to the logical path. Resolved only inside the issued view URL.
 export function relativeUrlTo(fromDir: string, logicalPath: string): string {
   const depth = fromDir === '' ? 0 : fromDir.split('/').length;
   return `${'../'.repeat(depth)}${encodeLogicalPath(logicalPath)}`;
@@ -208,7 +208,7 @@ export function relativeUrlTo(fromDir: string, logicalPath: string): string {
 
 const DOCUMENT_EXTENSIONS = new Set(['md', 'markdown', 'html', 'htm']);
 
-// 文書として開ける拡張子か（仕様5.2の既定対象）。
+// Whether the extension can be opened as a document (default targets of spec 5.2).
 export function hasDocumentExtension(path: string): boolean {
   const name = path.slice(path.lastIndexOf('/') + 1);
   const dot = name.lastIndexOf('.');
@@ -217,13 +217,13 @@ export function hasDocumentExtension(path: string): boolean {
 
 export type LinkTarget =
   | { kind: 'fragment' }
-  // browserの別tabで開けるURL（http・https・mailto）。
+  // A URL that opens in another browser tab (http, https, mailto).
   | { kind: 'external'; url: string }
-  // localの文書への相対link。fromRootは`/`始まり（assets-rootからの指定）。segmentsは`..`を含みうる。
+  // Relative link to a local document. fromRoot means it starts with `/` (relative to the assets-root). segments may contain `..`.
   | { kind: 'document'; fromRoot: boolean; segments: string[] }
   | { kind: 'other' };
 
-// 文書中のlinkの行き先を分類する。localの文書へのlinkは、開く前に本体で確認する（仕様10.4）。
+// Classify the target of a link in the document. A link to a local document is confirmed by the host before opening (spec 10.4).
 export function classifyLink(raw: string): LinkTarget {
   const cleaned = stripUrlWhitespace(raw);
   if (cleaned.startsWith('#')) return { kind: 'fragment' };

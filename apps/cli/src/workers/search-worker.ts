@@ -1,5 +1,5 @@
-// 検索indexを持つworker。解析済みの節をdataとして受け取り、indexへ入れる。
-// 文書の解析はここでは行わない（重い解析で、検索の依頼を待たせない）。
+// A worker that holds the search index. It receives parsed sections as data and puts them into the index.
+// Documents are not parsed here (so heavy parsing never delays search requests).
 import { parentPort } from 'node:worker_threads';
 
 import type { SearchMode } from '@vde-open/shared';
@@ -62,7 +62,7 @@ parentPort?.on('message', (request: SearchWorkerRequest) => {
     parentPort?.postMessage({ id: request.id, ok: false, reason: 'index-error' });
     return;
   }
-  // 診断だけは、片付けを待ってから返す（ほかの処理は、その場で結果を返す）。
+  // Only diagnostics wait for cleanup before replying (every other operation replies immediately).
   if (result instanceof Promise) {
     result.then(
       (value: unknown) => parentPort?.postMessage({ id: request.id, ok: true, result: value }),

@@ -1,7 +1,7 @@
-// HTMLと本体の間の通信の、本体側（仕様11.6・11.7）。
-// HTMLから届くframeを、大きさ・件数・順番・表示の識別子・操作・payloadの形で検証し、
-// 回答案の取得（ready）と置き換え（updateDraft）だけを行う。送信・取得済みの印・中止・検索・読み取りなどは拒否する。
-// HTMLから届くものは、利用者の確定ではなく、あくまで回答案として扱う（仕様11.8）。
+// The host side of the communication between the HTML and the management UI (spec 11.6, 11.7).
+// Frames from the HTML are validated by size, count, order, view identifier, operation, and payload shape,
+// and only fetching the draft answer (ready) and replacing it (updateDraft) are allowed. Submitting, acknowledging, cancelling, searching, reading, and so on are rejected.
+// Whatever arrives from the HTML is treated as a draft answer, never as the user's final answer (spec 11.8).
 import {
   answersSchema,
   BRIDGE_PROTOCOL_VERSION,
@@ -13,7 +13,7 @@ import {
 
 import { ApiError } from './api.ts';
 
-// MessagePortのうち、使う部分。
+// The part of MessagePort that is used.
 export interface BridgePort {
   postMessage(message: unknown): void;
   close(): void;
@@ -34,11 +34,11 @@ export interface ReadyResult {
 
 export interface BridgeHandlers {
   ready(): Promise<ReadyResult>;
-  // 回答案を置き換える。baseDraftVersionは、HTMLが渡した値をそのまま使う（最新の版へ読み替えない）。
+  // Replace the draft answer. baseDraftVersion is used exactly as the HTML passed it (not reinterpreted as the latest version).
   updateDraft(answers: Answers, baseDraftVersion: number): Promise<{ draftVersion: number }>;
 }
 
-// 通信を終えた理由。
+// Why the communication ended.
 export type BridgeCloseReason =
   | 'malformed'
   | 'too-large'
@@ -51,7 +51,7 @@ export type BridgeCloseReason =
   | 'replaced';
 
 export interface BridgeHost {
-  // 自分（このHTML）以外による回答案の変更を、HTMLへ知らせる。
+  // Tell the HTML about draft-answer changes made by anyone other than this HTML.
   notifyDraft(draft: { answers: Answers; draftVersion: number }): void;
   close(reason: BridgeCloseReason): void;
   readonly closed: boolean;
@@ -78,7 +78,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 const hasOnlyKeys = (value: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(value).every((key) => keys.includes(key));
 
-// JSONとしての大きさ（UTF-8）。JSONにできない値はnull。
+// Size as JSON (UTF-8). null for values that cannot be serialized to JSON.
 function jsonBytes(value: unknown): number | null {
   try {
     const text = JSON.stringify(value);
@@ -90,7 +90,7 @@ function jsonBytes(value: unknown): number | null {
 
 function errorBody(reason: unknown): { code: string; message: string } {
   if (reason instanceof ApiError) return { code: reason.code, message: reason.message };
-  return { code: 'E_BRIDGE_FAILED', message: '回答案を扱えませんでした。' };
+  return { code: 'E_BRIDGE_FAILED', message: 'Could not handle the draft answer.' };
 }
 
 export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
@@ -99,10 +99,10 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
   let closed = false;
   let lastSequence = 0;
   let received: number[] = [];
-  // このHTMLのupdateDraftで作った版と、HTMLが知っている最新の版。
+  // Versions created by this HTML's updateDraft, and the latest version the HTML knows of.
   const ownVersions = new Set<number>();
   let knownVersion = -1;
-  // updateDraftの応答を待っている間に届いた変更は、応答の後に知らせる（自分の変更を知らせないため）。
+  // Changes that arrive while an updateDraft response is pending are delivered after the response (so the HTML's own change is not reported to it).
   let updating = 0;
   let deferred: { answers: Answers; draftVersion: number } | null = null;
 
@@ -110,13 +110,13 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
     if (closed) return;
     const bytes = jsonBytes(message);
     if (bytes === null || bytes > LIMITS.bridgeOutboundFrameBytes) {
-      // 上限を超える応答は送らず、失敗として返す。
+      // Do not send a response over the limit; return a failure instead.
       if (message['type'] === 'response') {
         port.postMessage({
           type: 'response',
           sequence: message['sequence'],
           ok: false,
-          error: { code: 'E_LIMIT_EXCEEDED', message: '応答が大きすぎます。' },
+          error: { code: 'E_LIMIT_EXCEEDED', message: 'The response is too large.' },
         });
       }
       return;
@@ -143,7 +143,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
   const dispatch = ({ sequence, method, payload }: Frame): void => {
     if (method === 'ready') {
       if (!hasOnlyKeys(payload, [])) {
-        reject(sequence, 'E_INVALID_ARGUMENT', 'readyには引数を渡しません。');
+        reject(sequence, 'E_INVALID_ARGUMENT', 'ready takes no arguments.');
         return;
       }
       void respond(
@@ -167,21 +167,21 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
         reject(
           sequence,
           'E_INVALID_ARGUMENT',
-          'updateDraftには、回答案のobjectとbaseDraftVersionを渡してください。',
+          'updateDraft requires a draft-answer object and baseDraftVersion.',
         );
         return;
       }
       const bytes = jsonBytes(answers);
       if (bytes === null || bytes > LIMITS.answerBytes) {
-        reject(sequence, 'E_LIMIT_EXCEEDED', '回答案が大きすぎます。');
+        reject(sequence, 'E_LIMIT_EXCEEDED', 'The draft answer is too large.');
         return;
       }
-      // 受け取った値のまま検証する。JSONへの変換で、型を変えたり値を落としたりしない（仕様11.2）。
+      // Validate the value as received. Do not let JSON conversion change types or drop values (spec 11.2).
       if (Object.hasOwn(answers, '__proto__') || !answersSchema.safeParse(answers).success) {
         reject(
           sequence,
           'E_ANSWER_INVALID',
-          '回答案に使えるのは、field名ごとの文字列・有限の数・真偽値・文字列の配列だけです。',
+          'Draft answer values must be strings, finite numbers, booleans, or arrays of strings, keyed by field name.',
         );
         return;
       }
@@ -206,8 +206,8 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
       );
       return;
     }
-    // 送信・取得済みの印・中止・検索・読み取りなどは、HTMLから行えない（仕様11.6）。
-    reject(sequence, 'E_METHOD_NOT_ALLOWED', `HTMLからは ${method.slice(0, 64)} を行えません。`);
+    // Submitting, acknowledging, cancelling, searching, reading, and so on cannot be done from the HTML (spec 11.6).
+    reject(sequence, 'E_METHOD_NOT_ALLOWED', `${method.slice(0, 64)} cannot be called from HTML.`);
   };
 
   const host: BridgeHost = {
@@ -227,7 +227,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
       try {
         port.postMessage({ type: 'closed', reason });
       } catch {
-        // 相手がいなくても閉じる。
+        // Close even if the other side is gone.
       }
       closed = true;
       port.removeEventListener('message', onMessage);
@@ -238,7 +238,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
 
   function onMessage(event: MessageEvent): void {
     if (closed) return;
-    // 件数は、形を調べる前に数える（不正なframeを大量に送っても、上限で止まる）。
+    // Count before checking the shape (a flood of malformed frames still hits the limit).
     const at = now();
     received = received.filter((time) => at - time < RATE_WINDOW_MS);
     received.push(at);
@@ -267,7 +267,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
       host.close('malformed');
       return;
     }
-    // 別の表示（古いinstance）のframeと、順番の違反は、通信ごと終える。
+    // A frame from another view (an old instance) or an out-of-order frame ends the whole communication.
     if (data['instanceId'] !== instanceId) {
       host.close('instance');
       return;

@@ -4,8 +4,8 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
 
-// bundleに入れたmoduleの一覧を、中間fileとして書く。
-// scripts/build.tsが、これからlicense noticeを作り、fileは消す。
+// Write the list of modules included in the bundle as an intermediate file.
+// scripts/build.ts builds the license notice from it and then deletes the file.
 const recordBundledModules: Plugin = {
   name: 'vde-open:record-bundled-modules',
   apply: 'build',
@@ -22,7 +22,7 @@ const recordBundledModules: Plugin = {
   },
 };
 
-// `pnpm dev`が渡す開発用daemonのorigin。buildでは使わない。
+// The origin of the development daemon passed by `pnpm dev`. Not used in builds.
 const devBackend = process.env['VDE_OPEN_DEV_BACKEND'];
 
 export default defineConfig({
@@ -33,7 +33,7 @@ export default defineConfig({
     },
   },
   server: {
-    // 開発用のUIもloopbackだけで待ち受ける。
+    // The development UI also listens only on loopback.
     host: '127.0.0.1',
     port: 5173,
     strictPort: true,

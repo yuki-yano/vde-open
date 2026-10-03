@@ -8,13 +8,13 @@ import type { HtmlMode } from '@vde-open/shared';
 import type { PreviewFile, RenderService } from '../../render/render-service.ts';
 
 const CLOSE_GRACE_MS = 1000;
-// 表示用URLの形。`/r/<grant>/files/<logical path>`だけを受け付ける（仕様12.3）。
+// Shape of a view URL. Only `/r/<grant>/files/<logical path>` is accepted (spec 12.3).
 const PREVIEW_PATH = /^\/r\/([A-Za-z0-9_-]{43})\/files\/(.+)$/;
 const ENCODED_SEPARATOR_OR_NUL = /%(2f|5c|00)/i;
 
 export interface PreviewDeps {
   render: RenderService;
-  // 表示を埋め込める管理UIのorigin。開発用のoriginがあれば、それも含む。
+  // Management UI origins allowed to embed the view. Includes the development origin, if any.
   frameAncestors: () => string[];
   onEvent?: (event: string, fields: Record<string, string | number>) => void;
 }
@@ -25,9 +25,9 @@ export interface PreviewServer {
   close(): Promise<void>;
 }
 
-// 文書のpolicy（仕様10.5）。読み込めるのは、この表示に登録したfileだけ。
-// staticはscriptを動かさない。interactiveは、inlineと登録済みのscriptと、登録済みのfileへの通信だけを許す。
-// どちらも`allow-same-origin`を付けない（originを持たない）。
+// Document policy (spec 10.5). Only files registered for this view may be loaded.
+// static runs no scripts. interactive allows only inline and registered scripts, and connections to registered files.
+// Neither adds `allow-same-origin` (the document has no origin).
 function documentCsp(mode: HtmlMode, grantBase: string, ancestors: string[]): string {
   const interactive = mode === 'interactive';
   return [
@@ -47,7 +47,7 @@ function documentCsp(mode: HtmlMode, grantBase: string, ancestors: string[]): st
   ].join('; ');
 }
 
-// asset単体のpolicy。直接開かれても、何も読み込まず、何も実行しない。
+// Policy for a standalone asset. Even if opened directly, it loads nothing and runs nothing.
 const ASSET_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 
 function headersFor(file: PreviewFile, origin: string, ancestors: string[]) {
@@ -62,9 +62,9 @@ function headersFor(file: PreviewFile, origin: string, ancestors: string[]) {
         ? documentCsp(file.mode, `${origin}/r/${file.grant}/`, ancestors)
         : ASSET_CSP,
   };
-  // sandboxの中の文書はoriginを持たないので、fontなどの読み込みはcross-originになる。
-  // 権限を確かめた後のassetにだけ許可する。文書そのものと画像には付けない。
-  // この`null`は、読み込みを許可するためだけのもので、相手の確認には使わない。
+  // A sandboxed document has no origin, so loading fonts and the like is cross-origin.
+  // Allow it only for assets after the grant is verified. Not added to the document itself or to images.
+  // This `null` only permits loading; it is not used to verify the peer.
   if (
     file.role === 'font' ||
     file.role === 'style' ||
@@ -77,7 +77,7 @@ function headersFor(file: PreviewFile, origin: string, ancestors: string[]) {
 }
 
 function logicalPathOf(encoded: string): string | null {
-  // 区切りやNULをencodeした形は、解釈が分かれるので受け付けない。
+  // Encoded separators and NUL are interpreted inconsistently, so they are not accepted.
   if (ENCODED_SEPARATOR_OR_NUL.test(encoded)) return null;
   const segments: string[] = [];
   for (const segment of encoded.split('/')) {
@@ -99,7 +99,7 @@ export async function startPreviewServer(
   let host = '';
 
   const reject = (response: ServerResponse, status: number, extra: Record<string, string> = {}) => {
-    // 理由を区別しない。権限が無効でも、pathが未登録でも、同じ応答を返す。
+    // Do not distinguish the reason. An invalid grant and an unregistered path get the same response.
     const body = status === 405 ? 'Method Not Allowed' : 'Not Found';
     response.writeHead(status, {
       'Content-Type': 'text/plain; charset=utf-8',
@@ -110,17 +110,17 @@ export async function startPreviewServer(
       ...extra,
     });
     response.end(body);
-    // 表示用URLは秘密を含むので、pathは記録しない。
+    // View URLs contain a secret, so the path is not logged.
     deps.onEvent?.('preview.rejected', { status });
   };
 
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
-    // Hostは実際のlisten先だけを受け付ける。
+    // Accept only the actual listen address as Host.
     if (request.headers.host !== host) return reject(response, 404);
     const method = request.method ?? '';
     if (method !== 'GET' && method !== 'HEAD') return reject(response, 405, { Allow: 'GET, HEAD' });
 
-    // `..`や`%2e%2e`は、URLとして解決した後の形で調べる。browserが解決する形と同じ。
+    // `..` and `%2e%2e` are checked in the form after URL resolution. Same as how the browser resolves them.
     let pathname: string;
     try {
       pathname = new URL(request.url ?? '', origin).pathname;

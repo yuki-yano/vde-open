@@ -1,5 +1,5 @@
-// 導入した版のTanStack Markdown／Highlight、parse5、css-treeについて、
-// この製品が前提にするAPIと挙動を固定する。版を上げたらここで差分を検出する。
+// Pin the API and behavior this product relies on in the adopted versions of TanStack Markdown and Highlight, parse5 and css-tree.
+// After a version bump, differences show up here.
 import { createHighlighter } from '@tanstack/highlight';
 import {
   css,
@@ -21,7 +21,7 @@ import { parse, serialize } from 'parse5';
 import { describe, expect, it } from 'vitest';
 
 describe('@tanstack/markdown 1.0.0', () => {
-  it('parserはserializableなASTを返し、nodeに原文位置を持たない', () => {
+  it('the parser returns a serializable AST whose nodes carry no source positions', () => {
     const document = parseMarkdown('# 認証仕様\n\n本文です。\n\n## 節\n');
     expect(document.type).toBe('root');
     expect(document.children.map((node) => node.type)).toEqual(['heading', 'paragraph', 'heading']);
@@ -32,7 +32,7 @@ describe('@tanstack/markdown 1.0.0', () => {
     }
   });
 
-  it('allowHtml: falseでは生HTMLをescapeし、scriptを出力しない', () => {
+  it('with allowHtml: false, raw HTML is escaped and no script is output', () => {
     const output = renderHtml('<script>alert(1)</script>\n\n<b onclick="x()">太字</b>\n', {
       allowHtml: false,
     });
@@ -41,25 +41,25 @@ describe('@tanstack/markdown 1.0.0', () => {
     expect(output).toContain('&lt;b onclick=');
   });
 
-  it('javascript:のURLをリンクとして出力しない', () => {
+  it('does not output a javascript: URL as a link', () => {
     const output = renderHtml('[x](javascript:alert(1))\n', { allowHtml: false });
     expect(output).not.toMatch(/href="javascript:/i);
   });
 });
 
 describe('@tanstack/highlight 1.0.0', () => {
-  it('仕様8.2の基準言語を明示登録できる', () => {
+  it('the baseline languages of spec 8.2 can be registered explicitly', () => {
     const highlighter = createHighlighter({
       languages: [js, jsx, ts, tsx, json, yaml, html, css, shell, markdown],
     });
     expect(highlighter.listLanguages().toSorted()).toEqual(
       ['css', 'html', 'js', 'json', 'jsx', 'markdown', 'shell', 'ts', 'tsx', 'yaml'].toSorted(),
     );
-    // bashは独立したexportではなく、shellのaliasとして解決される。
+    // bash is not a separate export; it resolves as an alias of shell.
     expect(highlighter.normalizeLanguage('bash')).toBe('shell');
   });
 
-  it('Markdown用adapterはsourceをescapeし、pre/codeを二重にしない', () => {
+  it('the Markdown adapter escapes the source and does not double pre/code', () => {
     const highlighter = createHighlighter({ languages: [ts] });
     const markdownHighlighter = createTanStackMarkdownHighlighter(highlighter);
     const output = renderHtml('```ts\nconst a = "<script>";\n```\n', {
@@ -73,7 +73,7 @@ describe('@tanstack/highlight 1.0.0', () => {
 });
 
 describe('parse5 8.0.1', () => {
-  it('HTMLを構文解析して直列化でき、scriptを実行しない', () => {
+  it('parses and serializes HTML without executing scripts', () => {
     const tree = parse(
       '<!doctype html><title>t</title><p>本文<script>globalThis.__ran = 1</script>',
     );
@@ -83,7 +83,7 @@ describe('parse5 8.0.1', () => {
 });
 
 describe('css-tree 3.2.1', () => {
-  it('url()と@importの参照先を構文木から取り出せる', () => {
+  it('extracts the targets of url() and @import from the syntax tree', () => {
     const ast = csstree.parse('@import "a.css"; .x { background: url(img/b.png) }');
     const urls: string[] = [];
     csstree.walk(ast, (node) => {

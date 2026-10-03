@@ -49,8 +49,8 @@ const MIME_TYPES: Record<string, string> = {
   '.map': 'application/json; charset=utf-8',
 };
 
-// 管理UIのpolicy（仕様10.5）。scriptは同梱のものだけ。APIへの接続は自分のoriginだけ。
-// 文書の表示（iframe）と、文書中の登録済みの画像だけ、表示用のlistenerから読み込める。
+// Management UI policy (spec 10.5). Scripts are only the bundled ones. API connections only to its own origin.
+// Only the document view (iframe) and registered images in the document may load from the preview listener.
 function uiCsp(previewOrigin: string): string {
   return [
     "default-src 'none'",
@@ -77,24 +77,24 @@ export interface ManagementDeps {
   render: RenderService;
   search: SearchService;
   feedback: FeedbackService;
-  // 文書を表示するlistenerのorigin。
+  // Origin of the listener that serves documents.
   previewOrigin: string;
-  // ビルド済みUIのdirectory。無ければUIは配信しない。
+  // Directory of the built UI. If absent, the UI is not served.
   webRoot: string | null;
-  // 開発時だけ許可するUIのorigin。配布物では常にnull。
+  // UI origin allowed only during development. Always null in distributed builds.
   devOrigin: string | null;
   isStopping: () => boolean;
   onEvent?: (event: string, fields: Record<string, string | number>) => void;
-  // 通知の接続を確かめる間隔。指定がなければ15秒（仕様6.5）。
+  // Interval for checking notification connections. Defaults to 15 seconds (spec 6.5).
   heartbeatMs?: number;
-  // 書き込みが進まない通知の接続を切るまでの時間。指定がなければ`LIMITS.sseStallMs`。
+  // Time until a notification connection whose writes make no progress is cut. Defaults to `LIMITS.sseStallMs`.
   stallMs?: number;
 }
 
 export interface ManagementServer {
   readonly port: number;
   readonly origin: string;
-  // 通知の接続の数と、接続ごとの書き終わっていない通知の数の最大（診断用）。
+  // Number of notification connections and the maximum pending notifications per connection (for diagnostics).
   eventStreams(): { streams: number; maxPending: number };
   close(): Promise<void>;
 }
@@ -113,7 +113,7 @@ interface StaticAsset {
 async function loadStaticAssets(webRoot: string | null): Promise<Map<string, StaticAsset>> {
   const assets = new Map<string, StaticAsset>();
   if (!webRoot) return assets;
-  // 配信するfileを起動時に確定する。requestのpathをfilesystemへ解決することはしない。
+  // Fix the set of served files at startup. Request paths are never resolved against the filesystem.
   const walk = async (directory: string, prefix: string) => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
@@ -134,13 +134,13 @@ async function loadStaticAssets(webRoot: string | null): Promise<Map<string, Sta
   return assets;
 }
 
-// 回答案を含むbody。重複したkeyと`__proto__`を拒否するため、原文から読む（ADR-0011）。
+// Body containing a draft answer. Read from the raw text to reject duplicate keys and `__proto__` (ADR-0011).
 function parseAnswersBody(text: string): unknown {
   try {
     return parseStrictJson(text);
   } catch (error) {
     if (!(error instanceof StrictJsonError)) throw error;
-    throw new VdeError('E_INVALID_ARGUMENT', '回答案をJSONとして読めません。', {
+    throw new VdeError('E_INVALID_ARGUMENT', 'The draft answer could not be parsed as JSON.', {
       reason: error.reason,
       pointer: error.pointer,
     });
@@ -159,7 +159,7 @@ function toErrorBody(error: unknown): ErrorBody {
   if (error instanceof ZodError) {
     return {
       code: 'E_INVALID_ARGUMENT',
-      message: '引数が正しくありません。',
+      message: 'The arguments are invalid.',
       retryable: false,
       details: {
         issues: error.issues.map((issue) => ({
@@ -169,16 +169,16 @@ function toErrorBody(error: unknown): ErrorBody {
       },
     };
   }
-  // 想定外の例外は、内容を相手へ返さない。
+  // Do not return the details of unexpected exceptions to the peer.
   return {
     code: 'E_INTERNAL',
-    message: '内部errorが発生しました。',
+    message: 'An internal error occurred.',
     retryable: false,
     details: {},
   };
 }
 
-// error codeからHTTP statusを決める（仕様12.2）。clientは本文のcodeで処理する。
+// Decide the HTTP status from the error code (spec 12.2). Clients act on the code in the body.
 function statusOf(code: string): ContentfulStatusCode {
   if (code === 'E_UNAUTHORIZED') return 401;
   if (code === 'E_UNKNOWN_METHOD') return 404;
@@ -236,10 +236,10 @@ export async function startManagementServer(
   const app = new Hono<HttpEnv>();
   let origin = '';
   let host = '';
-  // 通知の接続ごとの、終える関数と書き終わっていない通知の数。
+  // Per notification connection: the finish function and the number of pending notifications.
   const streams = new Map<() => void, { readonly pending: number }>();
 
-  // すべての応答に付けるheader。
+  // Headers attached to every response.
   app.use('*', async (c, next) => {
     await next();
     c.header('X-Content-Type-Options', 'nosniff');
@@ -247,11 +247,11 @@ export async function startManagementServer(
     if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store');
   });
 
-  // Hostは実際のlisten先だけを受け付ける。別名で到達するrequest（DNS rebinding）を拒否する。
+  // Accept only the actual listen address as Host. Reject requests arriving under another name (DNS rebinding).
   app.use('*', async (c, next) => {
     if (c.req.header('host') !== host) {
       deps.onEvent?.('http.rejected', { reason: 'host' });
-      return fail(c, new VdeError('E_UNAUTHORIZED', 'このHostからは利用できません。'));
+      return fail(c, new VdeError('E_UNAUTHORIZED', 'This Host is not allowed.'));
     }
     return next();
   });
@@ -260,39 +260,45 @@ export async function startManagementServer(
     const requestOrigin = c.req.header('origin');
     const allowed =
       requestOrigin === origin || (deps.devOrigin !== null && requestOrigin === deps.devOrigin);
-    // Originがあるなら、このUIのoriginでなければ拒否する。`null`も管理の主体として扱わない。
+    // If Origin is present, reject unless it is this UI's origin. `null` is not treated as a management principal either.
     if (requestOrigin !== undefined && !allowed) {
       deps.onEvent?.('http.rejected', { reason: 'origin' });
-      return fail(c, new VdeError('E_UNAUTHORIZED', 'このOriginからは利用できません。'));
+      return fail(c, new VdeError('E_UNAUTHORIZED', 'This Origin is not allowed.'));
     }
     const site = c.req.header('sec-fetch-site');
     if (site !== undefined && site !== 'same-origin' && !(deps.devOrigin !== null && allowed)) {
       deps.onEvent?.('http.rejected', { reason: 'fetch-site' });
-      return fail(c, new VdeError('E_UNAUTHORIZED', 'このrequestは受け付けられません。'));
+      return fail(c, new VdeError('E_UNAUTHORIZED', 'This request is not accepted.'));
     }
     const method = c.req.method;
     if (method !== 'GET' && method !== 'HEAD') {
-      // 状態を変えるrequestは、UIのfetchからのものに限る。formの送信では作れない条件にする。
+      // State-changing requests are limited to fetches from the UI. Use conditions a form submission cannot produce.
       if (requestOrigin === undefined) {
-        return fail(c, new VdeError('E_UNAUTHORIZED', 'Originのないrequestでは変更できません。'));
+        return fail(
+          c,
+          new VdeError('E_UNAUTHORIZED', 'A request without Origin cannot make changes.'),
+        );
       }
       const contentLength = Number(c.req.header('content-length') ?? '0');
       if (
         contentLength > 0 &&
         !(c.req.header('content-type') ?? '').startsWith('application/json')
       ) {
-        return fail(c, new VdeError('E_INVALID_ARGUMENT', 'bodyはJSONで送ってください。'));
+        return fail(c, new VdeError('E_INVALID_ARGUMENT', 'The body must be sent as JSON.'));
       }
     }
     if (deps.isStopping()) {
-      return fail(c, new VdeError('E_DAEMON_STOPPING', 'daemonは停止処理中です。'));
+      return fail(c, new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));
     }
-    // 入口のticket交換だけは、sessionなしで受け付ける。
+    // Only the ticket exchange at the entry point is accepted without a session.
     if (c.req.path === `${API_PREFIX}/sessions/bootstrap` && method === 'POST') return next();
     const authorization = c.req.header('authorization') ?? '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : '';
     if (token === '' || !deps.sessions.authenticate(token)) {
-      return fail(c, new VdeError('E_UNAUTHORIZED', '認証が必要です。CLIから開き直してください。'));
+      return fail(
+        c,
+        new VdeError('E_UNAUTHORIZED', 'Authentication is required. Open again from the CLI.'),
+      );
     }
     c.set('token', token);
     return next();
@@ -304,7 +310,10 @@ export async function startManagementServer(
     const body = z.strictObject({ ticket: z.string().min(1).max(256) }).parse(await c.req.json());
     const token = deps.sessions.exchange(body.ticket);
     if (!token) {
-      return fail(c, new VdeError('E_UNAUTHORIZED', 'このURLは使用済みか、期限が切れています。'));
+      return fail(
+        c,
+        new VdeError('E_UNAUTHORIZED', 'This URL has already been used or has expired.'),
+      );
     }
     return c.json(
       successEnvelope(
@@ -367,13 +376,13 @@ export async function startManagementServer(
     const { revision, maxBytes, cursor } = c.req.query();
     const result = await deps.documents.read({
       documentId: c.req.param('id'),
-      // 続きは、cursorだけで取得する（cursorは、発行したときの版と取得の種類に固定されている）。
+      // Continuation is fetched by cursor alone (the cursor is fixed to the revision and read kind it was issued for).
       ...(cursor === undefined ? { outline: true } : { cursor }),
       ...(revision === undefined ? {} : { revision }),
       ...(maxBytes === undefined ? {} : { maxBytes: integerQuery.parse(maxBytes) }),
     });
     if (result.data.mode !== 'outline') {
-      throw new VdeError('E_INVALID_CURSOR', 'cursorが見出しの一覧のものではありません。', {
+      throw new VdeError('E_INVALID_CURSOR', 'The cursor is not for an outline.', {
         reason: 'mode',
       });
     }
@@ -388,7 +397,7 @@ export async function startManagementServer(
     ok(
       c,
       'documents.close',
-      // UIからはIDでだけ閉じる。pathを受け取るAPIは置かない。
+      // The UI closes by ID only. There is no API that accepts a path.
       await deps.documents.close({ cwd: '/', targets: [c.req.param('id')], all: false }),
     ),
   );
@@ -401,7 +410,7 @@ export async function startManagementServer(
     ok(c, 'documents.refresh', await deps.documents.refresh({ documentId: c.req.param('id') })),
   );
 
-  // 開いている文書の検索。指定できる項目は、CLIと同じ（仕様12.2）。
+  // Search over open documents. The accepted parameters are the same as the CLI (spec 12.2).
   api.get('/search', async (c) => {
     const { query, mode, limit, maxBytes, cursor } = c.req.query();
     const documents = c.req.queries('document') ?? [];
@@ -419,25 +428,25 @@ export async function startManagementServer(
     );
   });
 
-  // 質問の一覧。回答案は含めない。
+  // List of questions. Draft answers are not included.
   api.get('/feedback', (c) => {
     const status = c.req.query('status');
     return ok(c, 'feedback.list', deps.feedback.list(status === undefined ? {} : { status }));
   });
 
-  // 管理UI向けの質問。質問定義と回答案、文書の現在の版を含む。
+  // A question for the management UI. Includes the questionnaire, the draft answer, and the document's current revision.
   api.get('/feedback/:id', (c) =>
     ok(c, 'feedback.get', deps.feedback.getForUi(requestIdSchema.parse(c.req.param('id')))),
   );
 
-  // 回答案を置き換える。重複したkeyを見つけるため、bodyは原文から読む（仕様11.2）。
+  // Replace the draft answer. The body is read from the raw text to detect duplicate keys (spec 11.2).
   api.put('/feedback/:id/draft', async (c) => {
     const requestId = requestIdSchema.parse(c.req.param('id'));
     const body = parseAnswersBody(await c.req.text());
     return ok(c, 'feedback.draft', await deps.feedback.updateDraft(requestId, body));
   });
 
-  // 回答待ちの質問が固定した版と表示方法での、表示の権限（仕様12.2）。
+  // Render grant for the revision and HTML mode pinned by a pending question (spec 12.2).
   api.post('/feedback/:id/render-grants', async (c) => {
     const requestId = requestIdSchema.parse(c.req.param('id'));
     const result = await deps.render.createGrantForRequest(
@@ -453,15 +462,15 @@ export async function startManagementServer(
     );
   });
 
-  // HTMLのSDKからの操作（回答案の取得と置き換え）。管理UIが、表示のiframeから受け取って中継する。
-  // 権限（表示）はbodyで受け取り、いまも有効で、このsessionのもので、質問が回答待ちかを毎回確かめる。
+  // Operations from the HTML SDK (fetching and replacing the draft answer). The management UI relays them from the view iframe.
+  // The render grant is received in the body; every time, check that it is still valid, belongs to this session, and the question is pending.
   const bridgeOf = (token: string, grant: unknown) => {
     const found =
       typeof grant === 'string' ? deps.render.bridgeOf(deps.sessions.idOf(token), grant) : null;
     if (!found) {
       throw new VdeError(
         'E_RENDER_GRANT_INVALID',
-        '表示の権限が失効したため、HTMLからの回答案は受け付けません。',
+        'The render grant has expired, so draft answers from the HTML are not accepted.',
       );
     }
     return found;
@@ -475,22 +484,22 @@ export async function startManagementServer(
     const { grant, ...draft } = parseAnswersBody(await c.req.text()) as Record<string, unknown>;
     const token = c.get('token');
     const { requestId } = bridgeOf(token, grant);
-    // 保存の順番を待つ間に、権限の返却・scriptの許可の取消・sessionの失効が起きうる。
-    // 保存のtransactionの中でも、同じ質問への権限が有効かを確かめ直す。
+    // While waiting its turn to save, the grant may be released, script permission revoked, or the session expired.
+    // Re-check inside the save transaction that the grant for the same question is still valid.
     return ok(
       c,
       'render-grants.bridge-draft',
       await deps.feedback.updateDraft(requestId, draft, {
         authorize: () => {
           if (bridgeOf(token, grant).requestId !== requestId) {
-            throw new VdeError('E_RENDER_GRANT_INVALID', '表示の権限が変わりました。');
+            throw new VdeError('E_RENDER_GRANT_INVALID', 'The render grant has changed.');
           }
         },
       }),
     );
   });
 
-  // 保存済みの回答案を、回答として確定する。回答そのものは受け取らない（仕様11.8）。
+  // Submit the saved draft answer as the answer. The answer itself is not accepted here (spec 11.8).
   api.post('/feedback/:id/submit', async (c) =>
     ok(
       c,
@@ -499,7 +508,7 @@ export async function startManagementServer(
     ),
   );
 
-  // 管理UIで確認したうえで、質問を中止する。
+  // Cancel the question after confirmation in the management UI.
   api.post('/feedback/:id/cancel', async (c) => {
     feedbackCancelParamsSchema.parse(await c.req.json());
     return ok(
@@ -509,13 +518,13 @@ export async function startManagementServer(
     );
   });
 
-  // 文書の1つの版を表示するための、限定された権限を発行する。権限は発行したsessionに結び付く。
+  // Issue a limited grant for viewing one revision of a document. The grant is bound to the issuing session.
   api.post('/documents/:id/render-grants', async (c) => {
     const body = z
       .strictObject({ revision: z.string().optional(), mode: z.string().optional() })
       .parse(await c.req.json());
-    // 状態を変えるrequestのOriginは、入口で管理UIのoriginだと確かめてある。
-    // HTMLのSDKは、このoriginの親とだけ通信を始める。
+    // The Origin of state-changing requests was verified at the entry point to be the management UI's origin.
+    // The HTML SDK only starts communicating with a parent of this origin.
     const result = await deps.render.createGrant(
       deps.sessions.idOf(c.get('token')),
       { documentId: c.req.param('id'), ...body },
@@ -529,14 +538,14 @@ export async function startManagementServer(
     );
   });
 
-  // 表示の中から読み込もうとした、登録されていないfile。権限はURLへ載せず、bodyで渡す。
+  // Unregistered files the view tried to load. The grant is passed in the body, not in the URL.
   api.post('/render-grants/missing', async (c) => {
     const body = z.strictObject({ grant: z.string().min(1).max(128) }).parse(await c.req.json());
     const missing = deps.render.missingOf(deps.sessions.idOf(c.get('token')), body.grant);
     return c.json(successEnvelope({ missing }, { command: 'render-grants.missing' }));
   });
 
-  // HTMLの表示方法を変える。scriptを動かす表示（interactive）にするには、確認が必要（仕様10.2）。
+  // Change the HTML mode. Switching to the interactive view (which runs scripts) requires confirmation (spec 10.2).
   api.post('/documents/:id/html-mode', async (c) => {
     const body = (await c.req.json()) as Record<string, unknown>;
     return ok(
@@ -546,7 +555,7 @@ export async function startManagementServer(
     );
   });
 
-  // 表示をやめた権限を回収する。自分のsessionが発行したものだけを回収できる。
+  // Release grants whose views are no longer shown. Only grants issued by the caller's own session can be released.
   api.post('/render-grants/release', async (c) => {
     const body = z
       .strictObject({ grants: z.array(z.string().min(1).max(128)).max(256) })
@@ -555,8 +564,8 @@ export async function startManagementServer(
     return c.json(successEnvelope({ released }, { command: 'render-grants.release' }));
   });
 
-  // 文書中のlinkが指すlocalの文書を開く。行き先は、解析で取り出したlinkのIDで指定する。
-  // pathをclientから直接受け取ることはしない（仕様12.2）。
+  // Open the local document a link in the document points to. The target is given by the ID of the link extracted during parsing.
+  // Paths are never accepted directly from the client (spec 12.2).
   api.post('/documents/:id/links/:linkId/open', async (c) => {
     const params = linkOpenParamsSchema.parse({
       ...((await c.req.json()) as Record<string, unknown>),
@@ -577,9 +586,9 @@ export async function startManagementServer(
     );
   });
 
-  // fetchで読むSSE（仕様6.5）。IDと版だけを流し、本文は流さない。
-  // streamSSEが付ける`no-cache`は保存を許すので、`no-store`にする。保存できる応答だと、Firefoxは
-  // 同じURLへの2つ目の接続（別の画面や再接続）を、1つ目の応答が終わるまで約20秒待たせる。
+  // SSE read via fetch (spec 6.5). Only IDs and revisions are streamed, never the body.
+  // The `no-cache` set by streamSSE allows storing, so use `no-store` instead. With a storable response, Firefox
+  // holds a second connection to the same URL (another screen or a reconnect) for about 20 seconds until the first response ends.
   api.get('/events', (c) => {
     const response = streamSSE(c, async (stream) => {
       let closed = false;
@@ -592,8 +601,8 @@ export async function startManagementServer(
         wake();
       };
       const token = c.get('token');
-      // 書き込みは順に行い、streamを終える前に、依頼済みの書き込みが終わるのを待つ。
-      // 待たずに閉じると、停止の直前に出した通知が届かない。
+      // Writes are performed in order, and before ending the stream, wait for the requested writes to finish.
+      // Closing without waiting loses the notifications emitted just before stopping.
       const queue = createEventQueue({
         writeEvent: (event) =>
           stream.writeSSE({
@@ -602,8 +611,8 @@ export async function startManagementServer(
             data: JSON.stringify(event),
           }),
         writeHeartbeat: () => stream.write(': heartbeat\n\n'),
-        // 書き込みの直前に確かめる。期限が切れたsessionへは、次の確認を待たずに送るのをやめる。
-        // 順番を待っている間に失効した場合も、ここで止まる。
+        // Check right before writing. Stop sending to an expired session without waiting for the next check.
+        // A session that expired while waiting its turn is also stopped here.
         beforeWrite: () => {
           if (deps.sessions.isActive(token)) return true;
           drop();
@@ -611,8 +620,8 @@ export async function startManagementServer(
         },
         onError: finish,
       });
-      // 送るのをやめて接続を切る（sessionの失効・破棄、書き込みの詰まり）。残りの書き込みはせず、
-      // 詰まった書き込みを終わらせてsocketも閉じる（読まない相手へ送る分を残さない）。
+      // Stop sending and cut the connection (session expired or revoked, or writes stalled). Skip the remaining writes,
+      // end the stalled write, and close the socket too (do not leave data queued for a peer that does not read).
       const drop = () => {
         queue.stop();
         finish();
@@ -621,12 +630,12 @@ export async function startManagementServer(
       };
       streams.set(finish, queue);
       stream.onAbort(finish);
-      // sessionが破棄されたら、開いたままの接続も閉じる。失効したsessionへ通知を流し続けない。
+      // When the session is revoked, close the connection left open too. Do not keep streaming to an expired session.
       const stopWatchingSession = deps.sessions.onRevoke(token, drop);
       const send = (event: ServerEvent) => {
         if (!closed) queue.send(event);
       };
-      // 接続のたびに現在の連番を知らせる。受け手はここからstateを取り直す。
+      // Announce the current sequence number on every connect. The receiver resyncs state from here.
       send({
         type: 'hello',
         daemonId: deps.daemonId,
@@ -635,12 +644,12 @@ export async function startManagementServer(
       });
       const unsubscribe = deps.events.subscribe(send);
       const heartbeat = setInterval(() => {
-        // 接続を保っているだけでは、sessionの期限は延びない。期限が切れたら閉じる。
+        // Keeping the connection open does not extend the session. Close once it expires.
         if (!deps.sessions.isActive(token)) {
           drop();
           return;
         }
-        // 受け手が読まず、書き込みが進まない接続は切る。受け手は接続し直して、stateを取り直す。
+        // Cut a connection whose receiver does not read and whose writes make no progress. The receiver reconnects and resyncs state.
         if (queue.stalledFor() >= (deps.stallMs ?? LIMITS.sseStallMs)) {
           drop();
           return;
@@ -654,7 +663,7 @@ export async function startManagementServer(
         stopWatchingSession();
         unsubscribe();
         await queue.settled();
-        // 書き込みを終えるまで、接続として数える（診断に、終わっていない接続を隠さない）。
+        // Count it as a connection until the writes finish (do not hide unfinished connections from diagnostics).
         streams.delete(finish);
       }
     });
@@ -662,18 +671,18 @@ export async function startManagementServer(
     return response;
   });
 
-  api.all('*', (c) => fail(c, new VdeError('E_UNKNOWN_METHOD', '未知のAPIです。')));
+  api.all('*', (c) => fail(c, new VdeError('E_UNKNOWN_METHOD', 'Unknown API.')));
   api.onError((error, c) => fail(c, error));
   app.route(API_PREFIX, api);
 
-  // `/_/`配下の未知のpathを、UIのHTMLで応答しない。
-  app.all('/_/*', (c) => fail(c, new VdeError('E_UNKNOWN_METHOD', '未知のAPIです。')));
+  // Do not answer unknown paths under `/_/` with the UI's HTML.
+  app.all('/_/*', (c) => fail(c, new VdeError('E_UNKNOWN_METHOD', 'Unknown API.')));
 
   app.on(['GET', 'HEAD'], '*', (c) => {
     const asset = assets.get(c.req.path);
     if (!asset) {
       if (assets.size === 0 && c.req.path === '/') {
-        return c.text('UIがビルドされていません。pnpm build を実行してください。', 503);
+        return c.text('The UI has not been built. Run pnpm build.', 503);
       }
       return c.text('Not Found', 404);
     }
@@ -711,13 +720,13 @@ export async function startManagementServer(
       return { streams: streams.size, maxPending };
     },
     async close() {
-      // 通知のstreamを先に終える。最後の通知（daemon-stopping）が届いてから接続を閉じる。
+      // End the notification streams first. Close connections after the last notification (daemon-stopping) is delivered.
       for (const finish of streams.keys()) finish();
       await new Promise((resolve) => setTimeout(resolve, STREAM_FLUSH_MS));
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
         server.closeIdleConnections();
-        // 応答が終わらない接続は、少し待ってから切る。
+        // Connections whose responses do not finish are cut after a short wait.
         setTimeout(() => server.closeAllConnections(), CLOSE_GRACE_MS).unref();
       });
     },

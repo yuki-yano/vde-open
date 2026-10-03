@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import { createCursorCodec } from './cursor.ts';
 
-describe('署名付きcursor', () => {
-  it('発行した内容を同じ操作でだけ読める', () => {
+describe('signed cursor', () => {
+  it('decodes the issued payload only for the same operation', () => {
     const codec = createCursorCodec(randomBytes(32));
     const token = codec.encode({ op: 'list', offset: 2, catalogVersion: 5 });
     expect(codec.decode(token, 'list')).toMatchObject({ offset: 2, catalogVersion: 5 });
@@ -14,7 +14,7 @@ describe('署名付きcursor', () => {
     );
   });
 
-  it('改ざん、別のsecret、期限切れを拒否する', () => {
+  it('rejects tampering, another secret, and expiry', () => {
     let now = 1_000_000;
     const codec = createCursorCodec(randomBytes(32), () => now);
     const token = codec.encode({ op: 'list', offset: 0 });

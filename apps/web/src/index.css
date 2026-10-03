@@ -129,7 +129,7 @@
   }
 }
 
-/* Markdownの本文。部品の見た目はshadcnのthemeの値から取る。 */
+/* Markdown body. Component styles take their values from the shadcn theme. */
 .markdown-body {
   line-height: 1.75;
   overflow-wrap: anywhere;
@@ -209,7 +209,7 @@
   background: var(--muted);
   font-size: 0.9em;
 }
-/* code blockの上の操作（copy）。code blockの右上に重ねる。 */
+/* Actions on a code block (copy). Overlaid at the top right of the code block. */
 .markdown-body [data-code-block] {
   position: relative;
 }

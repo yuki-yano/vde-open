@@ -7,7 +7,7 @@ const rules: ArgvRules = {
   valueOptions: new Set(['--format', '--title', '--key']),
 };
 
-describe('最上位のfile引数をopenへ委譲する', () => {
+describe('delegates top-level file arguments to open', () => {
   it.each([
     [['a.md', 'b.html'], false, ['open', 'a.md', 'b.html']],
     [['--json', 'a.md'], false, ['open', '--json', 'a.md']],
@@ -20,7 +20,7 @@ describe('最上位のfile引数をopenへ委譲する', () => {
     [[], false, []],
     [['--help'], true, ['--help']],
     [['--version'], false, ['--version']],
-    // optionの値がsubcommandと同じ文字列でも、subcommandとして扱わない。
+    // An option value equal to a subcommand name is not treated as a subcommand.
     [['--title', 'read', 'a.md'], false, ['open', '--title', 'read', 'a.md']],
     [
       ['--key', 'list', '--format', 'markdown'],
@@ -29,7 +29,7 @@ describe('最上位のfile引数をopenへ委譲する', () => {
     ],
     [['--title=read', 'a.md'], false, ['open', '--title=read', 'a.md']],
     [['--json', 'list'], false, ['--json', 'list']],
-  ])('%j（stdinがpipe: %s）→ %j', (argv, piped, expected) => {
+  ])('%j (stdin piped: %s) -> %j', (argv, piped, expected) => {
     expect(normalizeArgv(argv, piped, rules)).toEqual(expected);
   });
 });

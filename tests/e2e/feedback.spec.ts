@@ -41,9 +41,9 @@ const sample = {
   },
 };
 
-const panelOf = (page: Page) => page.getByRole('complementary', { name: '質問への回答' });
+const panelOf = (page: Page) => page.getByRole('complementary', { name: 'Answer the question' });
 
-test('FB-001: 質問をnative formで表示し、必須の選択肢を初期選択せず、本体の送信で確定する', async ({
+test('FB-001: shows the question as a native form, does not preselect required options, and finalizes with the UI submit', async ({
   page,
 }) => {
   t.write('q.json', JSON.stringify(sample));
@@ -51,33 +51,33 @@ test('FB-001: 質問をnative formで表示し、必須の選択肢を初期選�
   await page.goto(await t.bootstrapUrl());
   const panel = panelOf(page);
   await expect(panel.getByRole('heading', { name: 'ログイン画面の確認' })).toBeVisible();
-  // 一覧でも、回答待ちの質問がある文書が分かる。
+  // The list also shows which document has a question awaiting an answer.
   await expect(
-    page.getByRole('navigation', { name: '開いている文書' }).getByTestId('pending-question'),
-  ).toHaveText('回答待ち');
+    page.getByRole('navigation', { name: 'Open documents' }).getByTestId('pending-question'),
+  ).toHaveText('Question');
   await expect(panel).toContainText('採用案と表示密度を選んでください。');
-  // enumはradio。どれも選ばれていない。必須の印がある。
+  // enum fields are radios. None is selected. Required fields are marked.
   const radios = panel.getByRole('radio');
   await expect(radios).toHaveCount(4);
   for (const radio of await radios.all()) await expect(radio).not.toBeChecked();
-  await expect(panel.getByText('（必須）')).toHaveCount(2);
-  const send = panel.getByRole('button', { name: 'Agentへ回答を送信' });
+  await expect(panel.getByText('(required)')).toHaveCount(2);
+  const send = panel.getByRole('button', { name: 'Send answers to the agent' });
   await expect(send).toBeDisabled();
-  await expect(panel.getByTestId('feedback-status')).toHaveText('未回答');
+  await expect(panel.getByTestId('feedback-status')).toHaveText('Not answered');
 
   await panel.getByRole('radio', { name: 'B', exact: true }).click();
   await panel.getByRole('radio', { name: 'compact', exact: true }).click();
   await panel.getByRole('textbox').fill('説明を短く');
-  await expect(panel.getByTestId('feedback-status')).toHaveText('回答案を保存しました');
-  // 回答の要約は、送信buttonの横に常に出る。
+  await expect(panel.getByTestId('feedback-status')).toHaveText('Draft answer saved');
+  // The answer summary is always shown next to the submit button.
   const summary = panel.getByRole('definition');
   await expect(summary).toHaveText(['B', 'compact', '説明を短く']);
-  // Agentには、送信まで回答を返さない。
+  // Nothing is returned to the agent until submitted.
   expect((await t.json<Request>(['feedback', 'get', request.requestId])).status).toBe('pending');
 
   await send.click();
   await expect(panel.getByTestId('feedback-status')).toHaveText(
-    '送信しました。Agentの取得を待っています',
+    'Submitted. Waiting for the agent to retrieve it',
   );
   await expect(page.getByTestId('pending-question')).toHaveCount(0);
   const answered = await t.json<Request>(['feedback', 'get', request.requestId]);
@@ -93,10 +93,10 @@ test('FB-001: 質問をnative formで表示し、必須の選択肢を初期選�
     '--submission-id',
     answered.submission?.submissionId as string,
   ]);
-  await expect(panel.getByTestId('feedback-status')).toHaveText('Agentが回答を取得しました');
+  await expect(panel.getByTestId('feedback-status')).toHaveText('The agent retrieved the answers');
 });
 
-test('FB-015の前提: 回答待ちの間は質問の版を表示し続け、新しい版では旧版への回答の確認を求める。Enterでは送信しない', async ({
+test("FB-015 prerequisite: while awaiting an answer, the question's revision stays shown; a newer revision asks for older-revision confirmation; Enter does not submit", async ({
   page,
 }) => {
   const question = {
@@ -122,48 +122,50 @@ test('FB-015の前提: 回答待ちの間は質問の版を表示し続け、新
   await expect(article).toContainText('最初の本文');
 
   t.atomicWrite('a.md', '# 版2\n\n新しい本文\n');
-  await expect(panel.getByRole('alert')).toContainText('新しい版があります');
-  // 入力中の表示は、新しい版へ差し替えない。
+  await expect(panel.getByRole('alert')).toContainText('A newer revision is available');
+  // The view being answered is not replaced with the new revision.
   await expect(article).toContainText('最初の本文');
   await expect(article).not.toContainText('新しい本文');
 
   await panel.getByRole('radio', { name: 'OK', exact: true }).click();
   const note = panel.getByRole('textbox');
   await note.fill('確認しました');
-  await expect(panel.getByTestId('feedback-status')).toHaveText('回答案を保存しました');
-  const send = panel.getByRole('button', { name: 'Agentへ回答を送信' });
-  // 旧版への回答であることを確認するまで、送信できない。
+  await expect(panel.getByTestId('feedback-status')).toHaveText('Draft answer saved');
+  const send = panel.getByRole('button', { name: 'Send answers to the agent' });
+  // Cannot submit until the answer to the older revision is confirmed.
   await expect(send).toBeDisabled();
   await panel
-    .getByRole('checkbox', { name: '旧版への回答として送信することを確認しました' })
+    .getByRole('checkbox', { name: 'I confirm that this answer is for the older revision' })
     .click();
   await expect(send).toBeEnabled();
-  // 入力欄でのEnterは、送信にならない。
+  // Enter in a text field does not submit.
   await note.press('Enter');
   await page.waitForTimeout(500);
   expect((await t.json<Request>(['feedback', 'get', request.requestId])).status).toBe('pending');
 
   await send.click();
   await expect(panel.getByTestId('feedback-status')).toHaveText(
-    '送信しました。Agentの取得を待っています',
+    'Submitted. Waiting for the agent to retrieve it',
   );
   const answered = await t.json<Request>(['feedback', 'get', request.requestId]);
   expect(answered.submission).toMatchObject({
     answers: { verdict: 'OK', note: '確認しました' },
     confirmedAgainstOlderRevision: true,
   });
-  // 回答が確定したら、表示は現在の版へ戻る。
+  // Once the answer is finalized, the view returns to the current revision.
   await expect(article).toContainText('新しい本文');
 });
 
-test('質問を管理UIから中止すると、Agentはcancelledとして受け取る', async ({ page }) => {
+test('cancelling a question from the management UI reaches the agent as cancelled', async ({
+  page,
+}) => {
   t.write('q.json', JSON.stringify(sample));
   const { request } = await t.json<{ request: Request }>(['ask', 'q.json']);
   await page.goto(await t.bootstrapUrl());
   const panel = panelOf(page);
-  await panel.getByRole('button', { name: '中止' }).click();
-  await page.getByRole('button', { name: '中止する' }).click();
-  await expect(panel.getByTestId('feedback-status')).toHaveText('中止されました');
+  await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel question' }).click();
+  await expect(panel.getByTestId('feedback-status')).toHaveText('Cancelled');
   const waited = await t.json<Request & { cancellation: { reason: string } }>([
     'feedback',
     'wait',

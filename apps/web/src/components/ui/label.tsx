@@ -3,7 +3,7 @@ import { cn } from 'cn';
 
 function Label({ className, ...props }: React.ComponentProps<'label'>) {
   return (
-    // 入力欄との関連付けは、呼び出し側で行う（htmlForか、入力欄をlabelの中に置く）。
+    // The caller associates the label with its control (htmlFor, or placing the control inside the label).
     // oxlint-disable-next-line jsx-a11y/label-has-associated-control
     <label
       data-slot="label"

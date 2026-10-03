@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { createSessionService } from './session-service.ts';
 
-describe('SEC-001 / SEC-003 sessionとticketの期限', () => {
-  it('ticketは60秒で失効し、1回しか交換できない', () => {
+describe('SEC-001 / SEC-003 session and ticket expiry', () => {
+  it('a ticket expires after 60 seconds and can be exchanged only once', () => {
     let now = 1_000_000;
     const sessions = createSessionService(() => now);
     const expired = sessions.createBootstrapTicket();
@@ -14,11 +14,11 @@ describe('SEC-001 / SEC-003 sessionとticketの期限', () => {
     const token = sessions.exchange(ticket);
     expect(token).not.toBeNull();
     expect(sessions.exchange(ticket)).toBeNull();
-    // ticketそのものは、sessionのtokenとして使えない。
+    // The ticket itself cannot be used as a session token.
     expect(sessions.authenticate(ticket)).toBe(false);
   });
 
-  it('sessionは最後の利用から12時間で失効し、利用のたびに延びる', () => {
+  it('a session expires 12 hours after its last use and is extended on each use', () => {
     let now = 1_000_000;
     const sessions = createSessionService(() => now);
     const token = sessions.exchange(sessions.createBootstrapTicket()) as string;
@@ -30,19 +30,19 @@ describe('SEC-001 / SEC-003 sessionとticketの期限', () => {
     expect(sessions.authenticate(token)).toBe(false);
   });
 
-  it('有効かを確かめるだけでは、期限は延びない', () => {
+  it('only checking whether it is active does not extend the expiry', () => {
     let now = 1_000_000;
     const sessions = createSessionService(() => now);
     const token = sessions.exchange(sessions.createBootstrapTicket()) as string;
     now += 11 * 60 * 60 * 1000;
     expect(sessions.isActive(token)).toBe(true);
     now += 2 * 60 * 60 * 1000;
-    // 最後の利用から13時間。途中の確認では延びていない。
+    // 13 hours since the last use. The check in between did not extend it.
     expect(sessions.isActive(token)).toBe(false);
     expect(sessions.authenticate(token)).toBe(false);
   });
 
-  it('破棄と期限切れを、開いたままの接続へ知らせる', () => {
+  it('notifies connections left open of revocation and expiry', () => {
     let now = 1_000_000;
     const sessions = createSessionService(() => now);
     const revoked = sessions.exchange(sessions.createBootstrapTicket()) as string;
@@ -55,7 +55,7 @@ describe('SEC-001 / SEC-003 sessionとticketの期限', () => {
 
     sessions.revoke(revoked);
     expect(calls).toEqual(['revoked']);
-    // 別のsessionの破棄では呼ばれない。解除した後も呼ばれない。
+    // Not called when another session is revoked. Not called after unsubscribing either.
     stop();
     sessions.revoke(other);
     expect(calls).toEqual(['revoked']);
@@ -65,7 +65,7 @@ describe('SEC-001 / SEC-003 sessionとticketの期限', () => {
     expect(calls).toEqual(['revoked', 'expired']);
   });
 
-  it('破棄したsessionと未知のtokenは認証しない', () => {
+  it('does not authenticate a revoked session or an unknown token', () => {
     const sessions = createSessionService();
     const token = sessions.exchange(sessions.createBootstrapTicket()) as string;
     sessions.revoke(token);

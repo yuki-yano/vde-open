@@ -1,11 +1,11 @@
 import { VdeError } from '@vde-open/shared';
 
-// promiseの終わりを待つ。signalが中断されたら、待つのをやめてE_DAEMON_STOPPINGで終える
-// （promiseの処理そのものは止めない）。待つのをやめた後のpromiseの失敗も、ここで受ける
-// （未処理のrejectionにしない）。
+// Waits for the promise to settle. If the signal is aborted, stops waiting and ends with E_DAEMON_STOPPING
+// (the promise's own work is not stopped). A failure of the promise after we stopped waiting is also
+// handled here (never left as an unhandled rejection).
 export function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return promise;
-  const stopping = () => new VdeError('E_DAEMON_STOPPING', 'daemonは停止処理中です。');
+  const stopping = () => new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.');
   if (signal.aborted) {
     promise.catch(() => undefined);
     return Promise.reject(stopping());

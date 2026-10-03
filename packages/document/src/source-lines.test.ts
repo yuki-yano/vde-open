@@ -9,7 +9,7 @@ import {
 
 const bytes = (text: string) => Buffer.from(text, 'utf8');
 
-describe('物理行の数え方', () => {
+describe('counting physical lines', () => {
   it.each([
     ['', 1],
     ['a', 1],
@@ -19,13 +19,13 @@ describe('物理行の数え方', () => {
     ['\n', 1],
     ['a\r\nb\r\n', 2],
     ['a\n\n', 2],
-  ])('%j は %i 行', (text, lines) => {
+  ])('%j has %i lines', (text, lines) => {
     expect(buildLineIndex(bytes(text)).lineCount).toBe(lines);
   });
 });
 
-describe('行範囲のbyte範囲', () => {
-  it('各行の改行を含み、連続する範囲をつなぐと原文を再現する', () => {
+describe('byte range of a line range', () => {
+  it('includes each line newline, so joining consecutive ranges reproduces the source', () => {
     const source = bytes('一行目\r\n二行目\n三行目');
     const index = buildLineIndex(source);
     const first = byteRangeOfLines(index, 1, 1);
@@ -39,7 +39,7 @@ describe('行範囲のbyte範囲', () => {
     expect(joined.equals(source)).toBe(true);
   });
 
-  it('endは最終行までに切り詰め、範囲外のstartはnullにする', () => {
+  it('clamps end to the last line and returns null for an out-of-range start', () => {
     const index = buildLineIndex(bytes('a\nb\n'));
     expect(byteRangeOfLines(index, 2, 99)).toEqual({ startByte: 2, endByteExclusive: 4 });
     expect(byteRangeOfLines(index, 3, 3)).toBeNull();
@@ -47,27 +47,27 @@ describe('行範囲のbyte範囲', () => {
     expect(byteRangeOfLines(index, 2, 1)).toBeNull();
   });
 
-  it('空のsourceは1行目が空の範囲になる', () => {
+  it('an empty source has an empty range for line 1', () => {
     const index = buildLineIndex(bytes(''));
     expect(byteRangeOfLines(index, 1, 1)).toEqual({ startByte: 0, endByteExclusive: 0 });
   });
 
-  it('byte位置から行番号を引ける', () => {
+  it('looks up the line number from a byte offset', () => {
     const index = buildLineIndex(bytes('ab\ncd\nef'));
     expect([0, 2, 3, 5, 6, 7].map((byte) => lineOfByte(index, byte))).toEqual([1, 1, 2, 2, 3, 3]);
   });
 });
 
-describe('code point境界での切り詰め', () => {
-  it('多byte文字の途中で切らない', () => {
+describe('truncation at code point boundaries', () => {
+  it('does not cut inside a multi-byte character', () => {
     const source = bytes('認証abc');
-    // 「認」「証」は各3 byte。4 byteの予算では「認」までしか入らない。
+    // The first two characters are 3 bytes each. A 4 byte budget fits only the first one.
     expect(truncateAtCodePoint(source, 0, source.byteLength, 4)).toBe(3);
     expect(truncateAtCodePoint(source, 0, source.byteLength, 6)).toBe(6);
     expect(truncateAtCodePoint(source, 0, source.byteLength, 100)).toBe(source.byteLength);
   });
 
-  it('4 byte文字でも、切った位置から続けると原文を再現する', () => {
+  it('with 4 byte characters, continuing from the cut reproduces the source', () => {
     const source = bytes('😀😀😀');
     let offset = 0;
     const parts: Buffer[] = [];

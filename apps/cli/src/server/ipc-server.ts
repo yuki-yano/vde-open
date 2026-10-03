@@ -32,12 +32,12 @@ export interface IpcServerOptions {
   key: Buffer;
   daemonId: string;
   handle: (method: string, params: unknown) => Promise<IpcHandlerResult>;
-  // 内容を含まないeventだけを受け取る。
+  // Receives only events that carry no content.
   onEvent?: (event: string, fields: Record<string, string | number>) => void;
 }
 
 export interface IpcServer {
-  // 実行中のrequestがすべて応答を返し終えるまで待つ。
+  // Waits until every in-flight request has finished responding.
   drain(): Promise<void>;
   close(): Promise<void>;
 }
@@ -53,10 +53,10 @@ function toErrorBody(error: unknown): ErrorBody {
       details: error.details,
     };
   }
-  // 想定外の例外は内容を相手へ返さない。
+  // Do not return the details of unexpected exceptions to the peer.
   return {
     code: 'E_INTERNAL',
-    message: '内部errorが発生しました。',
+    message: 'An internal error occurred.',
     retryable: false,
     details: {},
   };
@@ -94,7 +94,7 @@ function serveConnection(
     if (typeof id !== 'string' || typeof method !== 'string') {
       respond(typeof id === 'string' ? id : null, {
         ...errorEnvelope(
-          toErrorBody(new VdeError('E_INVALID_ARGUMENT', 'requestにidとmethodが必要です。')),
+          toErrorBody(new VdeError('E_INVALID_ARGUMENT', 'The request requires id and method.')),
         ),
       });
       return;
@@ -128,11 +128,11 @@ function serveConnection(
   const handleFrame = (frame: Record<string, unknown>) => {
     if (phase === 'await-hello') {
       if (frame['type'] !== 'hello' || !isNonce(frame['clientNonce'])) {
-        reject('E_UNAUTHORIZED', '認証前のframeは受け付けません。');
+        reject('E_UNAUTHORIZED', 'Frames before authentication are not accepted.');
         return;
       }
       if (frame['protocolVersion'] !== IPC_PROTOCOL_VERSION) {
-        reject('E_PROTOCOL_MISMATCH', 'IPCのprotocolVersionが一致しません。');
+        reject('E_PROTOCOL_MISMATCH', 'The IPC protocolVersion does not match.');
         return;
       }
       clientNonce = frame['clientNonce'];
@@ -158,7 +158,7 @@ function serveConnection(
         serverNonce,
       );
       if (frame['type'] !== 'auth' || !proofMatches(expected, frame['proof'])) {
-        reject('E_UNAUTHORIZED', '認証に失敗しました。');
+        reject('E_UNAUTHORIZED', 'Authentication failed.');
         return;
       }
       phase = 'ready';
@@ -174,7 +174,7 @@ function serveConnection(
     try {
       frames = decoder.push(chunk);
     } catch (error) {
-      // 上限超過と不正なJSONは、応答せずに接続を閉じる。
+      // On oversized frames and invalid JSON, close the connection without responding.
       options.onEvent?.('ipc.frame-error', {
         kind: error instanceof FrameError ? error.kind : 'unknown',
         phase,

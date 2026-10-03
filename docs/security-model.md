@@ -1,36 +1,38 @@
-# セキュリティモデル
+# Security model
 
-## 守るもの
+[日本語](security-model.ja.md)
 
-- 管理の権限（文書を開く・閉じる、検索、質問と回答の確定）。
-- 開いていない文書と、登録していないfile（秘密のfileを含む）。
-- 回答の確定。人が管理画面で送信したときだけ確定する。
+## What is protected
 
-## 信頼の境界
+- Management rights (opening and closing documents, search, and submitting questions and answers).
+- Documents that are not open, and files that are not registered (including secret files).
+- Answer submission. Answers are submitted only when a person submits them in the management UI.
 
-| 主体 | 扱い |
+## Trust boundaries
+
+| Party | Treatment |
 |---|---|
-| CLI・Agent（同じOSのuser） | IPCの鍵（runtime directoryの中、本人だけが読める）で、daemonと相互に確かめる |
-| 管理画面 | 一回限りのURL（bootstrap ticket、60秒）で作ったsession token。Host・Origin・`Sec-Fetch-Site`を確かめる。状態を変えるrequestはJSONだけ |
-| 文書の表示（iframe） | 信頼しない。管理画面と別のport（origin）で配信し、`sandbox`とCSPで制限する。管理のtokenを持たない |
-| 文書の中のscript（interactive） | 信頼しない。利用者が明示的に許可したHTMLだけで動かす。読み込めるのは登録したfileだけ。HTMLから行えるのは回答案の取得と置き換えだけで、確定はできない |
-| 外部のnetwork | daemonは外部へ通信しない。外部の画像・CSS・fontを読み込まない |
+| CLI and agents (the same OS user) | Mutual check with the daemon using the IPC key (inside the runtime directory, readable only by the user) |
+| Management UI | A session token created from a one-time URL (bootstrap ticket, 60 seconds). Host, Origin, and `Sec-Fetch-Site` are checked. State-changing requests accept JSON only |
+| Document view (iframe) | Not trusted. Served on a separate port (origin) from the management UI and restricted with `sandbox` and CSP. It never holds the management token |
+| Scripts in documents (interactive) | Not trusted. They run only in HTML that the user explicitly allowed. They can load only registered files. From HTML, they can only get and replace the draft answer; they cannot submit it |
+| External network | The daemon never makes outbound requests. External images, CSS, and fonts are not loaded |
 
-## 主な対策
+## Main measures
 
-- 表示の権限（256bitの乱数）は、文書・版・表示方法・session・閉じた回数・scriptの許可の世代に結び付き、閉じる操作・sessionの失効・許可の取消・返却で失効する（ADR-0008、0012）。
-- 配信するfileは、登録したlogical pathとの完全一致だけ。symlinkや「..」でassets-rootの外へ出る参照、名前が「.」で始まるfile、種類の合わないfileを拒否する（ADR-0009）。
-- staticのHTMLは、parse5の構文木で、script・event属性・埋め込み・base・自動の移動・formの送信先・外部の参照を取り除き、出力を解析し直して確かめる。CSSはcss-treeで、外部の参照とescapeによる回避を無効にする。
-- interactiveのHTMLは、CSPの`script-src`と`connect-src`を表示の権限の中に限り、`allow-same-origin`を付けない。MessagePortは表示したiframeへ1回だけ渡し、frameの大きさ・件数・順番・形を検証する。HTMLからの回答案の保存は、表示の権限を保存のtransactionの中でも確かめる（ADR-0012）。
-- 回答は、管理画面の送信buttonでだけ確定する。確定する内容は、serverが保存済みの回答案から取る。送信はIDで冪等にし、条件が違えば競合にする（ADR-0011）。
-- logには、token・ticket・表示の権限・回答・本文を残さない。
+- A render grant (256 random bits) is bound to the document, the revision, the view mode, the session, how many times the document was closed, and the generation of the script permission. It is revoked when the document is closed, the session expires, the permission is withdrawn, or the grant is released (ADR-0008, 0012).
+- Only files whose logical path exactly matches a registered one are served. References that leave the assets root through symlinks or `..`, files whose names start with ".", and files of the wrong type are rejected (ADR-0009).
+- Static HTML is processed on a parse5 syntax tree: scripts, event attributes, embeds, base, automatic navigation, form targets, and external references are removed, and the output is parsed again to verify it. CSS is processed with css-tree, and external references and escape-based bypasses are neutralized.
+- Interactive HTML limits CSP `script-src` and `connect-src` to the render grant, and never adds `allow-same-origin`. The MessagePort is handed over only once, to the iframe that is showing the document, and frames are checked for size, rate, order, and shape. Draft answers saved from HTML check the render grant again inside the save transaction (ADR-0012).
+- Answers are submitted only from the submit button of the management UI. The submitted content is taken from the draft answer saved on the server. Submission is idempotent per ID, and a mismatch in conditions is a conflict (ADR-0011).
+- Logs never contain tokens, tickets, render grants, answers, or document text.
 
-## 守らないもの
+## What is not protected
 
-- 同じOSのuserとして動く悪意のあるprocess（鍵とstateを読める）。
-- browser自体の脆弱性。
-- interactiveのHTMLの中のscriptによる、iframe自身の移動、CPU・memoryの消費。interactiveは、任意の敵対的なscriptを安全に動かす仕組みではない。
+- A malicious process running as the same OS user (it can read the key and the state).
+- Vulnerabilities in the browser itself.
+- Scripts in interactive HTML navigating their own iframe or consuming CPU and memory. Interactive mode is not a way to run arbitrary hostile scripts safely.
 
-## 検証
+## Verification
 
-受け入れテスト（SEC-001〜020、FB-007〜011、FB-022など）の対応は`docs/implementation-status.md`にあります。
+How the acceptance tests (SEC-001 to 020, FB-007 to 011, FB-022, and others) map to tests is recorded in `docs/implementation-status.md` (in Japanese).

@@ -1,18 +1,18 @@
-// 検索用の文字列の正規化と、語への分割（仕様9.2）。原文は変更せず、派生した値だけを作る。
+// Normalization and tokenization for search (spec 9.2). The source is not modified; only derived values are produced.
 
-// 全角・半角や合成文字の違いをそろえ、大文字と小文字を区別しない形にする。
+// Unifies full-width/half-width and composed forms, and makes it case-insensitive.
 export function normalizeForSearch(text: string): string {
   return text.normalize('NFKC').toLowerCase();
 }
 
 const segmenter = new Intl.Segmenter('ja', { granularity: 'word' });
-// 英数のidentifier（snake_case、kebab-case、dotでつないだ名前、camelCaseを含む）。
+// ASCII identifiers (snake_case, kebab-case, dotted names, and camelCase).
 const IDENTIFIER = /[A-Za-z0-9]+(?:[_.\-/][A-Za-z0-9]+)+|[A-Za-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*/g;
 const CAMEL_BOUNDARY = /(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/;
 
-// 文字列を検索語へ分ける。日本語は語の単位、英数は単語の単位。
-// identifierは、分けた部分に加えて、分ける前の形も語として残す（`refresh_token`そのものでも探せる）。
-// 大文字と小文字の境目で分けるので、正規化（小文字化）の前の文字列を渡す。
+// Splits text into search terms. Japanese by word, ASCII by word.
+// Identifiers keep the unsplit form as a term too, in addition to the pieces (so `refresh_token` itself is searchable).
+// Splits at case boundaries, so pass the text before normalization (lowercasing).
 export function tokenize(text: string): string[] {
   const nfkc = text.normalize('NFKC');
   const tokens: string[] = [];
@@ -31,14 +31,14 @@ export function tokenize(text: string): string[] {
   return tokens;
 }
 
-// 重複を除いた検索語。queryの解釈に使う。
+// Search terms without duplicates. Used to interpret queries.
 export function uniqueTokens(text: string): string[] {
   return [...new Set(tokenize(text))];
 }
 
 const ASCII_WORD = /^[a-z0-9]+$/;
 
-// 綴りのゆらぎを許すのは、英数の4文字以上の語だけ。日本語へは適用しない。
+// Spelling variations are allowed only for ASCII terms of 4 or more characters. Not applied to Japanese.
 export function allowsFuzzy(term: string): boolean {
   return term.length >= 4 && ASCII_WORD.test(term);
 }
@@ -49,7 +49,7 @@ export function codePointLength(text: string): number {
   return length;
 }
 
-// Unicode code pointの単位で切り出す。文字の途中で切らない。
+// Slices by Unicode code point. Never cuts a character in half.
 export function sliceCodePoints(text: string, start: number, end: number): string {
   return Array.from(text).slice(start, end).join('');
 }

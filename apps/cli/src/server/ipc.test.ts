@@ -31,9 +31,9 @@ async function startServer(): Promise<void> {
     daemonId: DAEMON_ID,
     handle: async (method, params) => {
       calls.push({ method, params });
-      if (method === 'fail') throw new VdeError('E_DOCUMENT_NOT_FOUND', '見つかりません。');
-      if (method === 'crash') throw new Error('内部の詳細');
-      // 応答しないhandler。testの後始末で解放する。
+      if (method === 'fail') throw new VdeError('E_DOCUMENT_NOT_FOUND', 'Not found.');
+      if (method === 'crash') throw new Error('internal details');
+      // A handler that never responds. Released in the test teardown.
       if (method === 'hang') await new Promise<void>((resolve) => hung.push(resolve));
       if (method === 'slow') {
         await new Promise<void>((resolve) => {
@@ -45,7 +45,7 @@ async function startServer(): Promise<void> {
   });
 }
 
-// 任意のbytesを送り、相手が閉じるまでに受け取った内容を返す。
+// Sends arbitrary bytes and returns what was received until the peer closes.
 function rawExchange(payloads: Buffer[]): Promise<{ received: string; closed: boolean }> {
   return new Promise((resolve, reject) => {
     const socket = connect(socketPath);
@@ -93,8 +93,8 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('IPCの正常系', () => {
-  it('認証後にrequestを送り、CLIと同じenvelopeで応答を受け取る', async () => {
+describe('IPC happy path', () => {
+  it('sends a request after authentication and receives the same envelope as the CLI', async () => {
     const connection = await connectIpc({ socketPath, key });
     try {
       expect(connection.daemonId).toBe(DAEMON_ID);
@@ -118,24 +118,24 @@ describe('IPCの正常系', () => {
     }
   });
 
-  it('想定外の例外の内容を相手へ返さない', async () => {
+  it('does not return the details of unexpected exceptions to the peer', async () => {
     const connection = await connectIpc({ socketPath, key });
     try {
       const envelope = await connection.request('crash', {});
       expect(envelope).toMatchObject({ ok: false, error: { code: 'E_INTERNAL' } });
-      expect(JSON.stringify(envelope)).not.toContain('内部の詳細');
+      expect(JSON.stringify(envelope)).not.toContain('internal details');
     } finally {
       connection.close();
     }
   });
 
-  it.skipIf(process.platform === 'win32')('socketは所有者だけが使える権限になる', () => {
+  it.skipIf(process.platform === 'win32')('the socket is accessible only by its owner', () => {
     expect(statSync(socketPath).mode & 0o777).toBe(0o600);
   });
 });
 
-describe('requestの期限と後始末', () => {
-  it('応答がなければ期限でrejectし、接続は使い続けられる', async () => {
+describe('request timeouts and cleanup', () => {
+  it('rejects on timeout when there is no response, and the connection stays usable', async () => {
     const connection = await connectIpc({ socketPath, key });
     try {
       await expect(connection.request('hang', {}, { timeoutMs: 100 })).rejects.toMatchObject({
@@ -147,7 +147,7 @@ describe('requestの期限と後始末', () => {
     }
   });
 
-  it('明示的に閉じたら、応答待ちのrequestをrejectする', async () => {
+  it('rejects pending requests when closed explicitly', async () => {
     const connection = await connectIpc({ socketPath, key });
     const waiting = connection.request('hang', {});
     connection.close();
@@ -157,7 +157,7 @@ describe('requestの期限と後始末', () => {
     });
   });
 
-  it('serverが接続を切ったら、応答待ちのrequestをrejectする', async () => {
+  it('rejects pending requests when the server drops the connection', async () => {
     const connection = await connectIpc({ socketPath, key });
     const waiting = connection.request('hang', {});
     await server?.close();
@@ -165,7 +165,7 @@ describe('requestの期限と後始末', () => {
     await expect(waiting).rejects.toMatchObject({ code: 'E_DAEMON_UNAVAILABLE' });
   });
 
-  it('drainは実行中のrequestが応答を返し終えるまで待つ', async () => {
+  it('drain waits until in-flight requests have finished responding', async () => {
     const connection = await connectIpc({ socketPath, key });
     try {
       const slow = connection.request<{ echo: unknown }>('slow', { n: 1 });
@@ -185,10 +185,10 @@ describe('requestの期限と後始末', () => {
   });
 });
 
-describe('接続の中断', () => {
+describe('aborting a connection', () => {
   const abortListeners = (signal: AbortSignal) => getEventListeners(signal, 'abort').length;
 
-  it('同じsignalで接続に何度失敗しても、失敗した接続のlistenerを残さない', async () => {
+  it('leaves no listeners from failed connections, however many times the same signal fails to connect', async () => {
     const controller = new AbortController();
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await expect(
@@ -196,13 +196,13 @@ describe('接続の中断', () => {
       ).rejects.toMatchObject({ code: 'E_DAEMON_UNAVAILABLE' });
     }
     expect(abortListeners(controller.signal)).toBe(0);
-    // 接続を確認し終えた後も残さない。
+    // None left after the handshake finishes either.
     const connection = await connectIpc({ socketPath, key, signal: controller.signal });
     connection.close();
     expect(abortListeners(controller.signal)).toBe(0);
   });
 
-  it('中断済みのsignalでは、接続せずに失敗し、listenerも残さない', async () => {
+  it('fails without connecting on an already aborted signal, and leaves no listeners', async () => {
     const controller = new AbortController();
     controller.abort();
     await expect(connectIpc({ socketPath, key, signal: controller.signal })).rejects.toMatchObject({
@@ -213,9 +213,9 @@ describe('接続の中断', () => {
   });
 });
 
-describe('応答しない相手に対するclientの終了', () => {
-  it('期限の後に接続を閉じれば、相手が切断に応じなくてもprocessが終了する', async () => {
-    // 認証までは正しく応じ、その後は何も返さず、相手からの切断にも応じないserver。
+describe('client shutdown against an unresponsive peer', () => {
+  it('the process exits if the connection is closed after the timeout, even when the peer ignores the disconnect', async () => {
+    // A server that responds correctly through authentication, then returns nothing and ignores the peer's disconnect.
     await server?.close();
     server = null;
     rmSync(socketPath, { force: true });
@@ -285,15 +285,15 @@ describe('応答しない相手に対するclientの終了', () => {
       expect(stdout.trim()).toBe('E_DAEMON_UNAVAILABLE');
       expect(exitCode).toBe(0);
     } finally {
-      // 切断に応じないserverなので、受け付けた接続をこちらで破棄してから閉じる。
+      // The server ignores disconnects, so destroy the accepted connections here before closing.
       for (const socket of accepted) socket.destroy();
       await new Promise<void>((resolve) => unresponsive.close(() => resolve()));
     }
   });
 });
 
-describe('SYS-004 認証前のIPC', () => {
-  it('認証前の通常methodを拒否して切断し、handlerを呼ばない', async () => {
+describe('SYS-004 IPC before authentication', () => {
+  it('rejects a regular method before authentication, disconnects, and does not call the handler', async () => {
     const result = await rawExchange([
       encodeFrame({ id: 'x', method: 'documents.list', params: {} }),
     ]);
@@ -303,7 +303,7 @@ describe('SYS-004 認証前のIPC', () => {
     await expectServerAlive();
   });
 
-  it('認証前の4KiBを超えるframeで切断する', async () => {
+  it('disconnects on a frame over 4KiB before authentication', async () => {
     const huge = Buffer.alloc(LIMITS.ipcPreAuthFrameBytes + 1, 0x61);
     const result = await rawExchange([huge]);
     expect(result.closed).toBe(true);
@@ -312,14 +312,14 @@ describe('SYS-004 認証前のIPC', () => {
     await expectServerAlive();
   });
 
-  it('不正なJSONで切断する', async () => {
+  it('disconnects on invalid JSON', async () => {
     const result = await rawExchange([Buffer.from('{"type":"hello",\n', 'utf8')]);
     expect(result.closed).toBe(true);
     expect(calls).toEqual([]);
     await expectServerAlive();
   });
 
-  it('誤ったproofでは認証されず、その後のmethodも処理されない', async () => {
+  it('does not authenticate with a wrong proof, and does not process the following method', async () => {
     const clientNonce = createNonce();
     const result = await rawExchange([
       encodeFrame({ type: 'hello', protocolVersion: IPC_PROTOCOL_VERSION, clientNonce }),
@@ -333,7 +333,7 @@ describe('SYS-004 認証前のIPC', () => {
     await expectServerAlive();
   });
 
-  it('別のprotocolVersionのclientを明示errorで拒否する', async () => {
+  it('rejects a client with a different protocolVersion with an explicit error', async () => {
     const result = await rawExchange([
       encodeFrame({ type: 'hello', protocolVersion: 2, clientNonce: createNonce() }),
     ]);
@@ -343,11 +343,11 @@ describe('SYS-004 認証前のIPC', () => {
   });
 });
 
-describe('SYS-005 接続相手の確認', () => {
+describe('SYS-005 verifying the peer', () => {
   let fake: Server | null = null;
   let fakeReceived: Buffer[];
 
-  // 本物のdaemonを止め、同じsocketで偽のserverを待ち受けさせる。
+  // Stop the real daemon and let a fake server listen on the same socket.
   async function startFakeServer(
     reply: (hello: Record<string, unknown>) => Record<string, unknown>,
   ): Promise<void> {
@@ -381,11 +381,11 @@ describe('SYS-005 接続相手の確認', () => {
     expect(wire.includes(key)).toBe(false);
     expect(wire.toString('utf8')).not.toContain(key.toString('hex'));
     expect(wire.toString('utf8')).not.toContain(key.toString('base64'));
-    // 相手を確認できていないので、clientのproofも送らない。
+    // The peer is not verified, so the client's proof is not sent either.
     expect(wire.toString('utf8')).not.toContain('"auth"');
   }
 
-  it('keyを持たない偽serverのproofを信用せず、keyもproofも送らない', async () => {
+  it('does not trust the proof of a fake server without the key, and sends neither the key nor a proof', async () => {
     await startFakeServer((hello) => ({
       type: 'hello',
       protocolVersion: IPC_PROTOCOL_VERSION,
@@ -403,8 +403,8 @@ describe('SYS-005 接続相手の確認', () => {
     expectNoSecretLeak();
   });
 
-  it('過去の接続で得た正しいhelloを再生されても信用しない', async () => {
-    // 正しいkeyで作ったが、別のclientNonceに対するhello。
+  it('does not trust a replayed valid hello from a past connection', async () => {
+    // A hello made with the correct key, but for a different clientNonce.
     const oldClientNonce = createNonce();
     const oldServerNonce = createNonce();
     const replayed = {
@@ -419,7 +419,7 @@ describe('SYS-005 接続相手の確認', () => {
     expectNoSecretLeak();
   });
 
-  it('別のprotocolVersionを名乗るserverを明示errorで拒否する', async () => {
+  it('rejects a server claiming a different protocolVersion with an explicit error', async () => {
     await startFakeServer(() => ({
       type: 'hello',
       protocolVersion: 2,
@@ -433,7 +433,7 @@ describe('SYS-005 接続相手の確認', () => {
     expectNoSecretLeak();
   });
 
-  it('認証前は、clientも4KiBを超えるframeを受け取らない', async () => {
+  it('before authentication, the client also rejects frames over 4KiB', async () => {
     await startFakeServer((hello) => {
       const serverNonce = createNonce();
       return {
@@ -441,7 +441,7 @@ describe('SYS-005 接続相手の確認', () => {
         protocolVersion: IPC_PROTOCOL_VERSION,
         daemonId: DAEMON_ID,
         serverNonce,
-        // 正しいproofを付けても、frameが大きすぎれば相手を確認する前に切断する。
+        // Even with a correct proof, an oversized frame disconnects before the peer is verified.
         proof: computeProof(key, 'server', DAEMON_ID, hello['clientNonce'] as string, serverNonce),
         padding: 'x'.repeat(LIMITS.ipcPreAuthFrameBytes),
       };
@@ -452,7 +452,7 @@ describe('SYS-005 接続相手の確認', () => {
     expectNoSecretLeak();
   });
 
-  it('同じclientNonceでも接続ごとにserverNonceが変わり、proofを使い回せない', async () => {
+  it('the serverNonce changes per connection even with the same clientNonce, so proofs cannot be reused', async () => {
     const clientNonce = createNonce();
     const hello = encodeFrame({
       type: 'hello',

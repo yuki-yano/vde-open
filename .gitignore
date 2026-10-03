@@ -8,6 +8,8 @@ dist/
 /playwright-report/
 /apps/cli/README.md
 /apps/cli/THIRD_PARTY_NOTICES.md
+/apps/cli/LICENSE
+/apps/cli/skills/
 /apps/cli/docs/
 /artifacts/
 /.dev-home/

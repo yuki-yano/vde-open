@@ -1,4 +1,4 @@
-// MarkdownのReact描画。TanStack Markdown／Highlightへの参照は、このpackageの中に閉じる。
+// React rendering of Markdown. References to TanStack Markdown and Highlight stay inside this package.
 import { createHighlighter } from '@tanstack/highlight';
 import {
   css,
@@ -21,10 +21,10 @@ import { useMemo, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import { isSafeLink, MARKDOWN_PARSE_OPTIONS } from './analysis.ts';
 import { classifyLink } from './references.ts';
 
-// highlightするcode blockの上限（仕様7.4）。超える場合は色付けせずに表示する。
+// Upper limit of a code block to highlight (spec 7.4). Larger blocks are shown without coloring.
 const MAX_HIGHLIGHT_CHARS = 256 * 1024;
 
-// 言語は明示的に登録する。未登録の言語は色付けしない。
+// Languages are registered explicitly. Unregistered languages are not colored.
 const highlighter = createHighlighter({
   languages: [js, jsx, ts, tsx, json, yaml, html, css, shell, markdown, plaintext],
 });
@@ -38,26 +38,26 @@ const safeHighlighter: CodeHighlighter = (code, lang, options) => {
 };
 
 export interface MarkdownViewProps {
-  // parseMarkdownDocumentの結果。解析はworkerで行い、描画だけをここで行う。
+  // Result of parseMarkdownDocument. Parsing happens in a worker; only rendering happens here.
   document: MarkdownDocument;
-  // 画像の参照を、表示できるURLへ直す。表示できなければnull。指定がなければ、画像は表示しない。
+  // Resolve an image reference into a URL that can be shown, or null if it cannot. Without it, no images are shown.
   resolveImage?: (src: string) => string | null;
-  // localの文書へのlinkが押されたときに呼ばれる。指定がなければ、linkとして扱わない。
+  // Called when a link to a local document is clicked. Without it, such links are not treated as links.
   onOpenLink?: (href: string) => void;
-  // code blockの上に置く操作（copyなど）。表示しているcodeは、操作の要素から`codeOfBlock`で読む。
+  // Actions placed above each code block (copy and so on). Read the shown code from an action element with `codeOfBlock`.
   codeActions?: ReactNode;
 }
 
-// code blockの中の要素（操作のbuttonなど）から、そのcode blockが表示しているcode
-// （色付けのための要素を除いた文字列）を読む。
+// From an element inside a code block (such as an action button), read the code that block shows
+// (the text without the coloring elements).
 export function codeOfBlock(element: Element): string {
   return element.closest('[data-code-block]')?.querySelector('pre code')?.textContent ?? '';
 }
 
 type Components = NonNullable<Parameters<typeof renderMarkdownReact>[1]>['components'];
 
-// URLは解析の時点で絞っている（analysis.ts）。描画でも同じ条件を確かめ、
-// 別の経路で作られたASTが渡されても、危険なlinkや画像の読み込みを出さない。
+// URLs are narrowed at parse time (analysis.ts). Rendering checks the same conditions,
+// so an AST built by another path still produces no dangerous links or image loads.
 function createComponents(
   resolveImage: MarkdownViewProps['resolveImage'],
   onOpenLink: MarkdownViewProps['onOpenLink'],
@@ -79,7 +79,7 @@ function createComponents(
         </a>
       );
     }
-    // localの文書へのlink。遷移はせず、開いてよいかを本体で確かめてから開く。
+    // Link to a local document. No navigation; the host checks whether it may be opened, then opens it.
     if (onOpenLink && classifyLink(href).kind === 'document') {
       return (
         <button type="button" data-local-link="" onClick={() => onOpenLink(href)}>
@@ -90,19 +90,19 @@ function createComponents(
     return <span>{children}</span>;
   }
 
-  // 表示できるのは、登録済みのlocal fileだけ。それ以外は読み込まず、代替textだけを示す。
+  // Only registered local files can be shown. Anything else is not loaded; only the alt text is shown.
   function Image({ src, alt, title }: ComponentPropsWithoutRef<'img'>): ReactNode {
     const url = typeof src === 'string' ? (resolveImage?.(src) ?? null) : null;
     if (url === null) {
-      return <span data-blocked-image="">{alt ? `[画像: ${alt}]` : '[画像]'}</span>;
+      return <span data-blocked-image="">{alt ? `[image: ${alt}]` : '[image]'}</span>;
     }
     return (
       <img src={url} alt={alt ?? ''} title={title} loading="lazy" referrerPolicy="no-referrer" />
     );
   }
 
-  // code block。操作（codeActions）は、各code blockの上に置く。操作の中の要素から、
-  // その要素が属するcode blockのcodeを`codeOfBlock`で読む。
+  // Code block. The actions (codeActions) are placed above each code block. From an element inside the actions,
+  // read the code of the block it belongs to with `codeOfBlock`.
   function Pre({ children, ...rest }: ComponentPropsWithoutRef<'pre'>): ReactNode {
     if (codeActions === undefined) return <pre {...rest}>{children}</pre>;
     return (

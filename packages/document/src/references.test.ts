@@ -13,8 +13,8 @@ import {
 
 const NUL = String.fromCharCode(0);
 
-describe('SEC-009 参照の分類', () => {
-  it('文書からの相対参照を、assets-rootからの相対pathへ解決する', () => {
+describe('SEC-009 reference classification', () => {
+  it('resolves relative references from the document into paths relative to the assets-root', () => {
     expect(classifyReference('img/a.png', '')).toEqual({
       kind: 'local',
       logicalPath: 'img/a.png',
@@ -25,21 +25,21 @@ describe('SEC-009 参照の分類', () => {
       logicalPath: 'docs/img/a.png',
       suffix: '?v=1#x',
     });
-    // `/`始まりは、文書の位置によらずassets-rootからの指定。
+    // A leading `/` means relative to the assets-root, whatever the document's location.
     expect(classifyReference('/css/site.css', 'docs/guide')).toMatchObject({
       logicalPath: 'css/site.css',
     });
     expect(classifyReference('./a/./b//c.png', '')).toMatchObject({ logicalPath: 'a/b/c.png' });
-    // 日本語と空白。encodeされていても、されていなくても同じpath。
+    // Japanese and spaces. The same path whether encoded or not.
     expect(classifyReference('%E5%9B%B3/a%20b.png', '')).toMatchObject({
       logicalPath: '図/a b.png',
     });
     expect(classifyReference('図/a b.png', '')).toMatchObject({ logicalPath: '図/a b.png' });
-    // browserと同じく、前後の空白と途中の改行は無視する。
+    // As in browsers, surrounding whitespace and newlines inside are ignored.
     expect(classifyReference('  img/\na.png\t ', '')).toMatchObject({ logicalPath: 'img/a.png' });
   });
 
-  it('assets-rootの外を指す参照を拒否する', () => {
+  it('rejects references pointing outside the assets-root', () => {
     for (const url of [
       '../a.png',
       'a/../../b.png',
@@ -49,14 +49,14 @@ describe('SEC-009 参照の分類', () => {
     ]) {
       expect(classifyReference(url, ''), url).toEqual({ kind: 'rejected', reason: 'outside-root' });
     }
-    // 文書がrootより下にあっても、rootを越える分は拒否する。
+    // Even when the document is below the root, going above the root is rejected.
     expect(classifyReference('../../a.png', 'docs')).toEqual({
       kind: 'rejected',
       reason: 'outside-root',
     });
   });
 
-  it('区切りやNULのencode、二重のencodeを拒否する', () => {
+  it('rejects encoded separators or NUL, and double encoding', () => {
     for (const url of [
       '..%2fsecret.png',
       'a%2Fb.png',
@@ -72,7 +72,7 @@ describe('SEC-009 参照の分類', () => {
     expect(classifyReference(`a${NUL}.png`, '')).toEqual({ kind: 'rejected', reason: 'nul' });
   });
 
-  it('filesystemのpath、UNC、file:、その他のschemeを拒否する', () => {
+  it('rejects filesystem paths, UNC, file: and other schemes', () => {
     expect(classifyReference('file:///etc/passwd', '')).toEqual({
       kind: 'rejected',
       reason: 'file-url',
@@ -97,7 +97,7 @@ describe('SEC-009 参照の分類', () => {
     ]) {
       expect(classifyReference(url, '').kind, url).toBe('rejected');
     }
-    // `/`始まりは、filesystemの絶対pathとしては扱わない。assets-rootの中だけを指す。
+    // A leading `/` is not treated as an absolute filesystem path. It points only inside the assets-root.
     expect(classifyReference('/etc/passwd', '')).toEqual({
       kind: 'local',
       logicalPath: 'etc/passwd',
@@ -105,7 +105,7 @@ describe('SEC-009 参照の分類', () => {
     });
   });
 
-  it('外部のURL、data URL、文書内の参照、空の参照を区別する', () => {
+  it('distinguishes external URLs, data URLs, in-document references and empty references', () => {
     for (const url of ['http://e.example/a.png', 'HTTPS://e.example/a.png', '//e.example/a.png']) {
       expect(classifyReference(url, ''), url).toEqual({ kind: 'remote' });
     }
@@ -126,7 +126,7 @@ describe('SEC-009 参照の分類', () => {
     }
   });
 
-  it('logical pathの形を確かめる', () => {
+  it('checks the form of a logical path', () => {
     expect(isValidLogicalPath('a/b.png')).toBe(true);
     for (const path of ['', '/a.png', 'a//b.png', '../a.png', 'a/./b.png', 'a\\b.png', `a${NUL}`]) {
       expect(isValidLogicalPath(path), path).toBe(false);
@@ -134,8 +134,8 @@ describe('SEC-009 参照の分類', () => {
   });
 });
 
-describe('assetの種別', () => {
-  it('拡張子で種別を決め、対応外はnull', () => {
+describe('asset types', () => {
+  it('decides the type by extension, and null for unsupported', () => {
     expect(assetTypeOf('a/b.PNG')).toEqual({ mime: 'image/png', role: 'image' });
     expect(assetTypeOf('a.svg')?.role).toBe('svg');
     expect(assetTypeOf('a.mjs')?.role).toBe('script');
@@ -145,33 +145,33 @@ describe('assetの種別', () => {
     }
   });
 
-  it('文脈ごとに使える種別を限る', () => {
+  it('limits the usable roles per context', () => {
     expect(roleAllowed('image', 'svg')).toBe(true);
     expect(roleAllowed('image', 'script')).toBe(false);
     expect(roleAllowed('style', 'image')).toBe(false);
     expect(roleAllowed('script', 'data')).toBe(false);
     expect(roleAllowed('css-url', 'font')).toBe(true);
-    // 文書の解析で見つけた参照からは、dataを登録しない。個別の指定でだけ登録できる。
+    // References found by document analysis never register data. Only an explicit asset can register it.
     for (const context of ['image', 'style', 'script', 'font', 'css-url'] as const) {
       expect(roleAllowed(context, 'data')).toBe(false);
     }
     expect(roleAllowed('explicit', 'data')).toBe(true);
   });
 
-  it('`.`で始まる名前を含むpathを見分ける', () => {
+  it('detects paths containing a name starting with `.`', () => {
     expect(hasHiddenSegment('.git/config')).toBe(true);
     expect(hasHiddenSegment('a/.env')).toBe(true);
     expect(hasHiddenSegment('a/b.png')).toBe(false);
   });
 
-  it('相対URLを作る', () => {
+  it('builds relative URLs', () => {
     expect(relativeUrlTo('', 'css/a b.css')).toBe('css/a%20b.css');
     expect(relativeUrlTo('docs/guide', 'img/図.png')).toBe('../../img/%E5%9B%B3.png');
   });
 });
 
-describe('linkの分類', () => {
-  it('外部のURL、文書内、localの文書、開けないlinkを区別する', () => {
+describe('link classification', () => {
+  it('distinguishes external URLs, in-document links, local documents and links that cannot be opened', () => {
     expect(classifyLink('https://e.example/a')).toEqual({
       kind: 'external',
       url: 'https://e.example/a',
@@ -204,7 +204,7 @@ describe('linkの分類', () => {
     }
   });
 
-  it('相対参照の形を見分ける', () => {
+  it('detects the form of a relative reference', () => {
     for (const url of ['a.png', './a.png', '../a.png', '/a.png', 'a b.png']) {
       expect(isRelativeReference(url), url).toBe(true);
     }

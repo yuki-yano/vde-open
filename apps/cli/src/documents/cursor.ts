@@ -2,8 +2,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 import { LIMITS, VdeError } from '@vde-open/shared';
 
-// serverが発行する署名付きcursor（仕様9.4）。payloadは操作と条件を拘束し、
-// 別の操作や条件へ流用できない。secretはdaemonの起動ごとに作るので、再起動で失効する。
+// Signed cursors issued by the server (spec 9.4). The payload binds the operation and conditions,
+// so it cannot be reused for another operation or conditions. The secret is created per daemon start, so cursors expire on restart.
 export interface CursorCodec {
   encode(payload: Record<string, unknown>): string;
   decode(token: string, operation: string): Record<string, unknown>;
@@ -12,7 +12,7 @@ export interface CursorCodec {
 function invalidCursor(reason: string): VdeError {
   return new VdeError(
     'E_INVALID_CURSOR',
-    'cursorが正しくないか、期限が切れています。最初から取得し直してください。',
+    'The cursor is invalid or has expired. Fetch again from the start.',
     { reason },
   );
 }

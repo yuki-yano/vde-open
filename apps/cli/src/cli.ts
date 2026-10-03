@@ -6,8 +6,8 @@ import { LIMITS, VdeError } from '@vde-open/shared';
 import { runCli } from './cli/run.ts';
 import { currentPathEnvironment } from './persistence/paths.ts';
 
-// shellのpipe（FIFO）かredirect（通常file）で内容が渡されているときだけ、stdinを入力として扱う。
-// Agentの実行環境ではstdinがsocketや/dev/nullになることがあり、それらは入力として扱わない。
+// Treat stdin as input only when content comes through a shell pipe (FIFO) or redirect (regular file).
+// In agent environments stdin may be a socket or /dev/null, and those are not treated as input.
 function stdinIsPiped(): boolean {
   try {
     const stats = fstatSync(0);
@@ -24,10 +24,14 @@ async function readStdin(): Promise<Buffer> {
     const bytes = chunk as Buffer;
     size += bytes.byteLength;
     if (size > LIMITS.documentBytes) {
-      throw new VdeError('E_LIMIT_EXCEEDED', 'stdinの内容が1文書の大きさの上限を超えています。', {
-        limit: 'documentBytes',
-        max: LIMITS.documentBytes,
-      });
+      throw new VdeError(
+        'E_LIMIT_EXCEEDED',
+        'The stdin content exceeds the size limit for one document.',
+        {
+          limit: 'documentBytes',
+          max: LIMITS.documentBytes,
+        },
+      );
     }
     chunks.push(bytes);
   }

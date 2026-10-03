@@ -16,7 +16,7 @@ let base: string;
 let watcher: WatchService | null;
 
 beforeEach(() => {
-  // 監視が返すpathと比べるので、symlinkを解決したpathを使う。
+  // Use a path with symlinks resolved, since it is compared against paths the watcher reports.
   base = realpathSync(mkdtempSync(join(tmpdir(), 'vde-open-watch-')));
   watcher = null;
 });
@@ -48,14 +48,14 @@ async function waitForText(
     const text = (await service.read({ documentId })).data.content;
     if (text === expected) return;
     if (Date.now() > deadline) {
-      throw new Error(`内容が反映されません: ${JSON.stringify(text)}`);
+      throw new Error(`The content was not updated: ${JSON.stringify(text)}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
 
-describe('fileの状態と保存済みの内容の照合', () => {
-  it('daemonが止まっている間の変更を、起動後に取り込む', async () => {
+describe('comparing file state with the saved content', () => {
+  it('picks up changes made while the daemon was stopped after it starts', async () => {
     const path = join(base, 'a.md');
     writeFileSync(path, '# 停止前\n');
     const first = await createService();
@@ -63,10 +63,10 @@ describe('fileの状態と保存済みの内容の照合', () => {
       ?.documentId as string;
     await first.store.close();
 
-    // 停止中にfileが変わる。
+    // The file changes while stopped.
     writeFileSync(path, '# 停止中の変更\n');
 
-    // 起動し直す。通知は来ないので、照合だけで気付く必要がある。
+    // Start again. No notification arrives, so the check alone must notice.
     const second = await createService();
     expect((await second.service.read({ documentId })).data.content).toBe('# 停止前\n');
     watcher = createWatchService({ documents: second.service, debounceMs: 20 });
@@ -74,7 +74,7 @@ describe('fileの状態と保存済みの内容の照合', () => {
     await waitForText(second.service, documentId, '# 停止中の変更\n');
   });
 
-  it('開いた直後の文書は、内容が合っていると分かっているので読み直さない', async () => {
+  it('does not resync a document just opened, since its content is known to match', async () => {
     writeFileSync(join(base, 'a.md'), '# a\n');
     let reads = 0;
     const { service } = await createService((path) => {
@@ -89,10 +89,10 @@ describe('fileの状態と保存済みの内容の照合', () => {
     expect(reads).toBe(1);
   });
 
-  it('読み取った後に変わった内容を、処理済みとして扱わない', async () => {
+  it('does not treat content changed after the read as handled', async () => {
     const path = join(base, 'a.md');
     writeFileSync(path, '# v1\n');
-    // 2回目の読み込み（読み直し）で、内容を読み取った直後にfileが書き換わる。
+    // On the second read (the resync), the file is rewritten right after its content is read.
     let reads = 0;
     const { service } = await createService(async (target) => {
       reads += 1;
@@ -103,11 +103,11 @@ describe('fileの状態と保存済みの内容の照合', () => {
     const documentId = (await service.open({ cwd: base, paths: ['a.md'] })).data.documents[0]
       ?.documentId as string;
 
-    // 通知には頼らず、定期の照合だけで追従させる。
+    // Follow changes through the periodic check alone, not notifications.
     writeFileSync(path, '# v2\n');
     const outcome = await service.refreshFromDisk(documentId);
     expect((await service.read({ documentId })).data.content).toBe('# v2\n');
-    // 覚えているのは、読み取った内容（v2）に対応する状態。現在のfile（v3）とは食い違う。
+    // What is remembered is the state matching the content read (v2). It disagrees with the current file (v3).
     expect(outcome.signature).toBe(service.readSignature(documentId));
 
     watcher = createWatchService({ documents: service, debounceMs: 20, fileCheckIntervalMs: 50 });

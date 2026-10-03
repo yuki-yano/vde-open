@@ -12,57 +12,66 @@ test.afterEach(async () => {
   await t.cleanup();
 });
 
-test('P2 gate: CLIで開いた文書がUIに表示され、追加と保存がそのまま反映される', async ({ page }) => {
+test('P2 gate: a document opened from the CLI is shown in the UI, and additions and saves are reflected as they happen', async ({
+  page,
+}) => {
   t.write('a.md', '# 最初の文書\n\n本文です。\n');
   await t.json(['open', 'a.md']);
   await page.goto(await t.bootstrapUrl());
 
-  const sidebar = page.getByRole('navigation', { name: '開いている文書' });
+  const sidebar = page.getByRole('navigation', { name: 'Open documents' });
   await expect(sidebar.getByRole('button', { name: '最初の文書', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: '最初の文書' }).last()).toBeVisible();
 
-  // CLIで文書を追加すると、UIを操作しなくても一覧に現れる。
+  // Opening a document from the CLI makes it appear in the list without touching the UI.
   t.write('b.md', '# 二つ目の文書\n');
   await t.json(['open', 'b.md']);
   await expect(sidebar.getByRole('button', { name: '二つ目の文書', exact: true })).toBeVisible();
-  // 追加しても、読んでいる文書は切り替わらない（DOC-014）。
+  // Adding a document does not switch the document being read (DOC-014).
   await expect(page.locator('article')).toContainText('本文です。');
 
-  // DOC-009: 一時fileへ書いてrenameする保存でも、最終的な内容が反映される。
+  // DOC-009: a save that writes a temporary file and renames it still shows the final content.
   t.atomicWrite('a.md', '# 最初の文書\n\n保存し直した本文です。\n');
   await expect(page.locator('article')).toContainText('保存し直した本文です。');
 });
 
-test('SEC-003: ticketのfragmentは履歴に残らず、同じURLは2度使えない', async ({ page, context }) => {
+test('SEC-003: the ticket fragment is not kept in history, and the same URL cannot be used twice', async ({
+  page,
+  context,
+}) => {
   t.write('a.md', '# a\n');
   await t.json(['open', 'a.md']);
   const url = await t.bootstrapUrl();
   await page.goto(url);
-  await expect(page.getByRole('navigation', { name: '開いている文書' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Open documents' })).toBeVisible();
   expect(new URL(page.url()).hash).toBe('');
   expect(await page.evaluate(() => window.location.href)).not.toContain('bootstrap');
-  // 管理UIは、遷移先へ参照元を渡さない。
+  // The management UI sends no referrer to navigation targets.
   const response = await page.request.get(await t.uiUrl());
   expect(response.headers()['referrer-policy']).toBe('no-referrer');
 
-  // 同じURLを別のtabで開いても、sessionは得られない。
+  // Opening the same URL in another tab does not yield a session.
   const second = await context.newPage();
   await second.goto(url);
-  await expect(second.getByRole('heading', { name: 'CLIから開き直してください' })).toBeVisible();
+  await expect(second.getByRole('heading', { name: 'Open again from the CLI' })).toBeVisible();
 });
 
-test('SEC-001: ticketなしで開いたUIは文書を表示せず、APIも応答しない', async ({ page }) => {
+test('SEC-001: the UI opened without a ticket shows no documents, and the API does not respond', async ({
+  page,
+}) => {
   t.write('secret.md', '# 秘密の見出し\n');
   await t.json(['open', 'secret.md']);
   const uiUrl = await t.uiUrl();
   await page.goto(uiUrl);
-  await expect(page.getByRole('heading', { name: 'CLIから開き直してください' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Open again from the CLI' })).toBeVisible();
   await expect(page.getByText('秘密の見出し')).toHaveCount(0);
   const status = await page.evaluate(async () => (await fetch('/_/api/v1/documents')).status);
   expect(status).toBe(401);
 });
 
-test('MD-003: Markdown中の生HTMLとscriptは、管理画面で実行されない', async ({ page }) => {
+test('MD-003: raw HTML and scripts in Markdown do not run in the management UI', async ({
+  page,
+}) => {
   t.write(
     'attack.md',
     [

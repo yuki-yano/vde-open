@@ -25,7 +25,7 @@ interface RawResponse {
   body: string;
 }
 
-// Hostなどのheaderを自由に指定してrequestを送る。
+// Sends a request with arbitrary headers such as Host.
 function raw(
   path: string,
   options: { method?: string; headers?: Record<string, string>; body?: string } = {},
@@ -72,8 +72,8 @@ async function session(): Promise<string> {
 
 const API_PATHS = ['/documents', '/status', '/events'];
 
-describe('SEC-001 管理APIの認証', () => {
-  it('tokenなし・別のtokenでは、一覧も本文も返さない', async () => {
+describe('SEC-001 management API authentication', () => {
+  it('returns neither the list nor the body without a token or with a different token', async () => {
     for (const path of API_PATHS) {
       const none = await raw(`/_/api/v1${path}`);
       expect(none.status, path).toBe(401);
@@ -85,7 +85,7 @@ describe('SEC-001 管理APIの認証', () => {
     }
   });
 
-  it('正しいtokenでだけ読め、破棄したtokenと再起動前のtokenは使えない', async () => {
+  it('readable only with the correct token; a revoked token and a token from before a restart are unusable', async () => {
     const token = await session();
     const authorized = { Authorization: `Bearer ${token}` };
     const list = await raw('/_/api/v1/documents', { headers: authorized });
@@ -99,7 +99,7 @@ describe('SEC-001 管理APIの認証', () => {
     expect(revoked.status).toBe(200);
     expect((await raw('/_/api/v1/documents', { headers: authorized })).status).toBe(401);
 
-    // sessionはmemoryだけにあるので、daemonの再起動で失効する。
+    // Sessions live only in memory, so they expire on daemon restart.
     const before = await session();
     await t.run(['daemon', 'restart', '--json']);
     const status = (await t.run(['daemon', 'status', '--json'])).json<{ uiUrl: string }>();
@@ -110,8 +110,8 @@ describe('SEC-001 管理APIの認証', () => {
   });
 });
 
-describe('SEC-002 OriginとHostの検査', () => {
-  it('攻撃者のOrigin、Origin: null、別名のHostを拒否する', async () => {
+describe('SEC-002 Origin and Host checks', () => {
+  it('rejects an attacker Origin, Origin: null, and an aliased Host', async () => {
     const token = await session();
     const authorized = { Authorization: `Bearer ${token}` };
     for (const headers of [
@@ -126,18 +126,18 @@ describe('SEC-002 OriginとHostの検査', () => {
       expect(response.status, JSON.stringify(headers)).toBe(401);
       expect(response.body).not.toContain('秘密');
     }
-    // 別名のHostでは、UIのHTMLも返さない。
+    // With an aliased Host, the UI HTML is not returned either.
     expect((await raw('/', { headers: { Host: 'attacker.example' } })).status).toBe(401);
   });
 
-  it('状態を変えるrequestは、UIのoriginからのJSONに限る', async () => {
+  it('state-changing requests are limited to JSON from the UI origin', async () => {
     const token = await session();
     const list = JSON.parse(
       (await raw('/_/api/v1/documents', { headers: { Authorization: `Bearer ${token}` } })).body,
     ) as { data: { documents: Array<{ documentId: string }> } };
     const id = list.data.documents[0]?.documentId as string;
 
-    // Originのない変更（browser以外やformの送信に相当）を拒否する。
+    // Rejects changes without Origin (equivalent to non-browser clients or form submissions).
     const noOrigin = await raw(`/_/api/v1/documents/${id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
@@ -153,12 +153,12 @@ describe('SEC-002 OriginとHostの検査', () => {
       body: 'order=x',
     });
     expect(form.status).toBe(400);
-    // 文書は閉じられていない。
+    // The document has not been closed.
     const after = await t.run(['list', '--json']);
     expect(after.json<{ totalDocuments: number }>().data.totalDocuments).toBe(1);
   });
 
-  it('CORSを許可せず、未知のAPIをUIのHTMLで応答しない', async () => {
+  it('does not allow CORS, and does not answer unknown APIs with the UI HTML', async () => {
     const token = await session();
     const preflight = await raw('/_/api/v1/documents', {
       method: 'OPTIONS',
@@ -178,8 +178,8 @@ describe('SEC-002 OriginとHostの検査', () => {
   });
 });
 
-describe('DOC-008 表示順の保存', () => {
-  it('並べ替えを保存し、再起動後も保つ。fileは動かさない', async () => {
+describe('DOC-008 saving the display order', () => {
+  it('saves the reordering and keeps it after a restart; files are not moved', async () => {
     t.write('b.md', '# b\n');
     t.write('c.md', '# c\n');
     await t.run(['open', 'b.md', 'c.md', '--json']);
@@ -210,7 +210,7 @@ describe('DOC-008 表示順の保存', () => {
         .data.documents.map((document) => document.title);
     expect(await titlesOf()).toEqual(['c', 'b', '秘密の見出し']);
 
-    // 古い一覧にもとづく並べ替えと、文書の過不足がある並べ替えは拒否する。
+    // Rejects a reordering based on a stale list, and one with missing or extra documents.
     const stale = await raw('/_/api/v1/documents/order', {
       method: 'PUT',
       headers,
@@ -238,7 +238,7 @@ describe('DOC-008 表示順の保存', () => {
 });
 
 describe('SEC-003 bootstrap ticket', () => {
-  it('1回だけ交換でき、2回目と未知のticketは拒否する', async () => {
+  it('can be exchanged once; a second exchange and an unknown ticket are rejected', async () => {
     const value = await ticket();
     const exchange = () =>
       raw('/_/api/v1/sessions/bootstrap', {
@@ -255,7 +255,7 @@ describe('SEC-003 bootstrap ticket', () => {
       body: JSON.stringify({ ticket: 'x'.repeat(43) }),
     });
     expect(unknown.status).toBe(401);
-    // 別のoriginからは、正しいticketでも交換できない。
+    // From a different origin, even a correct ticket cannot be exchanged.
     const crossOrigin = await raw('/_/api/v1/sessions/bootstrap', {
       method: 'POST',
       headers: { Origin: 'http://attacker.example', 'Content-Type': 'application/json' },
@@ -264,7 +264,7 @@ describe('SEC-003 bootstrap ticket', () => {
     expect(crossOrigin.status).toBe(401);
   });
 
-  it('通常の結果やlogに、ticketやtokenを出さない', async () => {
+  it('does not show the ticket or token in normal results or the log', async () => {
     const value = await ticket();
     const token = await session();
     const status = await t.run(['daemon', 'status', '--json']);
@@ -278,15 +278,15 @@ describe('SEC-003 bootstrap ticket', () => {
       expect(output).not.toContain(token);
       expect(output).not.toContain('bootstrap=');
     }
-    // 秘密を含むURLの表示は、--jsonと併用できない。
+    // Printing the URL containing a secret cannot be combined with --json.
     const printed = await t.run(['ui', '--print-url', '--json']);
     expect(printed.exitCode).toBe(2);
     expect(printed.stdout).not.toContain('bootstrap=');
   });
 });
 
-describe('SYS-013（部分検証）更新通知', () => {
-  it('認証したSSEは、接続時のhelloと変更の通知を、本文なしで流す', async () => {
+describe('SYS-013 (partial) change notifications', () => {
+  it('authenticated SSE streams hello on connect and change notifications, without bodies', async () => {
     const token = await session();
     const response = await fetch(`${origin}/_/api/v1/events`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -298,8 +298,8 @@ describe('SYS-013（部分検証）更新通知', () => {
     const readUntil = async (text: string) => {
       const deadline = Date.now() + 5000;
       while (!received.includes(text)) {
-        if (Date.now() > deadline) throw new Error(`${text} を受け取れませんでした: ${received}`);
-        // daemonの停止で接続が切れると、読み取りはerrorで終わることがある。
+        if (Date.now() > deadline) throw new Error(`did not receive ${text}: ${received}`);
+        // When the connection drops because the daemon stops, reading may end with an error.
         const chunk = await reader.read().catch(() => ({ done: true, value: undefined }) as const);
         if (chunk.done) break;
         received += decoder.decode(chunk.value, { stream: true });
@@ -320,7 +320,7 @@ describe('SYS-013（部分検証）更新通知', () => {
     expect(sequences).toEqual(sequences.toSorted((a, b) => a - b));
   });
 
-  it('sessionを破棄すると、接続済みのSSEも終わり、その後の通知は届かない', async () => {
+  it('revoking the session also ends the connected SSE, and later notifications do not arrive', async () => {
     const token = await session();
     const response = await fetch(`${origin}/_/api/v1/events`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -339,7 +339,7 @@ describe('SYS-013（部分検証）更新通知', () => {
     })();
     const deadline = Date.now() + 5000;
     while (!received.includes('event: hello')) {
-      if (Date.now() > deadline) throw new Error('helloを受け取れませんでした');
+      if (Date.now() > deadline) throw new Error('did not receive hello');
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
 
@@ -348,16 +348,16 @@ describe('SYS-013（部分検証）更新通知', () => {
       headers: { Origin: origin, Authorization: `Bearer ${token}` },
     });
     expect(revoked.status).toBe(200);
-    // 破棄した時点で、接続はserver側から閉じられる。
+    // At revocation, the server closes the connection.
     await Promise.race([
       reading,
       new Promise((_resolve, reject) =>
-        setTimeout(() => reject(new Error('SSEが終了しません')), 5000),
+        setTimeout(() => reject(new Error('SSE does not end')), 5000),
       ),
     ]);
     expect(ended).toBe(true);
 
-    // その後の変更は、破棄したsessionの接続へ流れない。
+    // Later changes do not flow to the revoked session's connection.
     t.write('after-revoke.md', '# 破棄の後\n');
     await t.run(['open', 'after-revoke.md', '--json']);
     expect(received).not.toContain('catalog-changed');

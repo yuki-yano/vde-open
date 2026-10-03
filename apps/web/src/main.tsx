@@ -5,7 +5,7 @@ import { App } from './App.tsx';
 import './index.css';
 
 const container = document.getElementById('root');
-if (!container) throw new Error('#root がありません');
+if (!container) throw new Error('#root not found');
 
 createRoot(container).render(
   <StrictMode>

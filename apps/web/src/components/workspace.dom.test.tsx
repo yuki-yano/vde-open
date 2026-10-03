@@ -76,9 +76,9 @@ function requestOf(overrides: Partial<FeedbackForUi> = {}): FeedbackForUi {
 
 let container: HTMLElement;
 let root: Root;
-// 本文を取得した版。
+// Revisions whose body was fetched.
 let contentRequests: string[];
-// daemonの現在の状態（偽のAPIが返す）。
+// The daemon's current state (returned by the fake API).
 let current: { documents: DocumentSummary[]; request: FeedbackForUi };
 let feedbackRequests: number;
 let handlers: { onEvent: (event: ServerEvent) => void; onConnect: () => void } | null;
@@ -88,7 +88,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  // 原文の表示にして、取得した本文をそのまま画面に出す。
+  // Use the Source view so the fetched body is shown as is.
   window.localStorage.setItem('vde-open.pref.view-mode', JSON.stringify('source'));
   contentRequests = [];
   feedbackRequests = 0;
@@ -125,44 +125,44 @@ afterEach(() => {
 });
 
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
-// 条件が成り立つまで待つ。testを並行して動かす負荷の下では、画面の更新に時間がかかる。
+// Wait until the condition holds. Under the load of tests running in parallel, screen updates take time.
 async function until(condition: () => boolean, timeoutMs = 3000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!condition() && Date.now() < deadline) await settle(10);
 }
 const shownText = () => container.querySelector('pre')?.textContent ?? '';
 function button(text: string): HTMLButtonElement {
-  // iconだけのbuttonは、aria-labelで探す。
+  // Icon-only buttons are found by aria-label.
   const found = [...container.querySelectorAll('button')].find(
     (item) => item.textContent?.includes(text) || item.getAttribute('aria-label') === text,
   );
-  if (!found) throw new Error(`${text} のbuttonが見つかりません`);
+  if (!found) throw new Error(`Button "${text}" not found`);
   return found;
 }
 const statusText = () =>
   container.querySelector('[data-testid="feedback-status"]')?.textContent ?? '';
 
-describe('FB-015 回答待ちの版の表示', () => {
-  it('質問の版は、更新を止める操作より優先し、その間は更新の停止を操作できない', async () => {
+describe('FB-015 showing the revision awaiting an answer', () => {
+  it("the question's revision takes precedence over pausing updates, and pausing cannot be toggled meanwhile", async () => {
     const document = documentOf({ revision: REV2 });
     root.render(<Viewer api={api} document={document} fixedRevision={REV1} />);
     await until(() => shownText() !== '');
     expect(shownText()).toBe('本文 1');
-    const pause = button('更新を止める');
+    const pause = button('Pause updates');
     expect(pause.disabled).toBe(true);
     pause.click();
     await settle();
     expect(shownText()).toBe('本文 1');
     expect(contentRequests).toEqual([REV1]);
-    expect(container.textContent).toContain('質問の版を表示中');
+    expect(container.textContent).toContain("Showing the question's revision");
   });
 
-  it('質問の前から更新を止めていても、質問の版を表示する', async () => {
+  it("shows the question's revision even if updates were paused before the question", async () => {
     root.render(<Viewer api={api} document={documentOf()} fixedRevision={null} />);
     await until(() => shownText() !== '');
-    button('更新を止める').click();
+    button('Pause updates').click();
     await settle();
-    // 止めている間に新しい版ができ、その版へ質問が来た。
+    // While paused, a new revision was created and a question arrived for that revision.
     root.render(
       <Viewer api={api} document={documentOf({ revision: REV2 })} fixedRevision={null} />,
     );
@@ -176,7 +176,7 @@ describe('FB-015 回答待ちの版の表示', () => {
   });
 });
 
-describe('SYS-013 通知の再接続と質問の再取得', () => {
+describe('SYS-013 notification reconnect and question refetch', () => {
   async function showPendingQuestion(): Promise<void> {
     current.documents = [documentOf({ pendingRequestIds: [REQUEST_ID] })];
     root.render(<Workspace api={api} />);
@@ -184,10 +184,10 @@ describe('SYS-013 通知の再接続と質問の再取得', () => {
     handlers?.onConnect();
     handlers?.onEvent({ type: 'hello', daemonId: 'd1', sequence: 1, catalogVersion: 1 });
     await until(() => statusText() !== '');
-    expect(statusText()).toBe('未回答');
+    expect(statusText()).toBe('Not answered');
   }
 
-  // 切れていた間に、質問が中止された。
+  // The question was cancelled while disconnected.
   function cancelWhileDisconnected(): number {
     current.documents = [documentOf()];
     current.request = requestOf({
@@ -197,23 +197,23 @@ describe('SYS-013 通知の再接続と質問の再取得', () => {
     return feedbackRequests;
   }
 
-  it('接続し直したら、表示中の質問を取り直す', async () => {
+  it('refetches the shown question after reconnecting', async () => {
     await showPendingQuestion();
     const before = cancelWhileDisconnected();
     handlers?.onConnect();
     handlers?.onEvent({ type: 'hello', daemonId: 'd1', sequence: 1, catalogVersion: 1 });
-    await until(() => statusText() === '中止されました');
+    await until(() => statusText() === 'Cancelled');
     expect(feedbackRequests).toBeGreaterThan(before);
-    expect(statusText()).toBe('中止されました');
+    expect(statusText()).toBe('Cancelled');
   });
 
-  it('通知の連番が欠けたときと、resync-requiredのときも取り直す', async () => {
+  it('also refetches when a sequence number is skipped and on resync-required', async () => {
     await showPendingQuestion();
     let before = cancelWhileDisconnected();
     handlers?.onEvent({ type: 'document-status', daemonId: 'd1', sequence: 5, catalogVersion: 1 });
-    await until(() => statusText() === '中止されました');
+    await until(() => statusText() === 'Cancelled');
     expect(feedbackRequests).toBeGreaterThan(before);
-    expect(statusText()).toBe('中止されました');
+    expect(statusText()).toBe('Cancelled');
 
     before = feedbackRequests;
     handlers?.onEvent({ type: 'resync-required', daemonId: 'd1', sequence: 6, catalogVersion: 1 });
@@ -222,12 +222,12 @@ describe('SYS-013 通知の再接続と質問の再取得', () => {
   });
 });
 
-describe('UX-002 検索の結果の版と、表示中の版', () => {
+describe("UX-002 the search result's revision and the shown revision", () => {
   const notice = () =>
     container.querySelector('[data-testid="section-target-notice"]')?.textContent ?? '';
   const target = (revision: string, nonce = 1) => ({ sectionId: 'sec_0001', revision, nonce });
 
-  it('質問の版を表示している間は、新しい版の結果へ移動せず、理由を示して質問の版を保つ', async () => {
+  it("while showing the question's revision, does not jump to a newer revision's result, explains why, and keeps the question's revision", async () => {
     root.render(
       <Viewer
         api={api}
@@ -237,21 +237,21 @@ describe('UX-002 検索の結果の版と、表示中の版', () => {
       />,
     );
     await until(() => notice() !== '');
-    expect(notice()).toContain('回答待ちの質問の版を表示しているため、移動しません');
+    expect(notice()).toContain("showing the question's revision while awaiting an answer");
     expect(shownText()).toBe('本文 1');
     expect(contentRequests).toEqual([REV1]);
   });
 
-  it('更新を止めている間と、検索の後に更新された場合も、別の版の結果へは移動しない', async () => {
+  it("does not jump to another revision's result while paused, or after the document was updated since the search", async () => {
     root.render(<Viewer api={api} document={documentOf()} sectionTarget={null} />);
     await until(() => shownText() !== '');
-    button('更新を止める').click();
+    button('Pause updates').click();
     await settle();
     root.render(
       <Viewer api={api} document={documentOf({ revision: REV2 })} sectionTarget={target(REV2)} />,
     );
     await until(() => notice() !== '');
-    expect(notice()).toContain('更新を止めているため、移動しません');
+    expect(notice()).toContain('Updates are paused, so the view did not jump');
     expect(shownText()).toBe('本文 1');
 
     root.unmount();
@@ -260,30 +260,30 @@ describe('UX-002 検索の結果の版と、表示中の版', () => {
       <Viewer api={api} document={documentOf({ revision: REV2 })} sectionTarget={target(REV1)} />,
     );
     await until(() => notice() !== '');
-    expect(notice()).toContain('検索した後に文書が更新されたため');
+    expect(notice()).toContain('The document was updated after the search');
   });
 
-  it('版が同じでも移動しない表示では、その旨を示し、閉じると次の移動まで出さない', async () => {
+  it('in a view that does not jump even for the same revision, says so, and after dismissing stays hidden until the next jump', async () => {
     root.render(<Viewer api={api} document={documentOf()} sectionTarget={target(REV1)} />);
     await until(() => notice() !== '');
-    expect(notice()).toContain('この表示では、節の位置へ移動しません');
-    button('閉じる').click();
+    expect(notice()).toContain('This view does not jump to sections');
+    button('Dismiss').click();
     await until(() => notice() === '');
     expect(notice()).toBe('');
     root.render(<Viewer api={api} document={documentOf()} sectionTarget={target(REV1, 2)} />);
     await until(() => notice() !== '');
-    expect(notice()).toContain('この表示では');
+    expect(notice()).toContain('This view does not jump');
   });
 });
 
-describe('文書のpathとIDのcopy（仕様13.2）', () => {
+describe('copying the document path and ID (spec 13.2)', () => {
   const copyResult = () =>
     container.querySelector('[data-testid="copy-result"]')?.textContent ?? '';
   function mockClipboard(writeText: (text: string) => Promise<void>): void {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   }
 
-  it('文書のpathとIDをcopyし、結果を示す', async () => {
+  it('copies the document path and ID and shows the result', async () => {
     const copied: string[] = [];
     mockClipboard((text) => {
       copied.push(text);
@@ -291,25 +291,25 @@ describe('文書のpathとIDのcopy（仕様13.2）', () => {
     });
     root.render(<Viewer api={api} document={documentOf()} />);
     await until(() => shownText() !== '');
-    button('文書のpathをcopy').click();
+    button('Copy document path').click();
     await until(() => copyResult() !== '');
-    expect(copyResult()).toBe('文書のpathをcopyしました。');
-    button('文書のIDをcopy').click();
-    await until(() => copyResult() === '文書のIDをcopyしました。');
+    expect(copyResult()).toBe('Copied the document path.');
+    button('Copy document ID').click();
+    await until(() => copyResult() === 'Copied the document ID.');
     expect(copied).toEqual(['a.html', 'doc_1']);
-    expect(copyResult()).toBe('文書のIDをcopyしました。');
+    expect(copyResult()).toBe('Copied the document ID.');
   });
 
-  it('copyできなかったときは、成功と示さずに理由を示す', async () => {
-    mockClipboard(() => Promise.reject(new Error('許可されていません')));
+  it('when copying fails, shows the reason instead of reporting success', async () => {
+    mockClipboard(() => Promise.reject(new Error('Not allowed')));
     root.render(<Viewer api={api} document={documentOf()} />);
     await until(() => shownText() !== '');
-    button('文書のIDをcopy').click();
+    button('Copy document ID').click();
     await until(() => copyResult() !== '');
-    expect(copyResult()).toBe('文書のIDをcopyできませんでした（許可されていません）。');
+    expect(copyResult()).toBe('Could not copy the document ID (Not allowed).');
   });
 
-  it('stdinから開いた文書には、pathのcopyを出さない', async () => {
+  it('does not offer copying the path for a document opened from stdin', async () => {
     mockClipboard(() => Promise.resolve());
     root.render(
       <Viewer
@@ -320,7 +320,7 @@ describe('文書のpathとIDのcopy（仕様13.2）', () => {
     await until(() => shownText() !== '');
     expect(
       [...container.querySelectorAll('button')].some(
-        (item) => item.getAttribute('aria-label') === '文書のpathをcopy',
+        (item) => item.getAttribute('aria-label') === 'Copy document path',
       ),
     ).toBe(false);
   });

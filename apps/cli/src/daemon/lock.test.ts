@@ -38,8 +38,8 @@ const acquire = (ownerId: string, ownerProbe: ProcessProbe = alive) =>
 
 const lockFiles = async () => (await readdir(dir)).filter((name) => name.startsWith(`${NAME}.`));
 
-describe('lockの取得と解放', () => {
-  it('排他的に取得でき、所有者だけが解放できる', async () => {
+describe('lock acquisition and release', () => {
+  it('acquires exclusively and only the owner can release', async () => {
     expect(await acquire('a')).toMatchObject({ acquired: true, info: { generation: 1 } });
     expect(await acquire('b')).toMatchObject({ acquired: false, reason: 'held' });
     expect(await holdsLock(dir, NAME, 'a')).toBe(true);
@@ -51,24 +51,24 @@ describe('lockの取得と解放', () => {
     expect(await readCurrentLock(dir, NAME)).toMatchObject({ ownerId: 'a', released: true });
   });
 
-  it('解放後は次の世代として取得し、世代を再利用しない', async () => {
+  it('acquires as the next generation after release and never reuses a generation', async () => {
     await acquire('a');
     await releaseLock(dir, NAME, 'a');
     expect(await acquire('b')).toMatchObject({ acquired: true, info: { generation: 2 } });
     await releaseLock(dir, NAME, 'b');
     expect(await acquire('c')).toMatchObject({ acquired: true, info: { generation: 3 } });
-    // 古い世代のfileは残さない。
+    // Files of older generations are not kept.
     expect(await lockFiles()).toHaveLength(1);
   });
 
-  it('同時に取得を試みても、成功するのは1つだけ', async () => {
+  it('only one succeeds when acquiring concurrently', async () => {
     const results = await Promise.all(
       Array.from({ length: 16 }, (_, index) => acquire(`owner-${String(index)}`)),
     );
     expect(results.filter((result) => result.acquired)).toHaveLength(1);
   });
 
-  it('読めないlockは引き継がない', async () => {
+  it('does not take over an unreadable lock', async () => {
     await writeFile(join(dir, `${NAME}.000000000001`), '{broken');
     expect(await readCurrentLock(dir, NAME)).toBe('invalid');
     expect(await acquire('a')).toEqual({ acquired: false, reason: 'invalid', holder: null });
@@ -76,7 +76,7 @@ describe('lockの取得と解放', () => {
   });
 });
 
-describe('SYS-006 / SYS-007 所有者の生存判定', () => {
+describe('SYS-006 / SYS-007 owner liveness check', () => {
   const lockedAt = '2026-10-02T12:00:00.000Z';
   const info = (startedAt: string): LockInfo => ({
     generation: 1,
@@ -86,25 +86,25 @@ describe('SYS-006 / SYS-007 所有者の生存判定', () => {
     released: false,
   });
 
-  it('processが無ければ停止済み', async () => {
+  it('dead when the process does not exist', async () => {
     expect(await inspectOwner(info(lockedAt), dead)).toBe('dead');
   });
 
-  it('processがあり、lockより前から動いていれば生存', async () => {
+  it('alive when the process exists and started before the lock', async () => {
     const started = new Date('2026-10-02T11:59:59.000Z');
     expect(await inspectOwner(info(lockedAt), probe(true, started))).toBe('alive');
   });
 
-  it('processがlockより後に起動していれば、pidの再利用なので停止済み', async () => {
+  it('dead when the process started after the lock, since the pid was reused', async () => {
     const started = new Date('2026-10-02T12:05:00.000Z');
     expect(await inspectOwner(info(lockedAt), probe(true, started))).toBe('dead');
   });
 
-  it('起動時刻が分からなければ、生存として扱う', async () => {
+  it('treated as alive when the start time is unknown', async () => {
     expect(await inspectOwner(info(lockedAt), probe(true, null))).toBe('alive');
   });
 
-  it.skipIf(process.platform === 'win32')('実際のprocessの起動時刻を取得できる', async () => {
+  it.skipIf(process.platform === 'win32')('reads the start time of a real process', async () => {
     const started = await systemProcessProbe.startTime(process.pid);
     expect(started).not.toBeNull();
     expect(Math.abs(Date.now() - (started as Date).getTime())).toBeLessThan(60 * 60 * 1000);
@@ -112,8 +112,8 @@ describe('SYS-006 / SYS-007 所有者の生存判定', () => {
   });
 });
 
-describe('停止済みの所有者からの引き継ぎ', () => {
-  it('所有者が生きているlockは引き継がず、fileも変えない', async () => {
+describe('takeover from a dead owner', () => {
+  it('does not take over a lock whose owner is alive and leaves the files unchanged', async () => {
     await acquire('owner');
     const before = await lockFiles();
     expect(await acquire('intruder', alive)).toMatchObject({
@@ -125,7 +125,7 @@ describe('停止済みの所有者からの引き継ぎ', () => {
     expect(await holdsLock(dir, NAME, 'owner')).toBe(true);
   });
 
-  it('所有者が停止済みなら、lockを外さずに次の世代で引き継ぐ', async () => {
+  it('takes over with the next generation without removing the lock when the owner is dead', async () => {
     await acquire('crashed');
     expect(await acquire('successor', dead)).toMatchObject({
       acquired: true,
@@ -135,10 +135,10 @@ describe('停止済みの所有者からの引き継ぎ', () => {
     expect(await holdsLock(dir, NAME, 'crashed')).toBe(false);
   });
 
-  it('同時に引き継ぎを試みても、取得に成功するのは1つだけ', async () => {
+  it('only one succeeds when taking over concurrently', async () => {
     const crashedPid = 4_000_001;
     await acquireLock(dir, NAME, { pid: crashedPid, ownerId: 'crashed' }, alive);
-    // 停止したのは元の所有者だけ。引き継ぎを試みるprocessは、互いを生存と判定する。
+    // Only the original owner is dead. Processes attempting the takeover see each other as alive.
     const onlyCrashedIsDead: ProcessProbe = {
       isAlive: (pid) => pid !== crashedPid,
       startTime: () => Promise.resolve(null),
@@ -160,8 +160,8 @@ describe('停止済みの所有者からの引き継ぎ', () => {
     expect(winners[0]).toMatchObject({ info: { ownerId: (current as LockInfo).ownerId } });
   });
 
-  it('観測の後に世代が2回進んでいたら、消された世代を作り直しても取得は成立しない', async () => {
-    // 世代1は解放済み。Aはこれを見て世代2を作ろうとし、作成の直前で止まる。
+  it('does not acquire by recreating a deleted generation when the generation advanced twice after the observation', async () => {
+    // Generation 1 is released. A sees this, tries to create generation 2, and pauses right before creating it.
     await acquire('first');
     await releaseLock(dir, NAME, 'first');
 
@@ -173,7 +173,7 @@ describe('停止済みの所有者からの引き継ぎ', () => {
     let paused = false;
     const acquiringA = acquireLock(dir, NAME, { pid: process.pid, ownerId: 'A' }, alive, {
       beforeLink: async () => {
-        // 最初の1回だけ止める。やり直しの取得は止めない。
+        // Pause only the first time. Retried acquisitions are not paused.
         if (paused) return;
         paused = true;
         aReachedLink();
@@ -184,13 +184,13 @@ describe('停止済みの所有者からの引き継ぎ', () => {
     });
     await aWaiting;
 
-    // その間に、Bが世代2を取得して解放し、Cが世代3を取得する。Cは世代2のfileを消す。
+    // Meanwhile, B acquires generation 2 and releases it, and C acquires generation 3. C deletes the generation 2 file.
     expect(await acquire('B')).toMatchObject({ acquired: true, info: { generation: 2 } });
     await releaseLock(dir, NAME, 'B');
     expect(await acquire('C')).toMatchObject({ acquired: true, info: { generation: 3 } });
     expect(await lockFiles()).toEqual([`${NAME}.000000000003`]);
 
-    // Aが再開する。世代2のfileは作れてしまうが、最大の世代ではないので取得は成立しない。
+    // A resumes. It can create the generation 2 file, but it is not the highest generation, so acquisition fails.
     resumeA();
     expect(await acquiringA).toMatchObject({
       acquired: false,
@@ -199,15 +199,15 @@ describe('停止済みの所有者からの引き継ぎ', () => {
     });
     expect(await holdsLock(dir, NAME, 'C')).toBe(true);
     expect(await holdsLock(dir, NAME, 'A')).toBe(false);
-    // Aが作り直した世代2のfileは残さない。
+    // The generation 2 file recreated by A is not kept.
     expect(await lockFiles()).toEqual([`${NAME}.000000000003`]);
   });
 
-  it('古い観測にもとづく引き継ぎは、現在の所有者のlockを壊さない', async () => {
-    // 停止済みと観測したlock（世代1）の後に、別のprocessが世代2を取り直している。
+  it('a takeover based on a stale observation does not break the lock of the current owner', async () => {
+    // After the lock observed as dead (generation 1), another process has re-acquired as generation 2.
     await acquire('crashed');
     await acquire('fresh', dead);
-    // 世代1を停止済みと見ていたprocessが取得を試みても、現在の世代2（生存）を見て諦める。
+    // Even if the process that saw generation 1 as dead tries to acquire, it sees the current generation 2 (alive) and gives up.
     expect(await acquire('late', alive)).toMatchObject({
       acquired: false,
       holder: { ownerId: 'fresh', generation: 2 },
@@ -215,7 +215,7 @@ describe('停止済みの所有者からの引き継ぎ', () => {
     expect(await holdsLock(dir, NAME, 'fresh')).toBe(true);
   });
 
-  it('解放と再取得を挟んでも、過去の世代番号では取得できない', async () => {
+  it('cannot acquire with a past generation number even across release and re-acquisition', async () => {
     await acquire('first');
     await releaseLock(dir, NAME, 'first');
     await acquire('second');

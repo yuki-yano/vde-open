@@ -25,15 +25,15 @@ import { FeedbackService } from './service.ts';
 
 const questionnaire: Questionnaire = {
   schemaVersion: 1,
-  title: 'ログイン画面の確認',
-  instructions: '採用案と表示密度を選んでください。',
+  title: 'Login screen review',
+  instructions: 'Choose the layout and display density.',
   fieldOrder: ['layout', 'density', 'comment'],
   answerSchema: {
     type: 'object',
     properties: {
-      layout: { type: 'string', title: '採用案', enum: ['A', 'B'] },
-      density: { type: 'string', title: '表示密度', enum: ['comfortable', 'compact'] },
-      comment: { type: 'string', title: '修正したい点', maxLength: 4000 },
+      layout: { type: 'string', title: 'Layout', enum: ['A', 'B'] },
+      density: { type: 'string', title: 'Display density', enum: ['comfortable', 'compact'] },
+      comment: { type: 'string', title: 'Requested changes', maxLength: 4000 },
     },
     required: ['layout', 'density'],
     additionalProperties: false,
@@ -90,7 +90,7 @@ async function ask(params: Record<string, unknown> = {}) {
   return (await feedback.create({ cwd: base, questionnaire: text, ...params })).data;
 }
 
-const complete = { layout: 'B', density: 'compact', comment: '説明を短く' };
+const complete = { layout: 'B', density: 'compact', comment: 'Shorten the description' };
 
 async function answer(requestId: string, answers: Record<string, unknown> = complete) {
   const draft = await feedback.updateDraft(requestId, { expectedDraftVersion: 0, answers });
@@ -108,8 +108,8 @@ async function answer(requestId: string, answers: Record<string, unknown> = comp
   };
 }
 
-describe('FB-005 / FB-006 質問の作成', () => {
-  it('文書の指定がなければ、質問のtitleと説明の文書を作り、その版に固定する', async () => {
+describe('FB-005 / FB-006 creating questions', () => {
+  it('without a document, creates a document from the question title and instructions and pins to its revision', async () => {
     const { request } = await ask();
     const listed = documents.list({}).data.documents;
     expect(listed).toHaveLength(1);
@@ -118,17 +118,17 @@ describe('FB-005 / FB-006 質問の作成', () => {
       sourceKind: 'generated',
       displayPath: null,
       pathSegments: [],
-      title: 'ログイン画面の確認',
+      title: 'Login screen review',
       revision: request.revision,
       pendingRequestIds: [request.requestId],
     });
     const content = await documents.read({ documentId: request.documentId });
-    expect(content.data.content).toContain('採用案と表示密度を選んでください。');
+    expect(content.data.content).toContain('Choose the layout and display density.');
     expect(request.status).toBe('pending');
     expect(events.map((event) => event.type)).toContain('catalog-changed');
   });
 
-  it('同じ文書へ回答待ちの質問を重ねて作らない。同じoperation IDは同じ質問、内容が違えば競合', async () => {
+  it('does not create a second pending question for the same document; the same operation ID returns the same question, different content is a conflict', async () => {
     const { documentId } = await openDocument('a.md', '# A\n');
     const operationId = randomUUID();
     const first = await ask({ documentId, operationId });
@@ -141,15 +141,15 @@ describe('FB-005 / FB-006 質問の作成', () => {
       code: 'E_PENDING_REQUEST_EXISTS',
       details: { requestId: first.request.requestId },
     });
-    const other = { ...questionnaire, title: '別の質問' };
+    const other = { ...questionnaire, title: 'Another question' };
     await expect(
       feedback.create({ cwd: base, questionnaire: JSON.stringify(other), documentId, operationId }),
     ).rejects.toMatchObject({ code: 'E_OPERATION_CONFLICT' });
     expect(feedback.list({}).data.requests).toHaveLength(1);
   });
 
-  it('--viewは文書を開いてから、その版へ質問する。閉じた文書や保持していない版へは質問しない', async () => {
-    write('view.md', '# 画面\n');
+  it('--view opens the document and asks on that revision; no questions on closed documents or unretained revisions', async () => {
+    write('view.md', '# Screen\n');
     const viewed = await ask({ view: 'view.md' });
     expect(documents.list({}).data.documents[0]).toMatchObject({
       documentId: viewed.request.documentId,
@@ -164,7 +164,7 @@ describe('FB-005 / FB-006 質問の作成', () => {
     ).rejects.toMatchObject({ code: 'E_REVISION_UNAVAILABLE' });
   });
 
-  it('FB-002 重複したkeyや対応しない形の質問定義は、登録しない', async () => {
+  it('FB-002 does not register a questionnaire with duplicate keys or an unsupported shape', async () => {
     await expect(
       feedback.create({
         cwd: base,
@@ -188,8 +188,8 @@ describe('FB-005 / FB-006 質問の作成', () => {
   });
 });
 
-describe('FB-004 Agentへ回答案を返さない', () => {
-  it('get・list・waitの結果に、回答案と質問定義を含めない', async () => {
+describe('FB-004 does not return draft answers to agents', () => {
+  it('get, list, and wait results do not include draft answers or the questionnaire', async () => {
     const { request } = await ask();
     await feedback.updateDraft(request.requestId, {
       expectedDraftVersion: 0,
@@ -213,13 +213,13 @@ describe('FB-004 Agentへ回答案を返さない', () => {
     await expect(
       feedback.wait({ requestId: request.requestId, timeoutMs: 50 }),
     ).rejects.toMatchObject({ code: 'E_TIMEOUT', details: { status: 'pending' } });
-    // 管理UI向けの取得には含まれる。
+    // Included in the fetch for the management UI.
     expect(feedback.getForUi(request.requestId).data.draftAnswers).toEqual({ layout: 'A' });
   });
 });
 
-describe('FB-012 / FB-013 / FB-014 送信', () => {
-  it('確定する内容は保存済みの回答案。確認した後に回答案が変われば、古い送信を拒否する', async () => {
+describe('FB-012 / FB-013 / FB-014 submit', () => {
+  it('submits the saved draft answers; if the draft changes after confirmation, the stale submit is rejected', async () => {
     const { request } = await ask();
     const flow = await answer(request.requestId);
     await feedback.updateDraft(request.requestId, {
@@ -230,7 +230,7 @@ describe('FB-012 / FB-013 / FB-014 送信', () => {
     expect(feedback.get({ requestId: request.requestId }).data.status).toBe('pending');
   });
 
-  it('同じsubmission IDの再送は同じ結果。条件が違えば競合にし、確定した回答を置き換えない', async () => {
+  it('a replay with the same submission ID returns the same result; different conditions are a conflict and the submitted answer is not replaced', async () => {
     const { request } = await ask();
     const flow = await answer(request.requestId);
     const submissionId = `sub_${randomUUID()}`;
@@ -250,7 +250,7 @@ describe('FB-012 / FB-013 / FB-014 送信', () => {
     );
   });
 
-  it('必須の回答がなければ送信しない。回答案は未完成でも保存できる', async () => {
+  it('does not submit without required answers; an incomplete draft can still be saved', async () => {
     const { request } = await ask();
     const flow = await answer(request.requestId, { layout: 'A' });
     await expect(flow.submit()).rejects.toMatchObject({
@@ -274,7 +274,7 @@ describe('FB-012 / FB-013 / FB-014 送信', () => {
     ).rejects.toMatchObject({ code: 'E_DRAFT_CONFLICT' });
   });
 
-  it('保存できなかった送信は、成功として扱わない（回答待ちのまま、再送で確定できる）', async () => {
+  it('a submit that failed to persist is not treated as success (stays pending and can be submitted again)', async () => {
     await setup({
       ...nodeStoreFs,
       writeFileDurable: async (path, data, mode) => {
@@ -298,21 +298,21 @@ describe('FB-012 / FB-013 / FB-014 送信', () => {
   });
 });
 
-describe('FB-016 新しい版と、旧版への回答の確認', () => {
-  it('新しい版があれば、本体での確認なしには送信しない。確認した後に版が変われば確認し直す', async () => {
-    const { documentId } = await openDocument('a.md', '# 版1\n');
+describe('FB-016 newer revisions and confirming answers to an older revision', () => {
+  it('with a newer revision, does not submit without confirmation in the host; a further revision change requires confirming again', async () => {
+    const { documentId } = await openDocument('a.md', '# Version 1\n');
     const { request } = await ask({ documentId });
     const flow = await answer(request.requestId);
-    write('a.md', '# 版2\n');
+    write('a.md', '# Version 2\n');
     await documents.refreshFromDisk(documentId);
     const shown = feedback.getForUi(request.requestId).data;
     expect(shown.currentRevision).not.toBe(request.revision);
-    // 確認していない。
+    // Not confirmed.
     await expect(flow.submit({ currentRevision: shown.currentRevision })).rejects.toMatchObject({
       code: 'E_NEWER_REVISION',
     });
-    // 確認した後に、さらに版が変わった。
-    write('a.md', '# 版3\n');
+    // The revision changed again after confirmation.
+    write('a.md', '# Version 3\n');
     await documents.refreshFromDisk(documentId);
     await expect(
       flow.submit({ currentRevision: shown.currentRevision, confirmOlderRevision: true }),
@@ -329,8 +329,8 @@ describe('FB-016 新しい版と、旧版への回答の確認', () => {
   });
 });
 
-describe('FB-017 / FB-018 / FB-019 / FB-020 / FB-021 待機・中止・取得済み・削除', () => {
-  it('待機は回答の確定で終わり、時間切れでは質問を回答待ちのまま残す', async () => {
+describe('FB-017 / FB-018 / FB-019 / FB-020 / FB-021 wait, cancel, acknowledge, and forget', () => {
+  it('wait ends on submit, and on timeout leaves the question pending', async () => {
     const { request } = await ask();
     await expect(
       feedback.wait({ requestId: request.requestId, timeoutMs: 30 }),
@@ -340,13 +340,13 @@ describe('FB-017 / FB-018 / FB-019 / FB-020 / FB-021 待機・中止・取得済
     const waiting = feedback.wait({ requestId: request.requestId, timeoutMs: 5000 });
     const other = feedback.wait({ requestId: request.requestId, timeoutMs: 5000 });
     await flow.submit();
-    // 複数の待機が、同じ回答を受け取る。
+    // Multiple waiters receive the same answer.
     const [a, b] = await Promise.all([waiting, other]);
     expect(a.data.submission).toEqual(b.data.submission);
     expect(a.data.status).toBe('submitted');
   });
 
-  it('文書を閉じると回答待ちの質問は中止になり、待っている要求にも伝わる', async () => {
+  it('closing the document cancels the pending question and notifies waiting requests', async () => {
     const { documentId } = await openDocument('a.md', '# A\n');
     const { request } = await ask({ documentId });
     const waiting = feedback.wait({ requestId: request.requestId, timeoutMs: 5000 });
@@ -356,13 +356,13 @@ describe('FB-017 / FB-018 / FB-019 / FB-020 / FB-021 待機・中止・取得済
       status: 'cancelled',
       cancellation: { reason: 'document_closed' },
     });
-    // 明示的な中止は、中止済みならそのまま返す。
+    // An explicit cancel returns as is if already cancelled.
     expect(
       (await feedback.cancel({ requestId: request.requestId }, 'agent')).data.cancellation?.reason,
     ).toBe('document_closed');
   });
 
-  it('読むだけでは取得済みにしない。取得済みの印は明示的に付け、何度付けても同じ', async () => {
+  it('reading does not acknowledge; acknowledge is explicit and idempotent', async () => {
     const { request } = await ask();
     const submitted = (await (await answer(request.requestId)).submit()).data;
     const submissionId = submitted.submission?.submissionId as string;
@@ -383,7 +383,7 @@ describe('FB-017 / FB-018 / FB-019 / FB-020 / FB-021 待機・中止・取得済
     });
   });
 
-  it('回答済みの質問の回答案は変えられず、回答待ちの質問は消せない', async () => {
+  it('draft answers of a submitted question cannot be changed, and a pending question cannot be forgotten', async () => {
     const { request } = await ask();
     await expect(
       feedback.forget({ requestId: request.requestId, confirmed: true }),
@@ -403,18 +403,18 @@ describe('FB-017 / FB-018 / FB-019 / FB-020 / FB-021 待機・中止・取得済
     });
   });
 
-  it('終わった質問の記録だけを消す。原本・文書・ほかの質問は残し、固定が外れた版は整理できる', async () => {
-    const { documentId } = await openDocument('a.md', '# 版1\n');
+  it('forgets only the finished question record; originals, documents, and other questions remain, and unpinned revisions can be pruned', async () => {
+    const { documentId } = await openDocument('a.md', '# Version 1\n');
     const { request } = await ask({ documentId });
     await (await answer(request.requestId)).submit();
     const { request: other } = await ask();
     for (const version of [2, 3, 4]) {
-      write('a.md', `# 版${String(version)}\n`);
+      write('a.md', `# Version ${String(version)}\n`);
       await documents.refreshFromDisk(documentId);
     }
     const revisionsOf = () =>
       store.payload.documents[documentId]?.revisions.map((entry) => entry.revision) ?? [];
-    // 質問が固定している版は、直近の版でなくても残る。
+    // A revision pinned by a question remains even if it is not recent.
     expect(revisionsOf()).toContain(request.revision);
     await expect(
       feedback.forget({ requestId: request.requestId, confirmed: false }),
@@ -430,20 +430,20 @@ describe('FB-017 / FB-018 / FB-019 / FB-020 / FB-021 待機・中止・取得済
     expect(feedback.get({ requestId: other.requestId }).data.status).toBe('pending');
     expect(store.payload.documents[documentId]?.isOpen).toBe(true);
     expect(existsSync(join(base, 'a.md'))).toBe(true);
-    // 5分以内の版は、規則どおり残る（固定が外れても、すぐには消さない）。
+    // Revisions within 5 minutes remain per the rules (not removed immediately when unpinned).
     expect(findIntegrityProblem(store.payload)).toBeNull();
   });
 });
 
-describe('SYS-015 保存容量の上限と固定した版', () => {
-  it('上限を超える新しい操作はerrorにし、質問が固定している版の内容は消さない', async () => {
+describe('SYS-015 storage limit and pinned revisions', () => {
+  it('new operations beyond the limit fail, and content of revisions pinned by questions is not removed', async () => {
     await setup(nodeStoreFs, 4096);
-    const { documentId } = await openDocument('a.md', `# 版1\n${'a'.repeat(1000)}\n`);
+    const { documentId } = await openDocument('a.md', `# Version 1\n${'a'.repeat(1000)}\n`);
     const { request } = await ask({ documentId });
     const pinnedBlob = store.payload.documents[documentId]?.revisions.find(
       (entry) => entry.revision === request.revision,
     )?.sourceSha256 as string;
-    write('a.md', `# 版2\n${'b'.repeat(4000)}\n`);
+    write('a.md', `# Version 2\n${'b'.repeat(4000)}\n`);
     await expect(documents.open({ cwd: base, paths: ['a.md'] })).rejects.toMatchObject({
       code: 'E_LIMIT_EXCEEDED',
       details: { limit: 'blobStoreBytes' },
@@ -454,9 +454,9 @@ describe('SYS-015 保存容量の上限と固定した版', () => {
   });
 });
 
-describe('送信のcommit途中でのfile操作の失敗', () => {
-  it('どのfile操作が失敗しても、復元後の質問は「回答待ち」か「回答済み（回答を含む）」のどちらか', async () => {
-    // 回答案まで保存した状態を作り、送信のcommitで行うfile操作を数える。
+describe('file operation failures during the submit commit', () => {
+  it('whichever file operation fails, the restored question is either pending or submitted (with answers)', async () => {
+    // Build a state with saved draft answers and count the file operations in the submit commit.
     const seed = join(base, 'seed');
     const seedStore = await StateStore.open({ root: seed, fs: nodeStoreFs });
     const seedDocuments = new DocumentService({
@@ -506,7 +506,8 @@ describe('送信のcommit途中でのfile操作の失敗', () => {
           name,
           (...args: unknown[]) => {
             if (armed) count += 1;
-            if (armed && count === crashAt) throw new Error(`操作 ${String(crashAt)} の直前で停止`);
+            if (armed && count === crashAt)
+              throw new Error(`Stopped right before operation ${String(crashAt)}`);
             return (operation as (...a: unknown[]) => unknown)(...args);
           },
         ]),
@@ -546,11 +547,11 @@ describe('送信のcommit途中でのfile操作の失敗', () => {
   });
 });
 
-describe('SYS-009 commitの途中でのprocessの停止', () => {
+describe('SYS-009 process killed during a commit', () => {
   const fixture = fileURLToPath(new URL('crash-commit.fixture.ts', import.meta.url));
 
-  // seedのstateを写した場所で、子processに操作をさせる。指定した番目のfile操作の直前で、
-  // 後始末をせずにkillする（0なら止めずに最後まで行い、行ったfile操作の一覧を返す）。
+  // Runs the operation in a child process on a copy of the seed state. Kills it without cleanup right before
+  // the Nth file operation (0 runs to the end and returns the list of file operations performed).
   const runIn = (seed: string, root: string, crashAt: number, operation: string, params: unknown) =>
     new Promise<{ signal: NodeJS.Signals | null; stdout: string }>((resolve) => {
       cpSync(seed, root, { recursive: true });
@@ -566,7 +567,7 @@ describe('SYS-009 commitの途中でのprocessの停止', () => {
       child.on('close', (_code, signal) => resolve({ signal, stdout }));
     });
 
-  // すべてのfile操作の直前で1回ずつkillし、復元したstateを調べる。
+  // Kills once right before each file operation and inspects the restored state.
   async function killAtEachStep<T>(
     seed: string,
     operation: string,
@@ -580,7 +581,7 @@ describe('SYS-009 commitの途中でのprocessの停止', () => {
         const root = join(base, `${operation}-kill-${String(index + 1)}`);
         const { signal } = await runIn(seed, root, index + 1, operation, params);
         expect(signal).toBe('SIGKILL');
-        // 参照するblobがなければ、開く時点でE_STATE_CORRUPTになる。
+        // If a referenced blob is missing, opening fails with E_STATE_CORRUPT.
         const reopened = await StateStore.open({ root, fs: nodeStoreFs });
         expect(findIntegrityProblem(reopened.payload)).toBeNull();
         const result = inspect(reopened.payload);
@@ -591,7 +592,7 @@ describe('SYS-009 commitの途中でのprocessの停止', () => {
     return { steps, restored };
   }
 
-  it('送信: metadataのrenameとdirectoryのsyncの前後のどこでkillされても、復元後は回答待ちか回答済み', async () => {
+  it('submit: wherever killed around the metadata rename and directory sync, the restored question is pending or submitted', async () => {
     const seed = join(base, 'seed');
     const seedStore = await StateStore.open({ root: seed, fs: nodeStoreFs });
     const seedFeedback = new FeedbackService({
@@ -630,7 +631,7 @@ describe('SYS-009 commitの途中でのprocessの停止', () => {
         };
       },
     );
-    // 送信は新しいblobを作らない。stateの一時file・rename・directoryのsyncを通る。
+    // Submit creates no new blob. It goes through the state temp file, rename, and directory sync.
     expect(steps).toContain('rename:state');
     expect(steps).toContain('syncDirectory:state');
     expect(steps.some((step) => step.endsWith(':blob'))).toBe(false);
@@ -645,7 +646,7 @@ describe('SYS-009 commitの途中でのprocessの停止', () => {
     );
   });
 
-  it('質問の作成: blobの作成の直後を含め、どこでkillされても、質問と文書のblobは両方あるか両方ないか', async () => {
+  it('create: wherever killed, including right after the blob is created, the question and the document blob are both present or both absent', async () => {
     const seed = join(base, 'seed');
     await (await StateStore.open({ root: seed, fs: nodeStoreFs })).close();
     const { steps, restored } = await killAtEachStep(
@@ -655,7 +656,7 @@ describe('SYS-009 commitの途中でのprocessの停止', () => {
       (payload) => ({
         requests: Object.values(payload.feedbackRequests).map((record) => ({
           status: record.status,
-          // 質問が固定した版の文書があり、その版の内容が読める（開く時点でblobの存在を確かめている）。
+          // The document with the revision pinned by the question exists and its content is readable (blob existence is checked on open).
           pinned:
             payload.documents[record.documentId]?.revisions.some(
               (entry) => entry.revision === record.revision,
@@ -664,7 +665,7 @@ describe('SYS-009 commitの途中でのprocessの停止', () => {
         documents: Object.keys(payload.documents).length,
       }),
     );
-    // 質問の文書のblobを、一時fileへ書いてrenameし、blobのdirectoryをsyncしてから、stateを置き換える。
+    // The question document's blob is written to a temp file, renamed, the blob directory synced, then the state is replaced.
     const blobCreated = steps.indexOf('rename:blob');
     expect(blobCreated).toBeGreaterThanOrEqual(0);
     expect(steps[blobCreated + 1]).toBe('syncDirectory:blob-dir');
@@ -675,7 +676,7 @@ describe('SYS-009 commitの途中でのprocessの停止', () => {
         { requests: [{ status: 'pending', pinned: true }], documents: 1 },
       ]).toContainEqual(outcome);
     }
-    // blobを作った直後（directoryのsyncの直前）のkillでは、まだ質問はない。
+    // Killed right after the blob is created (right before the directory sync), there is no question yet.
     expect(restored[blobCreated + 1]).toEqual({ requests: [], documents: 0 });
     expect(restored.at(-1)).toEqual({
       requests: [{ status: 'pending', pinned: true }],

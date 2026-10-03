@@ -60,7 +60,7 @@ async function ask(...args: string[]): Promise<Request> {
   return result.json<{ request: Request }>().data.request;
 }
 
-// 管理UIと同じ手順で、回答案を保存して送信する。
+// Save the draft answer and submit it, following the same steps as the management UI.
 async function answerFromUi(
   ui: UiClient,
   requestId: string,
@@ -87,7 +87,7 @@ async function answerFromUi(
   return submitted.json.data;
 }
 
-// 子processでCLIを起動する（SIGINTを送るため）。
+// Start the CLI in a child process (to send SIGINT).
 function spawnCli(args: string[]): {
   done: Promise<{ exitCode: number | null; stdout: string }>;
   interrupt: () => void;
@@ -112,8 +112,8 @@ function spawnCli(args: string[]): {
 const status = async (requestId: string) =>
   (await t.run(['feedback', 'get', requestId, '--json'])).json<Request>().data.status;
 
-describe('FB-005 / FB-006 CLIからの質問', () => {
-  it('askは文書がなければ質問の文書を作り、同じ文書への重複と、operation IDの再送・競合を扱う', async () => {
+describe('FB-005 / FB-006 questions from the CLI', () => {
+  it('ask creates a question document when there is none, and handles duplicates for the same document and operation ID replays and conflicts', async () => {
     const request = await ask();
     const listed = (await t.run(['list', '--json'])).json<{
       documents: Array<{ documentId: string; sourceKind: string; pendingRequestIds: string[] }>;
@@ -159,7 +159,7 @@ describe('FB-005 / FB-006 CLIからの質問', () => {
     expect(conflict.json().error.code).toBe('E_OPERATION_CONFLICT');
   });
 
-  it('FB-002 不正な質問定義は終了コード2で拒否し、何も登録しない', async () => {
+  it('FB-002 rejects an invalid questionnaire with exit code 2 and registers nothing', async () => {
     const cases: Array<[string, string]> = [
       [
         'dup.json',
@@ -196,8 +196,8 @@ describe('FB-005 / FB-006 CLIからの質問', () => {
   });
 });
 
-describe('FB-004 / FB-019 回答の取得と取得済みの印', () => {
-  it('回答案はAgentへ返さず、送信後は確定した回答を返す。読むだけでは取得済みにしない', async () => {
+describe('FB-004 / FB-019 fetching answers and acknowledging', () => {
+  it('draft answers are not returned to the Agent; after submit the confirmed answers are returned, and reading alone does not acknowledge', async () => {
     const request = await ask();
     const ui = await connectUi(t);
     await ui.api(`/feedback/${request.requestId}/draft`, {
@@ -235,13 +235,13 @@ describe('FB-004 / FB-019 回答の取得と取得済みの印', () => {
     ).json<Request>().data;
     expect(acked.acknowledgedAt).not.toBeNull();
     expect(again.acknowledgedAt).toBe(acked.acknowledgedAt);
-    // 管理UIからも、取得済みと区別できる。
+    // The management UI can also tell it is acknowledged.
     expect((await ui.api<Request>(`/feedback/${request.requestId}`)).json.data.acknowledgedAt).toBe(
       acked.acknowledgedAt,
     );
   });
 
-  it('管理APIの回答案は、重複したkeyと`__proto__`を拒否する', async () => {
+  it('the management API draft answer rejects duplicate keys and `__proto__`', async () => {
     const request = await ask();
     const ui = await connectUi(t);
     const { rawRequest } = await import('./ui-client.ts');
@@ -271,8 +271,8 @@ describe('FB-004 / FB-019 回答の取得と取得済みの印', () => {
   });
 });
 
-describe('FB-017 / FB-018 待機の終わり方と中止', () => {
-  it('待機の時間切れは終了コード6、中断は130。どちらも質問は回答待ちのまま', async () => {
+describe('FB-017 / FB-018 how waiting ends, and cancel', () => {
+  it('wait timeout exits 6, interrupt exits 130; in both the question stays pending', async () => {
     const request = await ask();
     const timedOut = await t.run([
       'feedback',
@@ -296,13 +296,13 @@ describe('FB-017 / FB-018 待機の終わり方と中止', () => {
     );
     expect(await status(request.requestId)).toBe('pending');
 
-    // browserを閉じても（管理UIのsessionが終わっても）、質問は中止しない。
+    // Closing the browser (ending the management UI session) does not cancel the question.
     const ui = await connectUi(t);
     expect((await ui.api('/session', { method: 'DELETE' })).status).toBe(200);
     expect(await status(request.requestId)).toBe('pending');
   });
 
-  it('文書を閉じた質問と、明示的に中止した質問は、cancelledとして取得できる（終了コード0）', async () => {
+  it('a question whose document was closed and an explicitly cancelled question are fetched as cancelled (exit code 0)', async () => {
     t.write('a.md', '# A\n');
     const closedOne = await ask('--view', 'a.md');
     const waiting = t.run(['feedback', 'wait', closedOne.requestId, '--timeout', '30', '--json']);
@@ -324,8 +324,8 @@ describe('FB-017 / FB-018 待機の終わり方と中止', () => {
   });
 });
 
-describe('FB-020 / FB-021 終わった質問の削除', () => {
-  it('回答待ちは消せず、終わった質問だけを--yesで消す。原本・文書・ほかの質問は残る', async () => {
+describe('FB-020 / FB-021 deleting finished questions', () => {
+  it('a pending question cannot be deleted; only finished ones are deleted with --yes, and the source file, document, and other questions remain', async () => {
     t.write('a.md', '# A\n');
     const done = await ask('--view', 'a.md');
     const other = await ask();
@@ -354,13 +354,13 @@ describe('FB-020 / FB-021 終わった質問の削除', () => {
   });
 });
 
-describe('SYS-003 / SYS-013 / DOC-016 再起動と待機、close --all', () => {
-  it('daemonが停止・再起動しても、待機は最初の期限の範囲で接続し直し、同じ質問の回答を受け取る', async () => {
+describe('SYS-003 / SYS-013 / DOC-016 restart and wait, close --all', () => {
+  it('when the daemon stops and restarts, wait reconnects within the original deadline and receives the answer to the same question', async () => {
     const request = await ask();
     const waiting = spawnCli(['feedback', 'wait', request.requestId, '--timeout', '30', '--json']);
     await new Promise((done) => setTimeout(done, 1000));
     expect((await t.run(['daemon', 'stop', '--json'])).exitCode).toBe(0);
-    // 待機が接続し直す（daemonを起動し直す）のを待つ。
+    // Wait for the wait command to reconnect (restarting the daemon).
     await new Promise((done) => setTimeout(done, 1500));
     const ui = await connectUi(t);
     await answerFromUi(ui, request.requestId);
@@ -369,7 +369,7 @@ describe('SYS-003 / SYS-013 / DOC-016 再起動と待機、close --all', () => {
     expect((JSON.parse(result.stdout) as JsonEnvelope<Request>).data.status).toBe('submitted');
   });
 
-  it('daemonが止まっても、残りの時間を延ばさずに時間切れにする', async () => {
+  it('times out without extending the remaining time even when the daemon stops', async () => {
     const request = await ask();
     const startedAt = Date.now();
     const waiting = spawnCli(['feedback', 'wait', request.requestId, '--timeout', '3', '--json']);
@@ -381,10 +381,10 @@ describe('SYS-003 / SYS-013 / DOC-016 再起動と待機、close --all', () => {
     expect(elapsed).toBeLessThan(3000 + 2500);
   });
 
-  it('daemonの起動を待っている間に期限が来ても、CLIのprocessは期限のすぐ後に終わる', async () => {
+  it('the CLI process exits right after the deadline even if it arrives while waiting for the daemon to start', async () => {
     const request = await ask();
     expect((await t.run(['daemon', 'stop', '--json'])).exitCode).toBe(0);
-    // 別のprocessが起動の途中であるかのように、起動lockを持ち続ける（このprocessは生きている）。
+    // Hold the start lock as if another process were in the middle of starting (this process is alive).
     const ownerId = `start_${crypto.randomUUID()}`;
     const held = await acquireLock(
       t.home,
@@ -397,7 +397,7 @@ describe('SYS-003 / SYS-013 / DOC-016 再起動と待機、close --all', () => {
       const startedAt = Date.now();
       const waiting = spawnCli(['feedback', 'wait', request.requestId, '--timeout', '1', '--json']);
       const result = await waiting.done;
-      // 起動の待ち（最大10秒）や接続のtimerが、processを生かし続けない。
+      // Waiting for startup (up to 10 seconds) or connection timers must not keep the process alive.
       expect(Date.now() - startedAt).toBeLessThan(3000);
       expect(result.exitCode).toBe(6);
       expect((JSON.parse(result.stdout) as JsonEnvelope<unknown>).error.code).toBe('E_TIMEOUT');
@@ -407,7 +407,7 @@ describe('SYS-003 / SYS-013 / DOC-016 再起動と待機、close --all', () => {
     expect(await status(request.requestId)).toBe('pending');
   });
 
-  it('再起動後も質問と回答が残る。close --allは回答の履歴と原本を残し、回答待ちを中止する', async () => {
+  it('questions and answers survive a restart; close --all keeps the answer history and source files, and cancels pending ones', async () => {
     t.write('a.md', '# A\n');
     t.write('b.md', '# B\n');
     const answered = await ask('--view', 'a.md');
@@ -416,7 +416,7 @@ describe('SYS-003 / SYS-013 / DOC-016 再起動と待機、close --all', () => {
     await answerFromUi(ui, answered.requestId);
     expect((await t.run(['open', '-w', '.', '--json'])).exitCode).toBe(0);
     await t.run(['daemon', 'restart', '--json']);
-    // 再起動の前のtokenは、新しいdaemonでは使えない。
+    // A token from before the restart is unusable with the new daemon.
     const restarted = await connectUi(t);
     const { rawRequest } = await import('./ui-client.ts');
     const stale = await rawRequest(restarted.origin, '/_/api/v1/feedback', {
@@ -446,8 +446,8 @@ describe('SYS-003 / SYS-013 / DOC-016 再起動と待機、close --all', () => {
   });
 });
 
-describe('SYS-014 / SEC-018 同時の操作とlog', () => {
-  it('回答案の保存・送信・並べ替え・closeを同時に行っても、stateは整合し、送信は1回だけ確定する', async () => {
+describe('SYS-014 / SEC-018 concurrent operations and the log', () => {
+  it('state stays consistent and submit is confirmed only once even when draft save, submit, reorder, and close run concurrently', async () => {
     t.write('a.md', '# A\n');
     t.write('b.md', '# B\n');
     const request = await ask('--view', 'a.md');
@@ -495,22 +495,22 @@ describe('SYS-014 / SEC-018 同時の操作とlog', () => {
       .filter((result) => 'status' in result && result.status === 200);
     const final = (await t.run(['feedback', 'get', request.requestId, '--json'])).json<Request>()
       .data;
-    // 送信が確定したなら1回だけ。回答案の更新が先なら、送信は競合で拒否される。
+    // If submit was confirmed, only once. If the draft update came first, submit is rejected as a conflict.
     expect(submitted.length).toBeLessThanOrEqual(1);
     expect(['pending', 'submitted']).toContain(final.status);
     expect(final.status === 'submitted').toBe(submitted.length === 1);
-    // stateは整合したまま読み直せる。
+    // The state can be reloaded consistently.
     await t.run(['daemon', 'restart', '--json']);
     expect(
       (await t.run(['feedback', 'get', request.requestId, '--json'])).json<Request>().data.status,
     ).toBe(final.status);
   });
 
-  it('質問の文書のcloseと送信が重なっても、確定か中止のどちらか一方だけになる', async () => {
+  it('when closing the question document and submit overlap, exactly one of confirmed or cancelled results', async () => {
     t.write('a.md', '# A\n');
     let connected: UiClient | null = null;
     const outcomes: Array<{ submit: number; status: string; reason: string | null }> = [];
-    // 送信とcloseのどちらを先に出すかを入れ替えて、何度か試す。
+    // Try several times, alternating which of submit and close is issued first.
     for (const closeFirst of [false, true, false, true]) {
       const request = await ask('--view', 'a.md');
       const ui = (connected ??= await connectUi(t));
@@ -547,7 +547,7 @@ describe('SYS-014 / SEC-018 同時の操作とlog', () => {
         { submit: 409, status: 'cancelled', reason: 'document_closed' },
       ]).toContainEqual(outcome);
     }
-    // stateは整合したまま読み直せる。
+    // The state can be reloaded consistently.
     expect((await t.run(['daemon', 'restart', '--json'])).exitCode).toBe(0);
     const listed = (await t.run(['feedback', 'list', '--json'])).json<{ requests: Request[] }>()
       .data.requests;
@@ -556,7 +556,7 @@ describe('SYS-014 / SEC-018 同時の操作とlog', () => {
     );
   });
 
-  it('回答・回答案・tokenを含む操作の後も、logには秘密と内容が残らない', async () => {
+  it('the log contains no secrets or content even after operations involving answers, draft answers, and tokens', async () => {
     const request = await ask();
     const ui = await connectUi(t);
     await answerFromUi(ui, request.requestId);

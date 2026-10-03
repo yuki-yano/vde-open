@@ -8,18 +8,18 @@ import { isExcludedDirectoryName, watchBaseOf } from '../documents/enumerate.ts'
 import type { DocumentService } from '../documents/service.ts';
 import { statSignature } from '../documents/source-reader.ts';
 
-// 通知が欠けた場合に備えて、fileの状態を定期的に確かめる間隔。
+// The interval for periodically checking file state, in case a notification is missed.
 const FILE_CHECK_INTERVAL_MS = 5000;
 const RULE_SCAN_INTERVAL_MS = 30_000;
-// 同時に読み直す文書の数。起動直後は、開いている全文書を確かめる。
+// The number of documents to resync at once. Right after startup, every open document is checked.
 const REFRESH_CONCURRENCY = 4;
 
 export interface WatchService {
-  // 現在のstateに合わせて、監視するdirectoryを増減する。
+  // Adds and removes watched directories to match the current state.
   sync(): void;
   close(): Promise<void>;
-  // 監視しているdirectoryの数と、作ったwatcher・閉じ終えたwatcherの数（資源の漏れの確認に使う）。
-  // 作った数と閉じ終えた数の差が、まだ閉じていないwatcherの数になる。
+  // The number of watched directories, and of watchers created and fully closed (used for resource leak checks).
+  // The difference between created and closed is the number of watchers not yet closed.
   readonly watcherStats: { directories: number; created: number; closed: number };
 }
 
@@ -40,15 +40,15 @@ function isUnder(directory: string, path: string): boolean {
   return fromDirectory !== '' && !fromDirectory.startsWith('..') && !fromDirectory.startsWith(sep);
 }
 
-// fileの更新追従と、監視ruleによる新しい文書の登録（仕様8.5）。
-// 監視するのは、開いている文書の親directoryと、ruleの起点だけ。
+// Follows file updates and registers new documents through watch rules (spec 8.5).
+// Only the parent directories of open documents and the roots of rules are watched.
 export function createWatchService(options: WatchServiceOptions): WatchService {
   const { documents } = options;
   const debounceMs = options.debounceMs ?? LIMITS.watchDebounceMs;
   const watchers = new Map<string, DirectoryWatcher>();
   const timers = new Map<string, NodeJS.Timeout>();
-  // 読めなかった文書の、読もうとした時点のfileの状態。状態が変わったら読み直す。
-  // 読めた文書の状態は、DocumentServiceが公開済みの内容と対にして持っている。
+  // For documents that could not be read, the file state at the time of the attempt. Resync when it changes.
+  // The state of readable documents is kept by DocumentService, paired with the published content.
   const unreadable = new Map<string, string>();
   let closed = false;
   const stats = { created: 0, closed: 0 };
@@ -61,7 +61,7 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     });
   };
 
-  // 同じ対象への通知をまとめ、最後の通知から少し待って1回だけ処理する。
+  // Coalesces notifications for the same target and handles them once, shortly after the last one.
   const schedule = (key: string, work: () => Promise<unknown>) => {
     const existing = timers.get(key);
     if (existing) clearTimeout(existing);
@@ -82,11 +82,11 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     }
   };
 
-  // 文書と、文書が参照しているfileの、現在の状態。DocumentServiceが覚えている形と同じ並び。
+  // The current state of the document and the files it references, in the same order DocumentService remembers.
   const signatureOf = async (documentId: string, path: string): Promise<string> =>
     (await Promise.all([path, ...documents.trackedFiles(documentId)].map(statOf))).join('|');
 
-  // 同時に読み直す数を抑える。空きがなければ、空くまで待つ。
+  // Limits concurrent resyncs. Waits for a free slot when there is none.
   const acquireRefresh = (): Promise<void> => {
     if (activeRefreshes < REFRESH_CONCURRENCY) {
       activeRefreshes += 1;
@@ -97,7 +97,7 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     });
   };
   const releaseRefresh = () => {
-    // 待っている読み直しがあれば、枠をそのまま渡す。
+    // If a resync is waiting, hand the slot straight to it.
     const next = waitingRefreshes.shift();
     if (next) next();
     else activeRefreshes -= 1;
@@ -109,11 +109,11 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
       if (closed) return;
       const observed = await signatureOf(documentId, path);
       const outcome = await documents.refreshFromDisk(documentId);
-      // 照合に使うのは、実際に読み取った内容に対応する状態。読み直した後のstatは使わない。
-      // 読んだ後に変わっていれば、次の照合で食い違い、もう一度読み直す。
+      // The comparison uses the state matching the content actually read, not a stat taken after the resync.
+      // If the file changed after the read, the next check will disagree and resync again.
       if (outcome.signature === null) unreadable.set(documentId, observed);
       else unreadable.delete(documentId);
-      // 参照しているfileが増減したら、監視するdirectoryも合わせる。
+      // When referenced files are added or removed, adjust the watched directories too.
       sync();
     } finally {
       releaseRefresh();
@@ -131,7 +131,7 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
 
   const handlePath = (path: string) => {
     for (const record of openFileDocuments()) {
-      // 文書そのものか、文書が参照しているfileが変わった。
+      // The document itself, or a file it references, changed.
       if (
         record.canonicalPath === path ||
         documents.trackedFiles(record.documentId).includes(path)
@@ -153,13 +153,13 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     }
   };
 
-  // 通知に頼らず、開いている文書の現状を確かめる。監視開始の直後や、通知が欠けた場合に効く。
+  // Checks the current state of open documents without relying on notifications. Useful right after watching starts, or when a notification is missed.
   const checkDocuments = () => {
     for (const record of openFileDocuments()) {
       const path = record.canonicalPath as string;
       void signatureOf(record.documentId, path).then((signature) => {
-        // daemonの起動後にまだ読んでいない文書は、保存済みの内容と合っているか分からない。
-        // 停止中の変更を取りこぼさないよう、読み直して確かめる。
+        // A document not yet read since the daemon started may not match the saved content.
+        // Resync to confirm, so changes made while stopped are not missed.
         const known =
           documents.readSignature(record.documentId) ?? unreadable.get(record.documentId);
         if (known !== signature) scheduleRefresh(record.documentId, path);
@@ -176,11 +176,11 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     const watcher = watch(directory, {
       ignoreInitial: true,
       followSymlinks: false,
-      // 直下だけの監視では、下の階層を読まない。
+      // When watching only the top level, do not read lower levels.
       ...(recursive ? {} : { depth: 0 }),
       ignored: (path) => {
         if (path === directory) return false;
-        // 走査と同じ規則で、隠しdirectoryと除外directoryの下を監視しない。
+        // Like enumeration, do not watch under hidden and excluded directories.
         const segments = relative(directory, path).split(sep);
         return segments.slice(0, -1).some((segment) => isExcludedDirectoryName(segment));
       },
@@ -189,7 +189,7 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
       if (basename(path).startsWith('.')) return;
       handlePath(path);
     });
-    // 監視するdirectoryが多いと、ほぼ同時に何度も呼ばれる。まとめて1回だけ確かめる。
+    // With many watched directories, this fires many times almost at once. Coalesce into a single check.
     watcher.on('ready', () => {
       schedule('check', () => {
         checkDocuments();
@@ -205,7 +205,7 @@ export function createWatchService(options: WatchServiceOptions): WatchService {
     if (closed) return;
     const desired = new Map<string, boolean>();
     for (const record of openFileDocuments()) {
-      // 文書の親directoryと、文書が参照しているfileの親directory。
+      // The document's parent directory, and the parent directories of the files it references.
       for (const path of [
         record.canonicalPath as string,
         ...documents.trackedFiles(record.documentId),

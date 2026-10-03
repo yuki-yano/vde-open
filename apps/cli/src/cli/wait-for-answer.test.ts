@@ -18,11 +18,11 @@ const failure = (code: string): Envelope<FeedbackForAgent> =>
 
 interface FakeConnection extends IpcConnection {
   closed: boolean;
-  // 受け取った待機の期限。
+  // Wait timeouts received.
   waited: number[];
 }
 
-// 応答をreplyで決める接続。replyがnullなら、応答しない。
+// A connection whose response is reply. With null, it never responds.
 function connection(reply: Envelope<FeedbackForAgent> | null = null): FakeConnection {
   const fake: FakeConnection = {
     daemonId: 'daemon_test',
@@ -55,8 +55,8 @@ async function timed<T>(work: Promise<T>): Promise<{ elapsed: number; error: unk
   }
 }
 
-describe('SYS-013 待機の期限', () => {
-  it('接続に時間がかかっても、期限は開始時のまま。後から成立した接続は閉じる', async () => {
+describe('SYS-013 wait deadline', () => {
+  it('the deadline stays as set at the start even when connecting is slow; a connection that opens late is closed', async () => {
     const late = connection();
     let given: AbortSignal | null = null;
     const result = await timed(
@@ -72,14 +72,14 @@ describe('SYS-013 待機の期限', () => {
     );
     expect(result.error).toMatchObject({ code: 'E_TIMEOUT', details: { status: 'pending' } });
     expect(result.elapsed).toBeLessThan(450);
-    // 起動の待ちなど、接続の処理にもやめるよう伝える。
+    // The connection process (such as waiting for startup) is also told to stop.
     expect((given as AbortSignal | null)?.aborted).toBe(true);
     await delay(300, () => undefined);
     expect(late.closed).toBe(true);
     expect(late.waited).toEqual([]);
   });
 
-  it('daemonへ渡す待ち時間は、接続にかかった時間を引いた残り。応答がなくても期限で終える', async () => {
+  it('the wait time passed to the daemon is the remainder after connecting; ends at the deadline even without a response', async () => {
     const silent = connection();
     const result = await timed(
       waitForAnswer({
@@ -96,7 +96,7 @@ describe('SYS-013 待機の期限', () => {
     expect(silent.closed).toBe(true);
   });
 
-  it('daemonが止まっていれば、期限の範囲で接続し直して回答を受け取る', async () => {
+  it('when the daemon is stopped, reconnects within the deadline and receives the answer', async () => {
     const answered = connection(ok(submitted));
     const attempts: string[] = [];
     const envelope = await waitForAnswer({
@@ -118,7 +118,7 @@ describe('SYS-013 待機の期限', () => {
     expect(answered.closed).toBe(true);
   });
 
-  it('中断は、接続の途中でもすぐに終え、質問は回答待ちのまま', async () => {
+  it('an interrupt ends immediately even mid-connection, and the question stays pending', async () => {
     let interrupt: () => void = () => undefined;
     const late = connection();
     const waiting = timed(

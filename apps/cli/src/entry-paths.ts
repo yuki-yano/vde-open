@@ -1,12 +1,12 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-// sourceから実行しているか。配布物ではfalse。
+// Whether running from source. false in the distributed package.
 export const isSourceRun = import.meta.url.endsWith('.ts');
 
-// 利用者のcwdやPATHではなく、このmoduleの位置から解決する。
+// Resolve from this module's location, not from the user's cwd or PATH.
 
-// daemonのentry。配布物ではdist/daemon.js、sourceから実行するときはsrc/daemon.ts。
+// Daemon entry. dist/daemon.js in the distributed package, src/daemon.ts when running from source.
 export function daemonEntryPath(): string {
   return fileURLToPath(new URL(isSourceRun ? './daemon.ts' : './daemon.js', import.meta.url));
 }
@@ -29,7 +29,7 @@ export function searchWorkerPath(): string {
   );
 }
 
-// ビルド済みのWeb UI。配布物ではdist/web。sourceから実行するときは、ビルド済みのdist/webがあれば使う。
+// The built Web UI. dist/web in the distributed package. When running from source, use a built dist/web if present.
 export function webRootPath(): string | null {
   const candidate = fileURLToPath(new URL(isSourceRun ? '../dist/web' : './web', import.meta.url));
   return existsSync(candidate) ? candidate : null;

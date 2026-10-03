@@ -20,7 +20,7 @@ const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 
 export interface Transaction {
-  // 次のstate。この複製を書き換える。commitに成功するまで現stateは変わらない。
+  // The next state. Mutate this copy. The current state does not change until the commit succeeds.
   readonly state: StatePayload;
   putBlob(bytes: Uint8Array): string;
 }
@@ -28,7 +28,7 @@ export interface Transaction {
 export interface StateStoreOptions {
   root: string;
   fs: StoreFs;
-  // 保存できる内容の合計の上限。指定がなければ仕様7.4の値。
+  // Upper limit on the total stored content. Defaults to the value in spec 7.4.
   blobStoreBytes?: number;
 }
 
@@ -55,7 +55,7 @@ export interface DecodedState {
   payload: StatePayload;
 }
 
-// state fileを検証して読む。破損と未知の版を区別し、どちらも黙って空stateにしない。
+// Validate and read the state file. Distinguish corruption from an unknown version, and never silently fall back to an empty state for either.
 export function decodeStateFile(bytes: Buffer, fileName: string): DecodedState {
   let raw: unknown;
   try {
@@ -63,7 +63,7 @@ export function decodeStateFile(bytes: Buffer, fileName: string): DecodedState {
   } catch (error) {
     throw new VdeError(
       'E_STATE_CORRUPT',
-      `${fileName} をJSONとして読めません。`,
+      `${fileName} cannot be parsed as JSON.`,
       { file: fileName },
       { cause: error },
     );
@@ -72,25 +72,25 @@ export function decodeStateFile(bytes: Buffer, fileName: string): DecodedState {
   if (typeof formatVersion === 'number' && formatVersion !== STATE_FORMAT_VERSION) {
     throw new VdeError(
       'E_STATE_FORMAT_UNSUPPORTED',
-      `${fileName} のformatVersion ${String(formatVersion)} は、このversionでは扱えません。`,
+      `${fileName} has formatVersion ${String(formatVersion)}, which this version cannot handle.`,
       { file: fileName, formatVersion, supported: STATE_FORMAT_VERSION },
     );
   }
   const parsed = stateFileSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new VdeError('E_STATE_CORRUPT', `${fileName} の構造が正しくありません。`, {
+    throw new VdeError('E_STATE_CORRUPT', `${fileName} has an invalid structure.`, {
       file: fileName,
     });
   }
   const { storeVersion, checksum, payload } = parsed.data;
   if (checksum !== checksumOf(storeVersion, payload)) {
-    throw new VdeError('E_STATE_CORRUPT', `${fileName} のchecksumが一致しません。`, {
+    throw new VdeError('E_STATE_CORRUPT', `${fileName} has a checksum mismatch.`, {
       file: fileName,
     });
   }
   const problem = findIntegrityProblem(payload);
   if (problem) {
-    throw new VdeError('E_STATE_CORRUPT', `${fileName} の参照が整合しません。`, {
+    throw new VdeError('E_STATE_CORRUPT', `${fileName} has inconsistent references.`, {
       file: fileName,
       problem,
     });
@@ -135,15 +135,15 @@ export class StateStore {
     if (current) {
       decoded = decodeStateFile(current, STATE_FILE);
     } else if ((await fs.size(join(root, PREVIOUS_FILE))) !== null) {
-      // state.jsonだけが消えている。勝手に過去へ戻さず、doctorでの明示repairに任せる。
+      // Only state.json is missing. Do not roll back on our own; leave it to an explicit repair in doctor.
       throw new VdeError(
         'E_STATE_CORRUPT',
-        `${STATE_FILE} がなく、${PREVIOUS_FILE} だけが残っています。`,
+        `${STATE_FILE} is missing and only ${PREVIOUS_FILE} remains.`,
         { file: STATE_FILE },
       );
     }
 
-    // 中断したcommitの一時fileを片付ける。確定済みのfileには触れない。
+    // Clean up temporary files from interrupted commits. Committed files are untouched.
     for (const name of await fs.list(root)) {
       if (name.startsWith(TEMP_PREFIX)) await fs.remove(join(root, name));
     }
@@ -160,7 +160,7 @@ export class StateStore {
     if (decoded) {
       for (const blob of referencedBlobs(decoded.payload)) {
         if (!blobSizes.has(blob)) {
-          throw new VdeError('E_STATE_CORRUPT', 'stateが参照するblobがありません。', {
+          throw new VdeError('E_STATE_CORRUPT', 'A blob referenced by the state is missing.', {
             file: STATE_FILE,
             blob,
           });
@@ -186,7 +186,7 @@ export class StateStore {
     this.#fatalListeners.add(listener);
   }
 
-  // 状態変更は必ずここを通し、1件ずつcommitする（仕様7.2）。
+  // Every state change goes through here and is committed one at a time (spec 7.2).
   transaction<T>(mutate: (tx: Transaction) => T | Promise<T>): Promise<T> {
     const result = this.#queue.then(() => this.#run(mutate));
     this.#queue = result.catch(() => undefined);
@@ -195,12 +195,12 @@ export class StateStore {
 
   async readBlob(blob: string): Promise<Buffer> {
     const bytes = await this.#fs.readFile(join(this.root, BLOB_DIR, blob));
-    if (!bytes) throw new VdeError('E_IO', '保存済みの内容を読めません。', { blob });
+    if (!bytes) throw new VdeError('E_IO', 'The stored content cannot be read.', { blob });
     return bytes;
   }
 
-  // 新しい変更を受け付けず、進行中のcommitが終わるのを待つ。
-  // daemonは、これが終わってからlockを解放する。
+  // Stop accepting new changes and wait for the in-progress commit to finish.
+  // The daemon releases the lock only after this finishes.
   async close(): Promise<void> {
     this.#closed = true;
     await this.#queue;
@@ -208,17 +208,17 @@ export class StateStore {
 
   #assertWritable(): void {
     if (this.#fatal) {
-      throw new VdeError('E_DAEMON_STOPPING', 'daemonは書込みを停止しています。', {
+      throw new VdeError('E_DAEMON_STOPPING', 'The daemon has stopped writing.', {
         cause: this.#fatal.code,
       });
     }
-    if (this.#closed) throw new VdeError('E_DAEMON_STOPPING', 'daemonは停止処理中です。');
+    if (this.#closed) throw new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.');
   }
 
-  // 現stateと直前のstateのどちらからも参照されないblobを消す。
+  // Delete blobs referenced by neither the current state nor the previous one.
   async collectGarbage(): Promise<number> {
     return this.transactionless(async () => {
-      // 保存結果を保証できない状態では、memoryのstateを根拠にblobを消さない。
+      // When the save outcome cannot be guaranteed, do not delete blobs based on the in-memory state.
       this.#assertWritable();
       const keep = referencedBlobs(this.#payload);
       const previous = await this.#fs.readFile(join(this.root, PREVIOUS_FILE));
@@ -228,7 +228,7 @@ export class StateStore {
             keep.add(blob);
           }
         } catch {
-          // 直前のstateを読めないときは、何が必要か判断できないので消さない。
+          // If the previous state cannot be read, we cannot tell what is needed, so delete nothing.
           return 0;
         }
       }
@@ -268,9 +268,9 @@ export class StateStore {
   }
 
   async #commit(next: StatePayload, pendingBlobs: Map<string, Uint8Array>): Promise<void> {
-    // 手順1: 次stateのschema・参照・容量を検証する。
+    // Step 1: validate the next state's schema, references, and size.
     const problem = findIntegrityProblem(next);
-    if (problem) throw new VdeError('E_INTERNAL', '次のstateが整合しません。', { problem });
+    if (problem) throw new VdeError('E_INTERNAL', 'The next state is inconsistent.', { problem });
     const needed = referencedBlobs(next);
     let blobBytes = 0;
     for (const size of this.#blobSizes.values()) blobBytes += size;
@@ -279,11 +279,11 @@ export class StateStore {
     }
     for (const blob of needed) {
       if (!this.#blobSizes.has(blob) && !pendingBlobs.has(blob)) {
-        throw new VdeError('E_INTERNAL', '次のstateが未保存のblobを参照しています。', { blob });
+        throw new VdeError('E_INTERNAL', 'The next state references an unsaved blob.', { blob });
       }
     }
     if (blobBytes > this.#blobStoreBytes) {
-      throw new VdeError('E_LIMIT_EXCEEDED', '保存できる内容の合計上限を超えます。', {
+      throw new VdeError('E_LIMIT_EXCEEDED', 'The total stored content would exceed the limit.', {
         limit: 'blobStoreBytes',
         max: this.#blobStoreBytes,
         actual: blobBytes,
@@ -292,7 +292,7 @@ export class StateStore {
     const storeVersion = this.#storeVersion + 1;
     const encoded = encodeStateFile(storeVersion, next);
     if (encoded.byteLength > LIMITS.metadataStateBytes) {
-      throw new VdeError('E_LIMIT_EXCEEDED', 'stateの大きさが上限を超えます。', {
+      throw new VdeError('E_LIMIT_EXCEEDED', 'The state size would exceed the limit.', {
         limit: 'metadataStateBytes',
         max: LIMITS.metadataStateBytes,
         actual: encoded.byteLength,
@@ -302,7 +302,7 @@ export class StateStore {
     const statePath = join(this.root, STATE_FILE);
     const writtenBlobs: Array<[string, number]> = [];
     try {
-      // 手順2: 新しいblobを一時fileへ書き、内容を確かめてからrenameする。
+      // Step 2: write new blobs to temporary files, verify their contents, then rename.
       for (const [blob, bytes] of pendingBlobs) {
         if (!needed.has(blob)) continue;
         const temp = join(this.root, BLOB_DIR, `${TEMP_PREFIX}${blob}-${randomUUID()}`);
@@ -310,29 +310,29 @@ export class StateStore {
         const written = await this.#fs.readFile(temp);
         if (!written || sha256(written) !== blob) {
           await this.#fs.remove(temp);
-          throw new Error(`blobの内容が一致しません: ${blob}`);
+          throw new Error(`Blob content does not match: ${blob}`);
         }
         await this.#fs.rename(temp, join(this.root, BLOB_DIR, blob));
         writtenBlobs.push([blob, bytes.byteLength]);
       }
       if (writtenBlobs.length > 0) await this.#fs.syncDirectory(join(this.root, BLOB_DIR));
 
-      // 手順3: 直前のstateをstate.prev.jsonへ置く。
+      // Step 3: place the previous state at state.prev.json.
       if (this.#persisted) {
         const current = await this.#fs.readFile(statePath);
-        if (!current) throw new Error(`${STATE_FILE} が消えています`);
+        if (!current) throw new Error(`${STATE_FILE} has disappeared.`);
         const tempPrevious = join(this.root, `${TEMP_PREFIX}prev-${randomUUID()}`);
         await this.#fs.writeFileDurable(tempPrevious, current, FILE_MODE);
         await this.#fs.rename(tempPrevious, join(this.root, PREVIOUS_FILE));
       }
     } catch (error) {
-      // blobの取り残しは後のGCで回収できる。state.jsonは変わっていない。
+      // Leftover blobs can be collected by a later GC. state.json is unchanged.
       for (const [blob, size] of writtenBlobs) this.#blobSizes.set(blob, size);
       throw this.#writeFailure(error);
     }
     for (const [blob, size] of writtenBlobs) this.#blobSizes.set(blob, size);
 
-    // 手順4: 次stateを一時fileへ書き、state.jsonへatomic replaceする。
+    // Step 4: write the next state to a temporary file and atomically replace state.json.
     const tempState = join(this.root, `${TEMP_PREFIX}state-${randomUUID()}`);
     try {
       await this.#fs.writeFileDurable(tempState, encoded, FILE_MODE);
@@ -343,7 +343,7 @@ export class StateStore {
     try {
       await this.#fs.rename(tempState, statePath);
     } catch (error) {
-      // renameが失敗を返しても、置換が起きたかどうかはfileを読んで判定する。
+      // Even if rename reports failure, read the file to decide whether the replace happened.
       const replaced = await this.#replaceHappened(statePath, encoded);
       if (replaced === false) {
         await this.#fs.remove(tempState).catch(() => undefined);
@@ -352,14 +352,14 @@ export class StateStore {
       throw this.#indeterminate(error);
     }
 
-    // 手順5: directoryをsyncする。ここから先の失敗は結果を保証できない。
+    // Step 5: sync the directory. From here on, a failure means the outcome cannot be guaranteed.
     try {
       await this.#fs.syncDirectory(this.root);
     } catch (error) {
       throw this.#indeterminate(error);
     }
 
-    // 手順6: 成功後にだけmemoryのstateを切り替える。
+    // Step 6: switch the in-memory state only after success.
     this.#payload = next;
     this.#storeVersion = storeVersion;
     this.#persisted = true;
@@ -379,17 +379,17 @@ export class StateStore {
     if (error instanceof VdeError) return error;
     return new VdeError(
       'E_STORAGE_WRITE_FAILED',
-      '状態を保存できませんでした。変更は反映されていません。',
+      'The state could not be saved. The change was not applied.',
       { reason: (error as NodeJS.ErrnoException).code ?? 'unknown' },
       { cause: error },
     );
   }
 
-  // replace後の失敗。memoryを新旧どちらかへ決め打ちせず、以後の書込みを止める（仕様7.2）。
+  // A failure after the replace. Do not commit memory to either the old or the new state; stop further writes (spec 7.2).
   #indeterminate(error: unknown): VdeError {
     const fatal = new VdeError(
       'E_COMMIT_INDETERMINATE',
-      '状態を保存した結果を保証できません。daemonを終了します。再実行してください。',
+      'The outcome of saving the state cannot be guaranteed. The daemon will exit. Please retry.',
       { reason: (error as NodeJS.ErrnoException).code ?? 'unknown' },
       { cause: error },
     );

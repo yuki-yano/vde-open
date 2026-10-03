@@ -1,4 +1,4 @@
-// CLIとWeb UIをビルドし、Web UIを配布packageのdist/webへ置く。
+// Build the CLI and the Web UI, and place the Web UI under dist/web of the distributed package.
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -13,11 +13,11 @@ import {
 
 const cliDist = join(cliDir, 'dist');
 
-// tsdownのcleanがdist/webを消すので、必ずWebのcopyより先に実行する。
+// tsdown's clean removes dist/web, so always run it before copying the Web UI.
 runNodeBin(cliDir, 'tsdown', [], { cwd: cliDir });
 runNodeBin(webDir, 'vite', ['build'], { cwd: webDir });
 
-// bundleに入れたmoduleの一覧（中間file）を読み、配布物からは消す。
+// Read the list of bundled modules (an intermediate file) and remove it from the distribution.
 const MODULE_LIST = 'bundled-modules.json';
 const takeModules = (path: string): string[] => {
   const ids = JSON.parse(readFileSync(path, 'utf8')) as string[];
@@ -31,8 +31,8 @@ const webTarget = join(cliDist, 'web');
 rmSync(webTarget, { recursive: true, force: true });
 cpSync(join(webDir, 'dist'), webTarget, { recursive: true });
 
-// 依存のlicense notice。CSSの`@import`（Tailwind CSSが処理する）で入るpackageは、
-// bundleのmoduleとして現れないので、名前で加える（apps/web/src/index.css）。
+// License notices of dependencies. Packages pulled in by CSS `@import` (processed by Tailwind CSS)
+// do not appear as bundled modules, so add them by name (apps/web/src/index.css).
 const CSS_PACKAGES = ['tailwindcss', 'tw-animate-css', 'shadcn', '@fontsource-variable/geist'];
 const webRoots = [join(webDir, 'node_modules')];
 const packageDirs = new Map([
@@ -48,16 +48,19 @@ writeFileSync(
   renderNotices([...packageDirs.keys()].map((dir) => readPackage(dir))),
 );
 
-// 配布packageのfilesに含める文書。まだ無いものはcopyしない。
-const packagedDocs: Array<[source: string, target: string]> = [
+// Documents, the license, and the agent skill included in the distributed package's files.
+// Skip the ones that do not exist yet.
+const packagedFiles: Array<[source: string, target: string]> = [
   [join(repoRoot, 'README.md'), join(cliDir, 'README.md')],
+  [join(repoRoot, 'LICENSE'), join(cliDir, 'LICENSE')],
   [join(repoRoot, 'docs', 'agent-usage.md'), join(cliDir, 'docs', 'agent-usage.md')],
+  [join(repoRoot, 'skills'), join(cliDir, 'skills')],
 ];
-for (const [source, target] of packagedDocs) {
-  rmSync(target, { force: true });
+for (const [source, target] of packagedFiles) {
+  rmSync(target, { recursive: true, force: true });
   if (!existsSync(source)) continue;
   mkdirSync(dirname(target), { recursive: true });
-  cpSync(source, target);
+  cpSync(source, target, { recursive: true });
 }
 
 console.log(`build: ${cliDist}`);

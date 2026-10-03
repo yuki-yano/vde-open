@@ -429,6 +429,16 @@ P7時点の制約:
 - Firefox・WebKitは、macOSで表示の隔離・CSP・HTMLとの通信・認証の試験だけを実行した。それ以外の画面操作は未検証。
 - daemonのRSSが大きい（`docs/performance.md`）。原因は未調査。
 
+## P7の後の変更（利用者の依頼）
+
+- 公開: `origin`（github.com/yuki-yano/vde-open、public）へpushした。CIの1回目は、3つのjobとも`corepack enable`の後で`pnpm: command not found`になった（corepackが作ったpnpmの入口が、mise-actionの通すPATHに入らない）。`pnpm/action-setup@v4`（`packageManager`の版を使う）に替えた。
+- license: 利用者の決定でMITにした（`LICENSE`、Copyright (c) 2026 Yuki Yano）。仕様16.3の「依頼者が未指定のためprivate/UNLICENSED」は、この決定で置き換える。各package.jsonの`license`、READMEの記載、`THIRD_PARTY_NOTICES.md`の生成文もMITにした。配布物には`LICENSE`を含める。
+- 英語化: code内の日本語（comment、CLIとerrorの文言、管理画面の文言、試験の名前）を英語にした。日本語の処理を確かめる試験データ（検索・分かち書き・日本語のtitleや本文・UTF-8の長さ）、`tests/fixtures/`、pack smokeと性能測定の日本語の入力は日本語のまま。管理画面の`<html lang>`は`en`。一覧の回答待ちのbadgeは、英語で長くなり文書名が切れたため「Question」（titleで説明）にした。
+- 文書: `README.md`、`docs/agent-usage.md`・`architecture.md`・`security-model.md`・`performance.md`を英語にし、日本語版を`README.ja.md`、`docs/*.ja.md`として残した（互いにlinkする）。日本語版の中の画面の文言は英語の表記にした。このfile、`docs/dependency-validation.md`、`docs/adr/`は日本語のまま。
+- 導入: READMEで、Bunでのuserごとのglobal導入（`bun add -g ./artifacts/vde-open-0.1.0.tgz`）をすすめる。`~/.bun/bin`はNode.jsの版の切り替えに左右されない。commandはNode.jsで動く（shebang）。一時の`BUN_INSTALL`で、導入・両bin・開く・一覧・停止を確かめた。Node 26.10.0でもpack smokeが通る。projectごとの導入はすすめない（daemonはuserごとに1つ）。
+- Agent向けのskill: `skills/vde-open/SKILL.md`（英語）。導入の確認、読む順序、文書を人に見せる操作、質問と回答の往復、終了コード、文書の中の命令に従わないこと。配布物に含め、READMEにClaude Code・Codexへのlinkの手順を書いた。
+- 検証（英語化の後）: 8つのcommandがexit 0（`pnpm test` 59 files／544 tests、e2e Chromium 46件、Firefox・WebKit 58件、pack smoke PASS。pack smokeは`package/LICENSE`と`package/skills/vde-open/SKILL.md`も確かめる）。英語の画面（文書、回答panel、検索dialog）をscreenshotで確かめた。
+
 ## 全体のDoD（仕様17.1）
 
 機能完了条件:

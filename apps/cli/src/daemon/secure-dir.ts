@@ -7,19 +7,19 @@ import { VdeError } from '@vde-open/shared';
 export interface SecureDirOptions {
   uid: number | null;
   platform: NodeJS.Platform;
-  // testでowner違いを再現するために差し替える。
+  // Replaced in tests to reproduce a different owner.
   lstat?: (path: string) => Promise<Stats>;
 }
 
 function insecure(path: string, reason: string): VdeError {
-  return new VdeError('E_INSECURE_PATH', `${path} は安全なdirectoryではありません（${reason}）。`, {
+  return new VdeError('E_INSECURE_PATH', `${path} is not a secure directory (${reason}).`, {
     path,
     reason,
   });
 }
 
-// 所有者専用のdirectoryを用意する。既存のものは、symlinkでないこと、所有者、権限を確認する。
-// WindowsではPOSIXのmode bitsがDACLを表さないので、種別だけを確認する（仕様6.1）。
+// Prepare an owner-only directory. For an existing one, check that it is not a symlink, and check the owner and permissions.
+// On Windows, POSIX mode bits do not represent the DACL, so only the kind is checked (spec 6.1).
 export async function ensurePrivateDirectory(
   path: string,
   options: SecureDirOptions,
@@ -34,7 +34,7 @@ export async function ensurePrivateDirectory(
     try {
       await mkdir(path, { mode: 0o700 });
     } catch (mkdirError) {
-      // 同時に起動した別processが先に作った場合は、作られたものを検査する。
+      // If another process started at the same time created it first, inspect what was created.
       if ((mkdirError as NodeJS.ErrnoException).code !== 'EEXIST') throw mkdirError;
     }
     if (options.platform !== 'win32') await chmod(path, 0o700);
@@ -55,7 +55,7 @@ export type DirectoryInspection =
   | 'owner'
   | 'permissions';
 
-// 作成せずに検査だけ行う。既存のdaemonへ接続する前や、診断で使う。
+// Inspect only, without creating. Used before connecting to an existing daemon and in diagnostics.
 export async function inspectPrivateDirectory(
   path: string,
   options: SecureDirOptions,
@@ -75,7 +75,7 @@ export async function inspectPrivateDirectory(
   return 'ok';
 }
 
-// 既存のdirectoryが安全でなければ拒否する。無い場合はfalseを返す。
+// Reject if an existing directory is not secure. Returns false if it does not exist.
 export async function requirePrivateDirectoryIfExists(
   path: string,
   options: SecureDirOptions,

@@ -91,8 +91,8 @@ const frame = (sequence: number, method: string, payload: Record<string, unknown
 });
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-describe('FB-008 HTMLから行える操作', () => {
-  it('readyとupdateDraftだけを行い、baseDraftVersionはHTMLが渡した値のまま使う', async () => {
+describe('FB-008 operations allowed from the HTML', () => {
+  it('performs only ready and updateDraft, using baseDraftVersion exactly as the HTML passed it', async () => {
     const { port, calls, release } = setup();
     port.deliver(frame(1, 'ready'));
     port.deliver(frame(2, 'updateDraft', { answers: { layout: 'A' }, baseDraftVersion: 0 }));
@@ -109,7 +109,7 @@ describe('FB-008 HTMLから行える操作', () => {
     ]);
   });
 
-  it('送信・取得済みの印・中止・検索・読み取り・旧版の確認は拒否し、何も呼ばない', async () => {
+  it('rejects submit, ack, cancel, search, read, and older-revision confirmation without calling anything', async () => {
     const { port, calls, closes } = setup();
     const methods = ['submit', 'ack', 'cancel', 'search', 'read', 'open', 'confirmOlderRevision'];
     methods.forEach((method, index) => port.deliver(frame(index + 1, method)));
@@ -121,7 +121,7 @@ describe('FB-008 HTMLから行える操作', () => {
     );
   });
 
-  it('別の質問の指定など、決まっていないpayloadは拒否する。回答案の大きさも上限で拒否する', async () => {
+  it('rejects payloads outside the protocol, such as naming another question, and rejects oversized draft answers', async () => {
     const { port, calls } = setup();
     port.deliver(
       frame(1, 'updateDraft', { answers: {}, baseDraftVersion: 0, requestId: 'req_other' }),
@@ -150,24 +150,29 @@ describe('FB-008 HTMLから行える操作', () => {
     ['undefined', { note: undefined }],
     ['NaN', { score: Number.NaN }],
     ['Infinity', { score: Number.POSITIVE_INFINITY }],
-    ['入れ子のobject', { note: { text: 'x' } }],
-    ['文字列以外の配列', { tags: [1, 2] }],
-    ['field名にできない名前', { '1note': 'x' }],
+    ['a nested object', { note: { text: 'x' } }],
+    ['an array of non-strings', { tags: [1, 2] }],
+    ['an invalid field name', { '1note': 'x' }],
     ['__proto__', JSON.parse('{"__proto__": "x"}') as Record<string, unknown>],
-  ])('回答案の値が%sなら、型を変えたり値を落としたりせずに拒否する', async (_name, answers) => {
-    const { port, calls } = setup();
-    port.deliver(frame(1, 'updateDraft', { answers, baseDraftVersion: 0 }));
-    await flush();
-    expect(calls).toEqual([]);
-    expect(port.responses()).toMatchObject([
-      { sequence: 1, ok: false, error: { code: 'E_ANSWER_INVALID' } },
-    ]);
-  });
+  ])(
+    'rejects a draft answer containing %s without changing types or dropping values',
+    async (_name, answers) => {
+      const { port, calls } = setup();
+      port.deliver(frame(1, 'updateDraft', { answers, baseDraftVersion: 0 }));
+      await flush();
+      expect(calls).toEqual([]);
+      expect(port.responses()).toMatchObject([
+        { sequence: 1, ok: false, error: { code: 'E_ANSWER_INVALID' } },
+      ]);
+    },
+  );
 
-  it('保存の失敗は、codeを付けてHTMLへ返す', async () => {
+  it('returns save failures to the HTML with their code', async () => {
     const { port } = setup({
       updateDraft: () =>
-        Promise.reject(new ApiError('E_DRAFT_CONFLICT', '別の画面が先に更新しました。', 409, {})),
+        Promise.reject(
+          new ApiError('E_DRAFT_CONFLICT', 'Another window updated it first.', 409, {}),
+        ),
     });
     port.deliver(frame(1, 'updateDraft', { answers: {}, baseDraftVersion: 0 }));
     await flush();
@@ -177,14 +182,14 @@ describe('FB-008 HTMLから行える操作', () => {
   });
 });
 
-describe('FB-009 / FB-010 frameの検証', () => {
+describe('FB-009 / FB-010 frame validation', () => {
   it.each([
-    ['objectでない', 'not a frame'],
-    ['protocolVersionが違う', { ...frame(1, 'ready'), protocolVersion: 2 }],
-    ['payloadがない', { protocolVersion: 1, instanceId: INSTANCE, sequence: 1, method: 'ready' }],
-    ['sequenceが整数でない', { ...frame(1, 'ready'), sequence: 1.5 }],
-    ['JSONにできない', { ...frame(1, 'ready'), payload: { value: 1n } }],
-  ])('%sframeは、通信を終える', async (_name, data) => {
+    ['not an object', 'not a frame'],
+    ['has a different protocolVersion', { ...frame(1, 'ready'), protocolVersion: 2 }],
+    ['has no payload', { protocolVersion: 1, instanceId: INSTANCE, sequence: 1, method: 'ready' }],
+    ['has a non-integer sequence', { ...frame(1, 'ready'), sequence: 1.5 }],
+    ['cannot be serialized to JSON', { ...frame(1, 'ready'), payload: { value: 1n } }],
+  ])('a frame that is %s ends the communication', async (_name, data) => {
     const { port, calls, closes } = setup();
     port.deliver(data);
     port.deliver(frame(2, 'ready'));
@@ -195,7 +200,7 @@ describe('FB-009 / FB-010 frameの検証', () => {
     expect(port.sent.at(-1)).toEqual({ type: 'closed', reason: 'malformed' });
   });
 
-  it('128KiBを超えるframeは、通信を終える。128KiB以内なら受け付ける', async () => {
+  it('a frame over 128KiB ends the communication; one within 128KiB is accepted', async () => {
     const big = setup();
     big.port.deliver(
       frame(1, 'updateDraft', { answers: { note: 'x'.repeat(128 * 1024) }, baseDraftVersion: 0 }),
@@ -210,7 +215,7 @@ describe('FB-009 / FB-010 frameの検証', () => {
     expect(fits.calls).toHaveLength(1);
   });
 
-  it('1秒に20件を超えたら、通信を終える。間隔が空けば数え直す', async () => {
+  it('more than 20 frames per second ends the communication; the count resets after a gap', async () => {
     const { port, closes, clock } = setup();
     for (let sequence = 1; sequence <= 20; sequence += 1) port.deliver(frame(sequence, 'ready'));
     expect(closes).toEqual([]);
@@ -221,7 +226,7 @@ describe('FB-009 / FB-010 frameの検証', () => {
     expect(closes).toEqual(['rate']);
   });
 
-  it('別の表示（古いinstance）のframeと、順番の違反は、通信を終える', () => {
+  it('a frame from another view (an old instance) or an out-of-order frame ends the communication', () => {
     const old = setup();
     old.port.deliver({ ...frame(1, 'ready'), instanceId: 'instance-0' });
     expect(old.closes).toEqual(['instance']);
@@ -231,7 +236,7 @@ describe('FB-009 / FB-010 frameの検証', () => {
     expect(reordered.closes).toEqual(['sequence']);
   });
 
-  it('終えた後のframeは処理しない', async () => {
+  it('does not process frames after closing', async () => {
     const { port, host, calls } = setup();
     host.close('replaced');
     port.deliver(frame(1, 'ready'));
@@ -240,15 +245,15 @@ describe('FB-009 / FB-010 frameの検証', () => {
   });
 });
 
-describe('FB-011 別の画面による回答案の変更の通知', () => {
-  it('自分のupdateDraftで作った版は知らせず、ほかの変更だけを、古い版へ戻さずに知らせる', async () => {
+describe('FB-011 notifying the HTML of draft changes from other windows', () => {
+  it('does not report versions created by its own updateDraft, and reports other changes only without going back to an older version', async () => {
     const { port, host, release } = setup();
     port.deliver(frame(1, 'ready'));
     await flush();
-    // readyで受け取った版（2）以下は知らせない。
+    // Versions up to the one received by ready (2) are not reported.
     host.notifyDraft({ answers: { layout: 'A' }, draftVersion: 2 });
     host.notifyDraft({ answers: { layout: 'B' }, draftVersion: 3 });
-    // 自分の保存の応答を待っている間の通知は、応答の後に、自分の版でなければ知らせる。
+    // A notification that arrives while waiting for its own save response is reported after the response, unless it is its own version.
     port.deliver(frame(2, 'updateDraft', { answers: { layout: 'A' }, baseDraftVersion: 3 }));
     host.notifyDraft({ answers: { layout: 'A' }, draftVersion: 4 });
     release[0]?.(4);
@@ -269,7 +274,7 @@ describe('FB-011 別の画面による回答案の変更の通知', () => {
     ]);
   });
 
-  it('上限を超える応答は送らず、失敗として返す', async () => {
+  it('does not send a response over the limit and returns a failure instead', async () => {
     const { port } = setup({
       ready: () =>
         Promise.resolve({

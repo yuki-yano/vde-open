@@ -1,5 +1,5 @@
-// HTML文書を表示する形へ変換する（仕様10.4）。staticはscriptなし、interactiveは登録済みのscriptだけを残す。
-// parse5の構文木を書き換えて出力する。HTMLの文字列への正規表現の置換はしない。
+// Transform an HTML document into its viewable form (spec 10.4). static has no scripts; interactive keeps only registered scripts.
+// Rewrites the parse5 syntax tree and serializes it. No regex replacement on the HTML string.
 import { parse, serialize, type DefaultTreeAdapterMap } from 'parse5';
 
 import { ParseLimitError, PARSER_LIMITS } from './analysis.ts';
@@ -45,13 +45,13 @@ export interface ScannedReference {
 
 export interface StaticHtmlInput {
   source: string;
-  // 文書の位置（assets-rootからの相対path）。相対参照を解決する基準になる。
+  // Location of the document (relative to the assets-root). Base for resolving relative references.
   documentLogicalPath: string;
-  // 配信できるassetのlogical pathと種別。
+  // Logical paths and roles of the assets that can be served.
   assets: ReadonlyMap<string, AssetRole>;
-  // interactive: 文書のscriptとevent handlerを残す（登録済みのscript fileだけを読み込む）。既定はstatic。
+  // interactive: keep the document's scripts and event handlers (loading only registered script files). Default is static.
   interactive?: boolean;
-  // 最初のscriptとして入れる、HTMLと本体の間の通信のSDK（interactiveのときだけ）。
+  // SDK for communication between the HTML and the host, inserted as the first script (interactive only).
   sdkScript?: string;
 }
 
@@ -61,7 +61,7 @@ export interface StaticHtmlResult {
   diagnostics: StaticDiagnostic[];
 }
 
-// 子孫ごと取り除く要素と、その理由。
+// Elements removed with their descendants, and the reason.
 const REMOVED_ELEMENTS: Record<string, string> = {
   script: 'script-removed',
   iframe: 'embed-removed',
@@ -77,7 +77,7 @@ const REMOVED_ELEMENTS: Record<string, string> = {
   noframes: 'element-removed',
 };
 
-// 要素にかかわらず取り除く属性。遷移、送信、外部への要求、権限の変更につながるもの。
+// Attributes removed on any element. They lead to navigation, submission, external requests or permission changes.
 const REMOVED_ATTRIBUTES = new Set([
   'srcdoc',
   'ping',
@@ -123,11 +123,11 @@ const MAX_DIAGNOSTICS = 500;
 const MAX_TARGET_LENGTH = 200;
 const MAX_LINK_TEXT = 120;
 
-// 走査の方針。変換と、参照の収集で共有する。
+// Traversal policy. Shared by the transform and the reference scan.
 interface Policy {
-  // scriptとevent handlerを残すか（interactive）。
+  // Whether to keep scripts and event handlers (interactive).
   interactive: boolean;
-  // 参照を残すなら出力するURL、取り除くならnull。
+  // The URL to output when the reference is kept, or null to remove it.
   asset(url: string, context: ReferenceContext): string | null;
   link(href: string, text: string): void;
   note(code: string, target: string | null): void;
@@ -149,7 +149,7 @@ function collapse(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-// 要素の中の文字を集める。入れ子が深くても再帰しない。
+// Collect the text inside an element. No recursion, however deep the nesting.
 function textOf(root: HtmlNode): string {
   let text = '';
   const stack: HtmlNode[] = [root];
@@ -172,7 +172,7 @@ function rewriteCss(source: string, kind: CssKind, policy: Policy): string {
   return result.css;
 }
 
-// srcsetの各候補を調べ、残せるものだけを返す。
+// Inspect each srcset candidate and return only the ones that can be kept.
 function rewriteSrcset(value: string, policy: Policy): string {
   const kept: string[] = [];
   for (const candidate of value.split(',')) {
@@ -187,7 +187,7 @@ function rewriteSrcset(value: string, policy: Policy): string {
   return kept.join(', ');
 }
 
-// 要素の属性を調べる。要素ごと取り除くならfalse。
+// Inspect the element's attributes. Returns false when the whole element is removed.
 function rewriteElement(element: HtmlElement, policy: Policy): boolean {
   const tag = element.tagName;
 
@@ -215,8 +215,8 @@ function rewriteElement(element: HtmlElement, policy: Policy): boolean {
     );
   }
 
-  // scriptが参照するfileは、staticの表示では使わないが、文書の版には含める。
-  // interactiveでは、登録済みのfileだけを読み込む。読み込めないscriptは要素ごと外す。
+  // Files referenced by scripts are not used in the static view but are included in the document revision.
+  // In interactive, only registered files are loaded. A script that cannot be loaded is removed as a whole.
   if (tag === 'script') {
     const src = getAttribute(element, 'src');
     if (src !== undefined) {
@@ -254,7 +254,7 @@ function rewriteElement(element: HtmlElement, policy: Policy): boolean {
     if (name === 'href') {
       if (tag === 'link') kept.push(attribute);
       else if (isAnchor) {
-        // 文書内の移動だけを残す。それ以外のlinkは無効にして、本体の一覧から開けるようにする。
+        // Keep only in-document navigation. Other links are disabled and made openable from the host's list.
         if (classifyLink(attribute.value).kind === 'fragment') kept.push(attribute);
         else policy.link(attribute.value, textOf(element));
       }
@@ -295,7 +295,7 @@ function rewriteElement(element: HtmlElement, policy: Policy): boolean {
   return true;
 }
 
-// 構文木を走査し、取り除く要素を外す。入れ子が深くても再帰しない。
+// Walk the syntax tree and remove the elements to drop. No recursion, however deep the nesting.
 function rewriteTree(root: HtmlParent, policy: Policy): void {
   let visited = 0;
   const stack: HtmlParent[] = [root];
@@ -313,7 +313,7 @@ function rewriteTree(root: HtmlParent, policy: Policy): void {
         continue;
       }
       if (child.namespaceURI !== HTML_NAMESPACE) {
-        // 文書に埋め込まれたSVGとMathMLは、scriptや外部参照を持てるので取り除く。
+        // Inline SVG and MathML can carry scripts and external references, so they are removed.
         policy.note(
           child.namespaceURI === SVG_NAMESPACE ? 'inline-svg-removed' : 'mathml-removed',
           null,
@@ -332,8 +332,8 @@ function rewriteTree(root: HtmlParent, policy: Policy): void {
         continue;
       }
       if (child.tagName === 'noscript') {
-        // staticではscriptが動かないので、noscriptの中身をそのまま表示する。要素を外して中身を残す。
-        // interactiveではscriptが動くので、noscriptの中身は表示されない。要素ごと外す。
+        // In static, scripts do not run, so the contents of noscript are shown as is. The element is removed and its contents kept.
+        // In interactive, scripts run, so the contents of noscript are not shown. The whole element is removed.
         if (policy.interactive) policy.note('noscript-removed', null);
         else pending.splice(index + 1, 0, ...child.childNodes);
         continue;
@@ -362,8 +362,8 @@ function textOfStyle(element: HtmlElement): string {
   return text;
 }
 
-// 変換後の出力をもう一度解析し、実行や遷移につながる要素・属性が残っていないことを確かめる。
-// interactiveでは、scriptとevent handlerだけを許す。
+// Parse the transformed output again and check that no element or attribute leading to execution or navigation remains.
+// In interactive, only scripts and event handlers are allowed.
 function assertOutput(html: string, interactive: boolean): void {
   const stack: HtmlNode[] = [parse(html, { scriptingEnabled: false })];
   while (stack.length > 0) {
@@ -386,7 +386,7 @@ function assertOutput(html: string, interactive: boolean): void {
   }
 }
 
-// 元の文書と表示が異なる理由を、種類と対象ごとに数える。
+// Count why the view differs from the original document, by kind and target.
 export class DiagnosticLog {
   readonly #entries = new Map<string, StaticDiagnostic>();
 
@@ -404,8 +404,8 @@ export class DiagnosticLog {
   }
 }
 
-// 参照を、表示へ残せるURLへ直す。残せない参照はnullにして、理由を記録する。
-// baseDirは、参照を含むfile（文書、またはCSS）のdirectory。
+// Resolve a reference into a URL that can stay in the view. A reference that cannot stay becomes null, and the reason is recorded.
+// baseDir is the directory of the file (document or CSS) that contains the reference.
 export function resolveAssetUrl(
   url: string,
   context: ReferenceContext,
@@ -417,7 +417,7 @@ export function resolveAssetUrl(
   const shown = url.slice(0, MAX_TARGET_LENGTH);
   const reference = classifyReference(url, baseDir);
   if (reference.kind === 'fragment') {
-    // CSSの`url(#id)`は文書内の参照。HTMLの属性では、文書自身を読み込むことになるので外す。
+    // In CSS, `url(#id)` is an in-document reference. In an HTML attribute it would load the document itself, so it is removed.
     return context === 'css-url' ? url : null;
   }
   if (reference.kind === 'data') {
@@ -446,7 +446,7 @@ export function resolveAssetUrl(
     log.note('asset-unsupported', reference.logicalPath);
     return null;
   }
-  // staticの表示ではscriptを使わない（要素ごと取り除く）。
+  // The static view uses no scripts (the whole element is removed).
   if (context === 'script' && options.scripts !== true) return null;
   return `${relativeUrlTo(baseDir, reference.logicalPath)}${reference.suffix}`;
 }
@@ -477,8 +477,8 @@ export function transformStaticHtml(
     },
   };
 
-  // noscriptの中身を通常の要素として解析する。既定の設定では中身が文字として素通りし、
-  // 取り除く対象から漏れる（interactiveでは、noscriptは要素ごと外す）。
+  // Parse the contents of noscript as ordinary elements. With the default setting the contents pass through as text
+  // and escape removal (in interactive, the whole noscript element is removed).
   const document = parse(input.source, { scriptingEnabled: false });
   rewriteTree(document, policy);
   if (interactive && input.sdkScript !== undefined) insertFirstScript(document, input.sdkScript);
@@ -487,7 +487,7 @@ export function transformStaticHtml(
   return { html, links, diagnostics: log.list() };
 }
 
-// headの最初の子として、scriptを入れる。文書のどのscriptよりも先に動く。
+// Insert the script as the first child of head. It runs before any script in the document.
 function insertFirstScript(document: HtmlParent, source: string): void {
   if (source.toLowerCase().includes('</script'))
     throw new Error('script text must not close itself');
@@ -511,7 +511,7 @@ function insertFirstScript(document: HtmlParent, source: string): void {
   head.childNodes.unshift(script);
 }
 
-// HTMLが参照するlocal fileの候補を集める。style要素とstyle属性の中の参照も含む。
+// Collect candidate local files the HTML references. Includes references inside style elements and style attributes.
 export function scanHtmlReferences(source: string): ScannedReference[] {
   const references: ScannedReference[] = [];
   const policy: Policy = {

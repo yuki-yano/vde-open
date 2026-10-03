@@ -1,5 +1,5 @@
-// 導入した版のHono、MiniSearch、Chokidar、tinyglobby、Node 24のIntl.Segmenterについて、
-// この製品が前提にするAPIと挙動を固定する。版を上げたらここで差分を検出する。
+// Pins the APIs and behavior this product relies on in the installed versions of Hono, MiniSearch,
+// Chokidar, tinyglobby, and Node 24's Intl.Segmenter. Upgrading a version surfaces differences here.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe('hono 4.13.12 + @hono/node-server 2.1.3', () => {
-  it('OSが割り当てたportで127.0.0.1だけにlistenし、SSEを返せる', async () => {
+  it('listens only on 127.0.0.1 on an OS-assigned port and can return SSE', async () => {
     const app = new Hono();
     app.get('/events', (c) =>
       streamSSE(c, async (stream) => {
@@ -48,7 +48,7 @@ describe('hono 4.13.12 + @hono/node-server 2.1.3', () => {
 });
 
 describe('minisearch 7.2.0', () => {
-  it('tokenizerを差し替え、field boostと文書の破棄ができる', () => {
+  it('supports a custom tokenizer, field boosts, and discarding documents', () => {
     const segmenter = new Intl.Segmenter('ja', { granularity: 'word' });
     const tokenize = (text: string) =>
       Array.from(segmenter.segment(text))
@@ -70,8 +70,8 @@ describe('minisearch 7.2.0', () => {
   });
 });
 
-describe('Node 24のIntl.Segmenter', () => {
-  it('日本語を語の単位に分割できる', () => {
+describe("Node 24's Intl.Segmenter", () => {
+  it('splits Japanese into words', () => {
     const segmenter = new Intl.Segmenter('ja', { granularity: 'word' });
     const words = Array.from(segmenter.segment('セッションの有効期限を更新する'))
       .filter((part) => part.isWordLike)
@@ -83,7 +83,7 @@ describe('Node 24のIntl.Segmenter', () => {
 });
 
 describe('tinyglobby 0.2.17', () => {
-  it('**で再帰列挙し、ignoreとdotfile除外が効く', async () => {
+  it('enumerates recursively with ** and honors ignore and dotfile exclusion', async () => {
     mkdirSync(join(workDir, 'docs', 'sub'), { recursive: true });
     mkdirSync(join(workDir, 'node_modules', 'x'), { recursive: true });
     writeFileSync(join(workDir, 'docs', 'a.md'), '# a\n');
@@ -102,11 +102,11 @@ describe('tinyglobby 0.2.17', () => {
   });
 });
 
-// 待機1回の期限。test全体の期限は、3回分の待機とwatcherの後始末が収まる長さにする。
+// Deadline for one wait. The whole test's deadline fits three waits plus the watcher cleanup.
 const EVENT_TIMEOUT_MS = 4000;
 const WATCH_TEST_TIMEOUT_MS = 20_000;
 
-// 期限とerrorで必ず決着させ、成否にかかわらずlistenerを外す。
+// Always settle on the deadline or an error, and remove the listeners either way.
 function waitForEvent(
   watcher: FSWatcher,
   eventName: 'ready' | 'add' | 'change',
@@ -121,7 +121,7 @@ function waitForEvent(
     };
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error(`${eventName} を期限内に検知できませんでした`));
+      reject(new Error(`${eventName} was not detected before the deadline`));
     }, EVENT_TIMEOUT_MS);
     const onAll = (event: string, path: string) => {
       if (event !== eventName || path !== targetPath) return;
@@ -143,8 +143,8 @@ function waitForEvent(
   });
 }
 
-// 監視を始めた直後の変更は、通知されないことがある（macOSで約35回に1回観測）。
-// 通知されるまで内容を変えて書き直し、後続の変更で検知できることを確かめる。
+// A change right after watching starts is sometimes not reported (observed about 1 in 35 times on macOS).
+// Rewrite the content until it is reported, then check that later changes are detected.
 async function writeUntilEvent(
   watcher: FSWatcher,
   eventName: 'add' | 'change',
@@ -167,7 +167,7 @@ async function writeUntilEvent(
 
 describe('chokidar 5.0.0', () => {
   it(
-    'directoryの監視で、fileの追加と変更を検知できる',
+    'detects added and changed files when watching a directory',
     { timeout: WATCH_TEST_TIMEOUT_MS },
     async () => {
       const target = join(workDir, 'a.md');
@@ -182,7 +182,7 @@ describe('chokidar 5.0.0', () => {
             watcher,
             'change',
             target,
-            (attempt) => `# a\n\n更新 ${String(attempt)}\n`,
+            (attempt) => `# a\n\nupdate ${String(attempt)}\n`,
           ),
         ).resolves.toBeUndefined();
       } finally {

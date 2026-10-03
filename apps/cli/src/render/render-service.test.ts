@@ -20,7 +20,7 @@ let store: StateStore;
 let documents: DocumentService;
 let render: RenderService;
 let sessionId: string;
-// 表示用の変換を、合図があるまで止める。
+// Hold the render until signalled.
 let holdRender: Promise<void> | null;
 let renderStarted: () => void;
 let renders: number;
@@ -66,12 +66,12 @@ function write(name: string, content: string): void {
 }
 
 async function openDocument(): Promise<string> {
-  write('site/index.html', '<p>本文</p>');
+  write('site/index.html', '<p>Body</p>');
   const opened = await documents.open({ cwd: base, paths: ['site/index.html'] });
   return opened.data.documents[0]?.documentId as string;
 }
 
-// 表示用の変換が始まったところで止める。戻り値を呼ぶと再開する。
+// Holds once the render starts. Calling the returned function resumes it.
 function pauseRender(): { started: Promise<void>; resume: () => void } {
   let resume: () => void = () => undefined;
   holdRender = new Promise<void>((resolve) => {
@@ -85,8 +85,8 @@ function pauseRender(): { started: Promise<void>; resume: () => void } {
 
 const GRANT_CONTEXT = { origin: 'http://127.0.0.1:1' };
 
-describe('SEC-015 表示の権限と、文書を閉じる操作の前後関係', () => {
-  it('変換を待つ間に文書が閉じられたら、権限を発行しない', async () => {
+describe('SEC-015 ordering of render grants and closing a document', () => {
+  it('does not issue a grant if the document is closed while rendering', async () => {
     const documentId = await openDocument();
     const paused = pauseRender();
     const issuing = render.createGrant(sessionId, { documentId }, GRANT_CONTEXT);
@@ -98,7 +98,7 @@ describe('SEC-015 表示の権限と、文書を閉じる操作の前後関係',
     expect(render.grantCount).toBe(0);
   });
 
-  it('変換を待つ間に閉じて開き直された場合、閉じる前に始めた発行は成立しない', async () => {
+  it('if closed and reopened while rendering, the issue started before the close does not take effect as is', async () => {
     const documentId = await openDocument();
     const paused = pauseRender();
     const issuing = render.createGrant(sessionId, { documentId }, GRANT_CONTEXT);
@@ -108,36 +108,36 @@ describe('SEC-015 表示の権限と、文書を閉じる操作の前後関係',
     await documents.open({ cwd: base, paths: ['site/index.html'] });
     holdRender = null;
     paused.resume();
-    // 開き直した後の文書に対して、開いていることを確かめ直してから発行する。
+    // Issues for the reopened document after re-checking that it is open.
     const grant = await issuing;
     expect(render.grantCount).toBe(1);
     expect(await render.resolve(grant.grant, 'index.html')).not.toBeNull();
 
-    // この権限は、開き直した後のものとして扱われる。次に閉じれば失効し、開き直しても戻らない。
+    // This grant belongs to the reopened document. The next close revokes it, and reopening does not bring it back.
     await documents.close({ cwd: base, targets: [documentId] });
     expect(await render.resolve(grant.grant, 'index.html')).toBeNull();
     await documents.open({ cwd: base, paths: ['site/index.html'] });
     expect(await render.resolve(grant.grant, 'index.html')).toBeNull();
   });
 
-  it('発行済みの権限は、閉じた時点の後始末を待たなくても、開き直した後に使えない', async () => {
+  it('an issued grant is unusable after reopen, even without waiting for the cleanup at close', async () => {
     const documentId = await openDocument();
     const grant = await render.createGrant(sessionId, { documentId }, GRANT_CONTEXT);
     expect(await render.resolve(grant.grant, 'index.html')).not.toBeNull();
 
-    // 後始末（pruneClosed）を呼ばないまま、閉じて開き直す。
+    // Close and reopen without calling the cleanup (pruneClosed).
     await documents.close({ cwd: base, targets: [documentId] });
     await documents.open({ cwd: base, paths: ['site/index.html'] });
     expect(await render.resolve(grant.grant, 'index.html')).toBeNull();
 
-    // 開き直した後に発行した権限は使える。
+    // A grant issued after the reopen is usable.
     const fresh = await render.createGrant(sessionId, { documentId }, GRANT_CONTEXT);
     expect(await render.resolve(fresh.grant, 'index.html')).not.toBeNull();
   });
 
-  it('同じ内容の文書が別の位置にあるとき、変換結果を取り違えない', async () => {
-    write('site/a.html', '<p>同じ</p>');
-    write('site/b.html', '<p>同じ</p>');
+  it('does not mix up render results of identical documents at different locations', async () => {
+    write('site/a.html', '<p>Same</p>');
+    write('site/b.html', '<p>Same</p>');
     const opened = await documents.open({ cwd: base, paths: ['site/a.html', 'site/b.html'] });
     const [a, b] = opened.data.documents.map((document) => document.documentId) as [string, string];
     const grantA = await render.createGrant(sessionId, { documentId: a }, GRANT_CONTEXT);
@@ -146,27 +146,27 @@ describe('SEC-015 表示の権限と、文書を閉じる操作の前後関係',
     expect([grantA.documentLogicalPath, grantB.documentLogicalPath]).toEqual(['a.html', 'b.html']);
     expect(await render.resolve(grantB.grant, 'a.html')).toBeNull();
     expect(await render.resolve(grantB.grant, 'b.html')).not.toBeNull();
-    // 同じ文書・同じ版の2回目は、変換し直さない。
+    // A second grant for the same document and revision does not render again.
     await render.createGrant(sessionId, { documentId: a }, GRANT_CONTEXT);
     expect(renders).toBe(2);
   });
 });
 
-describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
+describe('interactive view and communication with the HTML', () => {
   const questionnaire = JSON.stringify({
     schemaVersion: 1,
-    title: '確認',
+    title: 'Confirm',
     fieldOrder: ['ok'],
     answerSchema: {
       type: 'object',
-      properties: { ok: { type: 'boolean', title: 'よい' } },
+      properties: { ok: { type: 'boolean', title: 'OK' } },
       required: [],
       additionalProperties: false,
     },
   });
 
   async function openInteractive(): Promise<string> {
-    write('site/app.html', '<p id="x">本文</p><script>document.title = "動いた"</script>');
+    write('site/app.html', '<p id="x">Body</p><script>document.title = "ran"</script>');
     const opened = await documents.open({
       cwd: base,
       paths: ['site/app.html'],
@@ -184,14 +184,14 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
   const body = async (grant: string, path: string) =>
     (await render.resolve(grant, path))?.body.toString('utf8') ?? null;
 
-  it('scriptの実行を許可していない文書は、interactiveの表示を発行しない', async () => {
+  it('does not issue an interactive view for a document without script permission', async () => {
     const documentId = await openDocument();
     await expect(
       render.createGrant(sessionId, { documentId, mode: 'interactive' }, GRANT_CONTEXT),
     ).rejects.toMatchObject({ code: 'E_INTERACTIVE_NOT_ALLOWED' });
   });
 
-  it('interactiveの表示はscriptを残し、SDKはinteractiveで作った回答待ちの質問の表示にだけ入れる', async () => {
+  it('the interactive view keeps scripts, and the SDK is included only in views of pending questions created as interactive', async () => {
     const documentId = await openInteractive();
     const plain = await render.createGrant(
       sessionId,
@@ -214,7 +214,7 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
       requestId: request.requestId,
     });
     const html = await body(bridged.grant, bridged.documentLogicalPath);
-    // SDKは最初のscriptで、表示ごとの設定（識別子と、通信してよい親のorigin）だけを持つ。
+    // The SDK is the first script and holds only the per-view config (the identifier and the allowed parent origin).
     expect(html?.indexOf('vde-bridge-hello')).toBeLessThan(html?.indexOf('document.title') ?? 0);
     expect(html).toContain(
       JSON.stringify({
@@ -223,14 +223,14 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
       }),
     );
     expect(html).not.toContain('__vde_bridge_config_');
-    // 文書の表示の発行には、質問を指定できない。
+    // A question cannot be specified when issuing a document view.
     await expect(
       render.createGrant(sessionId, { documentId, requestId: request.requestId }, GRANT_CONTEXT),
     ).rejects.toThrow();
   });
 
-  it('質問の表示は、質問が固定した版と表示方法で発行する。staticで作った質問は、後から許可してもscriptを動かさない', async () => {
-    write('site/app.html', '<p>版1</p><script>1</script>');
+  it('a question view is issued with the revision and view mode pinned by the question; a question created as static does not run scripts even if allowed later', async () => {
+    write('site/app.html', '<p>Version 1</p><script>1</script>');
     const opened = await documents.open({ cwd: base, paths: ['site/app.html'] });
     const documentId = opened.data.documents[0]?.documentId as string;
     const staticRequest = await ask(documentId);
@@ -244,14 +244,14 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
     expect(pinned).toMatchObject({ mode: 'static', bridge: null });
     expect(await body(pinned.grant, pinned.documentLogicalPath)).not.toContain('<script');
 
-    // interactiveで作った質問も、許可が外れれば静的表示（SDKなし）。新しい版ができても、質問の版を表示する。
+    // A question created as interactive also falls back to the static view (no SDK) once the permission is revoked. The question's revision is shown even after a new revision.
     const { FeedbackService } = await import('../feedback/service.ts');
     await new FeedbackService({ store, documents }).cancel(
       { requestId: staticRequest.requestId },
       'agent',
     );
     const interactiveRequest = await ask(documentId);
-    write('site/app.html', '<p>版2</p>');
+    write('site/app.html', '<p>Version 2</p>');
     await documents.open({ cwd: base, paths: ['site/app.html'] });
     await documents.setHtmlMode({ documentId, mode: 'static' });
     const revoked = await render.createGrantForRequest(
@@ -264,10 +264,10 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
       bridge: null,
       revision: interactiveRequest.revision,
     });
-    expect(await body(revoked.grant, revoked.documentLogicalPath)).toContain('版1');
+    expect(await body(revoked.grant, revoked.documentLogicalPath)).toContain('Version 1');
   });
 
-  it('許可を外した後に許可し直しても、前の許可で発行したinteractiveの表示は戻らない', async () => {
+  it('re-granting after revocation does not revive interactive views issued under the previous permission', async () => {
     const documentId = await openInteractive();
     const grant = await render.createGrant(
       sessionId,
@@ -275,11 +275,11 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
       GRANT_CONTEXT,
     );
     expect(await body(grant.grant, grant.documentLogicalPath)).not.toBeNull();
-    // 外した後、前の表示には触れないまま、許可し直す。
+    // Revoke, then re-grant without touching the previous view.
     await documents.setHtmlMode({ documentId, mode: 'static' });
     await documents.setHtmlMode({ documentId, mode: 'interactive', confirmed: true });
     expect(await render.resolve(grant.grant, grant.documentLogicalPath)).toBeNull();
-    // 許可済みのまま同じ指定で開き直しても、発行済みの表示は使い続けられる。
+    // Reopening with the same option while allowed keeps issued views usable.
     const current = await render.createGrant(
       sessionId,
       { documentId, mode: 'interactive' },
@@ -289,7 +289,7 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
     expect(await body(current.grant, current.documentLogicalPath)).not.toBeNull();
   });
 
-  it('SDKを入れた表示の操作は、権限が有効で、発行したsessionのもので、質問が回答待ちの間だけ', async () => {
+  it('operations from an SDK-enabled view work only while the grant is valid, belongs to the issuing session, and the question is pending', async () => {
     const documentId = await openInteractive();
     const request = await ask(documentId);
     const bridged = await render.createGrantForRequest(sessionId, request.requestId, GRANT_CONTEXT);
@@ -299,17 +299,17 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
       revision: request.revision,
     });
     expect(render.bridgeOf('session_other', bridged.grant)).toBeNull();
-    // SDKのない表示では使えない。
+    // Not available for a view without the SDK.
     const plain = await render.createGrant(
       sessionId,
       { documentId, mode: 'interactive' },
       GRANT_CONTEXT,
     );
     expect(render.bridgeOf(sessionId, plain.grant)).toBeNull();
-    // 返却した権限は使えない。
+    // A released grant is unusable.
     render.release(sessionId, [bridged.grant]);
     expect(render.bridgeOf(sessionId, bridged.grant)).toBeNull();
-    // 質問が終われば使えない。
+    // Unusable once the question ends.
     const again = await render.createGrantForRequest(sessionId, request.requestId, GRANT_CONTEXT);
     const { FeedbackService } = await import('../feedback/service.ts');
     await new FeedbackService({ store, documents }).cancel(
@@ -323,7 +323,7 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
   });
 
   it.each(['cancel', 'submit', 'forget'] as const)(
-    '変換を待つ間に質問が終わったら（%s）、SDKを入れた表示を発行しない',
+    'does not issue an SDK-enabled view if the question ends (%s) while rendering',
     async (ending) => {
       const documentId = await openInteractive();
       const request = await ask(documentId);
@@ -353,7 +353,7 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
     },
   );
 
-  it('scriptの実行の許可が外れたら、発行済みのinteractiveの表示は使えない', async () => {
+  it('issued interactive views become unusable once the script permission is revoked', async () => {
     const documentId = await openInteractive();
     const grant = await render.createGrant(
       sessionId,
@@ -365,7 +365,7 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
     expect(await render.resolve(grant.grant, grant.documentLogicalPath)).toBeNull();
   });
 
-  it('登録されていないfileの読み込みを、表示ごとに記録して知らせる。別のsessionからは見えない', async () => {
+  it('records and reports loads of unregistered files per view; not visible from another session', async () => {
     const notified: string[] = [];
     const sessions = createSessionService();
     const owner = sessions.idOf(sessions.exchange(sessions.createBootstrapTicket()) as string);
@@ -395,7 +395,7 @@ describe('interactive（scriptを動かす表示）とHTMLとの通信', () => {
     expect(await tracking.resolve(grant, 'mod.js')).toBeNull();
     expect(tracking.missingOf(owner, grant)).toEqual(['data.json', 'mod.js']);
     expect(tracking.missingOf(other, grant)).toEqual([]);
-    // 同じfileは1回だけ知らせる。
+    // The same file is reported only once.
     expect(notified).toEqual([documentId, documentId]);
   });
 });

@@ -14,7 +14,7 @@ async function run(argv: string[]) {
       stderr += text;
     },
     cwd: process.cwd(),
-    // daemonへ接続しないcommandだけを試す。state rootには触れない。
+    // Test only commands that do not connect to the daemon. The state root is not touched.
     environment: {
       env: { VDE_OPEN_HOME: '/nonexistent/vde-open-unit-test' },
       platform: process.platform,
@@ -27,8 +27,8 @@ async function run(argv: string[]) {
   return { exitCode, stdout, stderr };
 }
 
-describe('CLI-002 両名でhelp/version（CLI本体）', () => {
-  it('--versionはpackage.jsonのversionだけをstdoutへ出す', async () => {
+describe('CLI-002 help/version under both names (CLI itself)', () => {
+  it('--version writes only the package.json version to stdout', async () => {
     expect(await run(['--version'])).toEqual({
       exitCode: 0,
       stdout: `${packageJson.version}\n`,
@@ -36,15 +36,15 @@ describe('CLI-002 両名でhelp/version（CLI本体）', () => {
     });
   });
 
-  it('--helpは固定の表示名とvoの案内を出す', async () => {
+  it('--help shows the fixed display name and the note about vo', async () => {
     const result = await run(['--help']);
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe('');
     expect(result.stdout).toContain('Usage: vde-open');
-    expect(result.stdout).toContain('`vo`は`vde-open`と同じコマンドです。');
+    expect(result.stdout).toContain('`vo` is the same command as `vde-open`.');
   });
 
-  it('未知のoptionはexit 2で、stdoutへ何も出さない', async () => {
+  it('an unknown option exits with 2 and writes nothing to stdout', async () => {
     const result = await run(['--target', 'x']);
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toBe('');

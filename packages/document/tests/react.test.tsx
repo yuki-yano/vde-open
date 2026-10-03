@@ -7,8 +7,8 @@ import { MarkdownView } from '../src/react.tsx';
 const render = (source: string) =>
   renderToStaticMarkup(<MarkdownView document={parseMarkdownDocument(source)} />);
 
-describe('MD-001 対応する構文の描画', () => {
-  it('ATX見出し、表、task list、脚注、code、reference linkを描画する', () => {
+describe('MD-001 rendering of supported syntax', () => {
+  it('renders ATX headings, tables, task lists, footnotes, code and reference links', () => {
     const output = render(
       [
         '# 認証仕様',
@@ -45,8 +45,8 @@ describe('MD-001 対応する構文の描画', () => {
   });
 });
 
-describe('MD-002 対応しない構文の固定した挙動', () => {
-  it('Setext、indent code、裸URLは変換せず、原文の文字を壊さずに表示する', () => {
+describe('MD-002 fixed behavior for unsupported syntax', () => {
+  it('Setext, indented code and bare URLs are not converted and the source text is shown intact', () => {
     const output = render(
       'Setextの見出し\n===\n\n    indentしたcode\n\nhttps://example.com/bare\n',
     );
@@ -59,19 +59,19 @@ describe('MD-002 対応しない構文の固定した挙動', () => {
   });
 });
 
-describe('MD-003 生HTMLと危険なURL', () => {
-  it('生HTMLを要素として出力せず、scriptやevent handlerを持ち込まない', () => {
+describe('MD-003 raw HTML and dangerous URLs', () => {
+  it('does not output raw HTML as elements and brings in no scripts or event handlers', () => {
     const output = render(
       '<script>alert(1)</script>\n\n<img src=x onerror="alert(2)">\n\n段落中の<b onclick="x()">太字</b>\n',
     );
     expect(output).not.toMatch(/<script/i);
     expect(output).not.toMatch(/<img/i);
     expect(output).not.toMatch(/<b[\s>]/i);
-    // escapeされた文字としてだけ残る。
+    // It remains only as escaped text.
     expect(output).toContain('&lt;script&gt;');
   });
 
-  it('javascript・file・dataのURLをlinkにせず、画像を読み込まない', () => {
+  it('does not link javascript, file or data URLs, and loads no images', () => {
     const output = render(
       [
         '[js](javascript:alert(1))',
@@ -89,21 +89,21 @@ describe('MD-003 生HTMLと危険なURL', () => {
     expect(output).toContain('href="#h1"');
   });
 
-  it('code中のscriptはescapeして表示する', () => {
+  it('script inside code is shown escaped', () => {
     const output = render('```html\n<script>alert(1)</script>\n```\n\n`<script>inline</script>`\n');
     expect(output).not.toMatch(/<script/i);
     expect(output).toContain('&lt;script&gt;');
   });
 });
 
-describe('MD-004 code blockのhighlight', () => {
-  it('preとcodeを二重にしない', () => {
+describe('MD-004 code block highlighting', () => {
+  it('does not double pre and code', () => {
     const output = render('```ts\nconst a: number = 1;\n```\n');
     expect(output.match(/<pre\b/g)).toHaveLength(1);
     expect(output.match(/<code\b/g)).toHaveLength(1);
   });
 
-  it('未知の言語と大きすぎるblockは、色付けせずに表示する', () => {
+  it('unknown languages and oversized blocks are shown without coloring', () => {
     const unknown = render('```brainfuck\n+++.<script>\n```\n');
     expect(unknown.match(/<pre\b/g)).toHaveLength(1);
     expect(unknown).not.toMatch(/<script/i);
@@ -116,7 +116,7 @@ describe('MD-004 code blockのhighlight', () => {
 });
 
 describe('MD-005 frontmatter', () => {
-  it('tag・group・承認・命令を、表示や権限へ変換しない', () => {
+  it('does not turn tags, groups, approvals or commands into display or permissions', () => {
     const output = render(
       '---\ntags: [secret]\ngroup: admin\napproved: true\nrun: rm -rf /\n---\n\n# 本文\n',
     );

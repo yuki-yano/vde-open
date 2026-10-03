@@ -1,15 +1,15 @@
-// interactiveのHTMLへ最初のscriptとして入れる、同梱SDK（仕様11.6）。HTMLへ秘密を渡さない。
-// 本体との通信は、本体が1回だけ渡すMessagePortだけを使う（仕様11.7）。
-// SDKが提供するのは window.vde.ready() と window.vde.feedback（updateDraft、onDraftChanged）だけ。
-// 送信・取得済みの印・中止・検索・読み取りや、旧版への回答の確認は提供しない。
+// The bundled SDK inserted as the first script in interactive HTML (spec 11.6). No secrets are passed to the HTML.
+// Communication with the host uses only the MessagePort the host hands over once (spec 11.7).
+// The SDK provides only window.vde.ready() and window.vde.feedback (updateDraft, onDraftChanged).
+// It does not provide submit, acknowledge, cancel, search, read, or confirmation of answers to an older revision.
 import { BRIDGE_HELLO, BRIDGE_PORT, BRIDGE_PROTOCOL_VERSION } from '@vde-open/shared';
 
-// 本体からportを受け取るまで待つ時間。過ぎたら、SDKの呼び出しを失敗させる。
+// How long to wait for the port from the host. After that, SDK calls fail.
 const PORT_WAIT_MS = 10_000;
-// portを受け取るまで、通信の開始を求め直す間隔。
+// Interval for re-requesting the connection until the port arrives.
 const HELLO_INTERVAL_MS = 500;
 
-// configSlotは、表示ごとの設定（JSON）に置き換える位置。設定はinstanceIdとparentOriginだけ。
+// configSlot marks where the per-view config (JSON) is inserted. The config holds only instanceId and parentOrigin.
 export function bridgeSdkScript(configSlot: string): string {
   return `(function (config) {
   'use strict';
@@ -54,7 +54,7 @@ export function bridgeSdkScript(configSlot: string): string {
       });
       return;
     }
-    if (data.type === 'closed') fail(bridgeError('E_BRIDGE_CLOSED', '本体との通信が終わりました。表示し直してください。'));
+    if (data.type === 'closed') fail(bridgeError('E_BRIDGE_CLOSED', 'The connection to the host has closed. Reload the view.'));
   }
   function onWindowMessage(event) {
     if (event.source !== parentWindow || event.origin !== parentOrigin) return;
@@ -87,12 +87,12 @@ export function bridgeSdkScript(configSlot: string): string {
   window.addEventListener('message', onWindowMessage);
   var hello = setInterval(sendHello, ${String(HELLO_INTERVAL_MS)});
   setTimeout(function () {
-    if (!port) fail(bridgeError('E_BRIDGE_UNAVAILABLE', '本体との通信を始められませんでした。表示し直してください。'));
+    if (!port) fail(bridgeError('E_BRIDGE_UNAVAILABLE', 'The connection to the host could not be established. Reload the view.'));
   }, ${String(PORT_WAIT_MS)});
   var feedback = Object.freeze({
     updateDraft: function (answers, options) {
       if (!options || typeof options.baseDraftVersion !== 'number') {
-        return Promise.reject(bridgeError('E_INVALID_ARGUMENT', 'options.baseDraftVersionを指定してください。'));
+        return Promise.reject(bridgeError('E_INVALID_ARGUMENT', 'options.baseDraftVersion is required.'));
       }
       return call('updateDraft', { answers: answers, baseDraftVersion: options.baseDraftVersion });
     },

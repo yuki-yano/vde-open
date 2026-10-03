@@ -15,7 +15,7 @@ export interface RawOptions {
   body?: string;
 }
 
-// URLを正規化せずにrequestを送る。`..`やencodeした区切りを、書いたとおりに届けるため。
+// Sends a request without normalizing the URL, so that `..` and encoded separators arrive as written.
 export function rawRequest(
   origin: string,
   path: string,
@@ -68,22 +68,22 @@ export interface GrantData {
 }
 
 export interface UiClient {
-  // 管理UIのorigin。
+  // Origin of the management UI.
   origin: string;
-  // 文書を表示するlistenerのorigin。
+  // Origin of the listener that serves documents.
   previewOrigin: string;
   token: string;
-  // 管理APIを、認証付きで呼ぶ。
+  // Calls the management API with authentication.
   api: <T>(
     path: string,
     options?: { method?: string; body?: unknown },
   ) => Promise<{ status: number; json: Envelope<T>; headers: RawResponse['headers'] }>;
   grant: (documentId: string, revision?: string) => Promise<GrantData>;
-  // 表示用URLの、pathの部分（`/r/<grant>/files/`）。
+  // Path part of the preview URL (`/r/<grant>/files/`).
   filesPath: (grant: GrantData) => string;
 }
 
-// CLIが発行する一回限りのURLから、管理UIのsessionを作る。
+// Creates a management UI session from the one-time URL issued by the CLI.
 export async function connectUi(t: TestHome): Promise<UiClient> {
   const status = (await t.run(['daemon', 'status', '--json'])).json<{ uiUrl: string }>();
   const origin = status.data.uiUrl.replace(/\/$/, '');
@@ -125,7 +125,7 @@ export async function connectUi(t: TestHome): Promise<UiClient> {
         body: revision === undefined ? {} : { revision },
       });
       if (!response.json.ok) {
-        throw new Error(`grantを取得できません: ${JSON.stringify(response.json.error)}`);
+        throw new Error(`cannot get a grant: ${JSON.stringify(response.json.error)}`);
       }
       return response.json.data;
     },

@@ -10,8 +10,8 @@ export interface Logger {
   flush(): Promise<void>;
 }
 
-// event名、件数、byte数、error code、所要時間だけを記録する。
-// 本文、回答、path、tokenは渡さない（仕様10.6）。
+// Record only event names, counts, byte counts, error codes, and durations.
+// Never pass bodies, answers, paths, or tokens (spec 10.6).
 export function createFileLogger(stateRoot: string): Logger {
   const directory = join(stateRoot, 'logs');
   const file = join(directory, 'daemon.jsonl');
@@ -28,7 +28,7 @@ export function createFileLogger(stateRoot: string): Logger {
       if (size + line.length > MAX_LOG_BYTES) await rename(file, `${file}.1`);
       await appendFile(file, line, { mode: 0o600 });
     } catch {
-      // logを書けなくても、daemonの動作は止めない。
+      // Even if the log cannot be written, the daemon keeps running.
     }
   };
 

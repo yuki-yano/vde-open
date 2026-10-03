@@ -12,8 +12,8 @@ const fixtureBytes = (name: string) => readFileSync(fixturePath(name));
 const fixtureJson = (name: string) =>
   JSON.parse(readFileSync(fixturePath(name), 'utf8')) as unknown;
 
-describe('revisionの計算', () => {
-  it('引き継ぎ一式の返却例と同じrevisionになる', () => {
+describe('revision computation', () => {
+  it('matches the revisions in the handoff response examples', () => {
     const search = fixtureJson('search-response.json') as {
       data: { hits: Array<{ revision: string }> };
     };
@@ -37,7 +37,7 @@ describe('revisionの計算', () => {
     ).toBe(feedback.data.revision);
   });
 
-  it('assetの順序に依存せず、asset内容が変われば変わる', () => {
+  it('is independent of asset order and changes when asset content changes', () => {
     const base = {
       format: 'html' as const,
       sourceSha256: 'a'.repeat(64),

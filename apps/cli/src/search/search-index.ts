@@ -11,21 +11,21 @@ import {
   uniqueTokens,
 } from './tokenize.ts';
 
-// 文書の属性。本文を入れ直さずに変えられる。
+// Document attributes. Can be changed without re-indexing the content.
 export interface IndexedMeta {
   documentId: string;
   revision: string;
   format: DocumentFormat;
   title: string;
   displayPath: string | null;
-  // file名と、symlinkを解決した絶対path。stdinの文書はnull。
+  // File name and absolute path with symlinks resolved. null for stdin documents.
   fileName: string | null;
   canonicalPath: string | null;
-  // 一覧での順番。同じ順位のhitを、この順で並べる。
+  // Order in the list. Hits of the same rank are sorted by this.
   order: number;
 }
 
-// indexへ入れる1文書。sectionsは、文書の解析で取り出した節。
+// One document to index. sections are the sections extracted by document analysis.
 export interface IndexedDocument extends IndexedMeta {
   sections: Section[];
 }
@@ -33,45 +33,45 @@ export interface IndexedDocument extends IndexedMeta {
 export interface IndexQuery {
   query: string;
   mode: SearchMode;
-  // 対象を絞る文書ID。nullなら、indexにある文書のすべて。
+  // Document IDs to restrict to. null means every document in the index.
   documents: ReadonlySet<string> | null;
 }
 
-// 順位を付けた後のhit。何件目から何件返すかは、呼び出し側が決める。
+// A ranked hit. The caller decides the offset and how many to return.
 export type RankedHit = SearchHit;
 
-// 1つの索引項目に入れる本文・見出しの上限（UTF-16のcode unit）。長いものは、重ねながら分ける。
-// 1回に索引へ入れる量を小さくして、索引を作っている間も検索を待たせ続けないようにする。
+// Max body/heading length per index entry (UTF-16 code units). Longer text is split into overlapping parts.
+// Keeps each indexing step small so searches are not kept waiting while the index is built.
 export const PART_LENGTH = 16_384;
-// 分けた部分の重なり。queryの上限（512 code point）を十分に含むので、連続した文字列の一致を取りこぼさない。
+// Overlap between parts. Well above the query limit (512 code points), so no literal match is missed.
 export const PART_OVERLAP = 4_096;
-// 上位の見出しの語は、配下の節の一致として、本文と同じ重み（見出しの重み4に対して1）で数える。
+// Terms in ancestor headings count as matches of descendant sections with the body weight (1 against the heading weight of 4).
 const CONTEXT_FACTOR = 0.25;
 
-// 節の形。見出しの文字列は持たない（見出しは分けた部分から組み立てる）。
-// 上位の見出しは、親の節の番号でたどる（配下の節ごとに上位の見出しを複製しない）。
+// Section shape. Does not hold the heading text (the heading is assembled from the parts).
+// Ancestor headings are followed by the parent section index (not duplicated per descendant section).
 export interface IndexSection {
   sectionId: string;
   level: number;
-  // 親の見出しの節の番号。序文と最上位の見出しはnull。
+  // Index of the parent heading section. null for the preamble and top-level headings.
   parent: number | null;
 }
 
-// 索引へ入れる単位。長い節は、見出しと本文を重ねながら分けた部分ごとに1件。
-// sectionは、節の先頭の部分（part 0）にだけ入れる。
+// Unit of indexing. A long section becomes one entry per overlapping part of its heading and body.
+// section is set only on the first part of the section (part 0).
 export interface IndexPart {
   sectionIndex: number;
-  // 節の中で何番目の部分か。
+  // Position of this part within the section.
   part: number;
   section: IndexSection | null;
-  // この部分が持つ、見出しの一部と、それが見出しの何文字目から始まるか。
+  // The piece of the heading in this part, and the offset in the heading where it starts.
   heading: string;
   headingStart: number;
   body: string;
 }
 
 interface StoredSection extends IndexSection {
-  // 分けた部分から組み立てた、見出しの全文。
+  // Full heading text assembled from the parts.
   title: string;
 }
 
@@ -80,13 +80,13 @@ interface Entry {
   documentId: string;
   sectionIndex: number;
   part: number;
-  // MiniSearchへ渡すfield。titleとpathは文書の属性なので、先頭の節の先頭の部分にだけ入れる
-  // （全部の節に入れると、titleの語で、文書のすべての節が候補になる）。
+  // Fields passed to MiniSearch. title and path are document attributes, so they are set only on the first part of the first section
+  // (setting them on every section would make all sections candidates for title terms).
   title: string;
   path: string;
   heading: string;
   body: string;
-  // 連続した文字列の一致を調べるための、正規化した値。
+  // Normalized values for checking literal matches.
   normalizedBody: string;
   normalizedHeading: string;
 }
@@ -94,18 +94,18 @@ interface Entry {
 interface Stored {
   meta: IndexedMeta;
   entries: Entry[];
-  // 節の番号ごとの形と、節の先頭の項目。
+  // Shape and first entry of each section, by section index.
   sections: Map<number, StoredSection>;
   heads: Map<number, Entry>;
   normalizedTitle: string;
-  // 正規化したpathとfile名。pathの検索と、完全一致の判定に使う。
+  // Normalized paths and file name. Used for path search and exact-match checks.
   normalizedPaths: string[];
   normalizedName: string;
 }
 
 type MatchKind = SearchHit['matchKind'];
 
-// 一致の種類の強さ。小さいほど上位（仕様9.2）。
+// Strength of each match kind. Lower ranks higher (spec 9.2).
 const MATCH_RANK: Record<MatchKind, number> = {
   'path-exact': 0,
   phrase: 1,
@@ -116,11 +116,11 @@ const MATCH_RANK: Record<MatchKind, number> = {
 
 const BOOST = { title: 5, heading: 4, path: 3, body: 1 };
 const EXCERPT_LEAD = 60;
-// 英数と記号だけのquery。語の途中で切った文字列（`toke`など）を、連続した一致として扱わないために見分ける。
+// A query of ASCII letters, digits, and symbols only. Detected so a truncated word (such as `toke`) is not treated as a literal match.
 const ASCII_ONLY = /^[ -~]+$/;
-// 前方一致を使う最小の長さ。1文字の前方一致は、関係のない語に広く当たる。
+// Minimum length for prefix matching. A one-character prefix matches too many unrelated terms.
 const PREFIX_MIN_LENGTH = 2;
-// 綴りのゆらぎとして許す、文字の違いの数。
+// Number of character differences allowed as a spelling variation.
 const FUZZY_DISTANCE = 1;
 
 function pathsOf(meta: IndexedMeta): string[] {
@@ -132,7 +132,7 @@ function isLowSurrogate(text: string, index: number): boolean {
   return code >= 0xdc00 && code <= 0xdfff;
 }
 
-// 長い文字列を、重ねながら分けた部分と、それぞれの開始位置。surrogate pairの途中では切らない。
+// Splits long text into overlapping parts with their start offsets. Never splits inside a surrogate pair.
 function splitWithStarts(text: string): Array<{ text: string; start: number }> {
   if (text.length <= PART_LENGTH) return [{ text, start: 0 }];
   const parts: Array<{ text: string; start: number }> = [];
@@ -149,14 +149,14 @@ function splitWithStarts(text: string): Array<{ text: string; start: number }> {
   return parts;
 }
 
-// 長い文字列を、重ねながら分ける。
+// Splits long text into overlapping parts.
 export function splitParts(text: string): string[] {
   return splitWithStarts(text).map((part) => part.text);
 }
 
 export function partsOf(sections: Section[]): IndexPart[] {
   const parts: IndexPart[] = [];
-  // 見出しの親子。解析のheadingPathと同じ規則（自分以上の深さの見出しを閉じる）でたどる。
+  // Heading hierarchy. Follows the same rule as headingPath in analysis (closes headings at the same or deeper level).
   const stack: Array<{ index: number; level: number }> = [];
   for (const [sectionIndex, section] of sections.entries()) {
     let parent: number | null = null;
@@ -183,13 +183,13 @@ export function partsOf(sections: Section[]): IndexPart[] {
   return parts;
 }
 
-// 部分を索引へ入れるときの処理量の目安。索引に入れるfieldの長さの合計。
+// Approximate cost of indexing a part: the total length of the indexed fields.
 export function partWeight(part: IndexPart): number {
   return part.heading.length + part.body.length;
 }
 
-// 部分を、1回に索引へ入れる量の上限で区切る。上限を超える前に区切るので、
-// 1回分が上限を超えるのは、1つの部分だけで上限を超えるとき（見出しと本文の分けた長さの合計まで）だけ。
+// Splits parts into batches by the per-step indexing limit. A batch is cut before exceeding the limit,
+// so a batch exceeds it only when a single part does (up to the combined length of a split heading and body).
 export function batchesOf(parts: IndexPart[], maxWeight: number, maxParts: number): IndexPart[][] {
   const batches: IndexPart[][] = [];
   let batch: IndexPart[] = [];
@@ -208,7 +208,7 @@ export function batchesOf(parts: IndexPart[], maxWeight: number, maxParts: numbe
   return batches;
 }
 
-// 抽出した本文から、一致した位置の周りを抜き出す。要約や言い換えはしない（仕様9.4）。
+// Extracts the text around the match position from the extracted body. No summarizing or rephrasing (spec 9.4).
 function excerptOf(text: string, normalized: string, needles: string[]): string {
   let at = -1;
   for (const needle of needles) {
@@ -216,10 +216,10 @@ function excerptOf(text: string, normalized: string, needles: string[]): string 
     at = normalized.indexOf(needle);
     if (at !== -1) break;
   }
-  // 正規化で長さが変わることがあるので、位置は比率で元の本文へ写す。
+  // Normalization can change the length, so the position is mapped to the original text proportionally.
   const position = at <= 0 ? 0 : Math.floor((at * text.length) / Math.max(1, normalized.length));
   let start = Math.max(0, position - EXCERPT_LEAD);
-  // surrogate pairの途中から始めない。
+  // Never start inside a surrogate pair.
   if (start > 0 && isLowSurrogate(text, start)) start -= 1;
   const window = text.slice(start, start + LIMITS.searchExcerptCodePoints * 2 + EXCERPT_LEAD);
   return sliceCodePoints(window, 0, LIMITS.searchExcerptCodePoints).replace(/\s+/g, ' ').trim();
@@ -227,12 +227,12 @@ function excerptOf(text: string, normalized: string, needles: string[]): string 
 
 const sectionKeyOf = (entry: Entry) => `${entry.documentId}\n${String(entry.sectionIndex)}`;
 
-// 語の一致を、節の単位でまとめたもの。
+// Term matches aggregated per section.
 interface SectionMatch {
   stored: Stored;
   sectionIndex: number;
   score: number;
-  // 最もscoreの高い部分と、本文に一致した部分（抜粋に使う）。上位の見出しだけで一致した節はnull。
+  // The highest scoring part, and the part matched in the body (used for the excerpt). null for sections matched only via ancestor headings.
   entry: Entry | null;
   entryScore: number;
   bodyEntry: Entry | null;
@@ -251,24 +251,24 @@ function emptyMatch(stored: Stored, sectionIndex: number): SectionMatch {
   };
 }
 
-// 開いている文書の、節ごとの検索index。
-// 語の一致はMiniSearchで、連続した文字列の一致は正規化した本文への部分一致で調べる。
+// Per-section search index of open documents.
+// Term matches use MiniSearch; literal matches use substring search on the normalized body.
 //
-// 文書は「始める→何回かに分けて入れる→確定する」の順に入れる。確定するまでは検索に出さず、
-// 確定した時点で、前の版と入れ替える。分けて入れる間に、検索の依頼を挟めるようにするため。
-// 長い節は複数の項目に分けて入れるが、一致の判定と結果は節の単位で行う。
+// A document is added as "begin, append in several steps, commit". It is not searchable until committed,
+// and on commit it replaces the previous revision. This lets search requests interleave with appends.
+// Long sections are split into several entries, but matching and results are per section.
 export class SearchIndex {
-  // 確定した文書。検索の対象はこれだけ。
+  // Committed documents. Only these are searched.
   readonly #documents = new Map<string, Stored>();
-  // 入れている途中の文書。
+  // Documents being added.
   readonly #staging = new Map<string, Stored>();
   readonly #entries = new Map<string, { stored: Stored; entry: Entry }>();
-  // 索引の世代。文書を入れ始めるたびに進め、索引項目のIDに含める（前の版の項目と取り違えない）。
+  // Index generation. Advanced each time a document begins, and included in entry IDs (never confused with entries of a previous revision).
   #generation = 0;
   readonly #mini = new MiniSearch<Entry>({
     idField: 'id',
     fields: ['title', 'path', 'heading', 'body'],
-    // 語への分割と正規化は、自前の規則で行う。空白での分割だけには頼らない。
+    // Tokenization and normalization follow our own rules, not just whitespace splitting.
     tokenize: (text) => tokenize(text),
     processTerm: (term) => term,
   });
@@ -277,8 +277,8 @@ export class SearchIndex {
     return this.#documents.size;
   }
 
-  // 保持している項目の数（資源の漏れの確認に使う。daemon.diagnostics）。
-  // settleなら、消した項目の片付け（MiniSearchのvacuum）を終えてから数える。
+  // Counts of retained entries (used to check for resource leaks; daemon.diagnostics).
+  // With settle, counts after cleaning up discarded entries (MiniSearch vacuum).
   async retainedCounts(settle: boolean): Promise<Record<string, number>> {
     if (settle) await this.#mini.vacuum();
     return {
@@ -331,7 +331,7 @@ export class SearchIndex {
     this.#generation += 1;
   }
 
-  // 入れている途中の文書を捨てる。確定した文書は残す。
+  // Discards a document being added. The committed document remains.
   abort(documentId: string): void {
     this.#discard(this.#staging.get(documentId));
     this.#staging.delete(documentId);
@@ -343,18 +343,18 @@ export class SearchIndex {
     this.#staging.set(meta.documentId, this.#stored({ ...meta }, [], new Map(), new Map()));
   }
 
-  // 節の部分を入れる。呼び出し側は、partsOfで分けた部分を、何回かに分けて渡せる。
+  // Appends section parts. The caller may pass the parts from partsOf in several calls.
   append(documentId: string, revision: string, parts: IndexPart[]): void {
     const stored = this.#staging.get(documentId);
     if (!stored || stored.meta.revision !== revision) {
-      throw new Error('入れ始めていない文書の節です。');
+      throw new Error('The section belongs to a document that has not begun.');
     }
     const { meta } = stored;
     const entries = parts.map((item): Entry => {
       if (item.section) stored.sections.set(item.sectionIndex, { ...item.section, title: '' });
       const section = stored.sections.get(item.sectionIndex);
-      if (!section) throw new Error('節の先頭の部分がありません。');
-      // 重ねて分けた見出しを、元の全文へ組み立てる（部分は順に届く）。
+      if (!section) throw new Error('The first part of the section is missing.');
+      // Assembles the overlapping heading parts back into the full text (parts arrive in order).
       if (item.heading !== '') {
         section.title += item.heading.slice(section.title.length - item.headingStart);
       }
@@ -380,11 +380,11 @@ export class SearchIndex {
     }
   }
 
-  // 入れ終えた文書を確定し、前の版と入れ替える。
+  // Commits a fully added document, replacing the previous revision.
   commit(documentId: string, revision: string): void {
     const stored = this.#staging.get(documentId);
     if (!stored || stored.meta.revision !== revision) {
-      throw new Error('入れ始めていない文書です。');
+      throw new Error('The document has not begun.');
     }
     this.#staging.delete(documentId);
     this.#discard(this.#documents.get(documentId));
@@ -392,7 +392,7 @@ export class SearchIndex {
     this.#generation += 1;
   }
 
-  // 1回で文書を入れる（testと、小さな文書の便宜）。
+  // Adds a document in one step (convenience for tests and small documents).
   upsert(document: IndexedDocument): void {
     const { sections, ...meta } = document;
     this.begin(meta);
@@ -400,7 +400,7 @@ export class SearchIndex {
     this.commit(meta.documentId, meta.revision);
   }
 
-  // title・path・順番だけを変える。本文は入れ直さない。版が違えばfalse（入れ直しが必要）。
+  // Changes only title, path, and order without re-indexing the content. Returns false if the revision differs (re-indexing needed).
   updateMeta(meta: IndexedMeta): boolean {
     const current = this.#documents.get(meta.documentId);
     if (!current || current.meta.revision !== meta.revision) return false;
@@ -423,7 +423,7 @@ export class SearchIndex {
     return true;
   }
 
-  // 上位の見出しから順に並べた見出し。親の節の番号でたどる。
+  // Headings from the top-level ancestor down. Followed by parent section index.
   #headingPathOf(stored: Stored, sectionIndex: number): string[] {
     const path: string[] = [];
     let current = stored.sections.get(sectionIndex);
@@ -435,7 +435,7 @@ export class SearchIndex {
     return path;
   }
 
-  // 見出しの節の配下にある節の番号。文書の順で、より深い見出しが続く間が配下。
+  // Indexes of sections under a heading section: following sections in document order while headings are deeper.
   #descendantsOf(stored: Stored, sectionIndex: number): number[] {
     const own = stored.sections.get(sectionIndex);
     if (!own || own.level === 0) return [];
@@ -448,21 +448,21 @@ export class SearchIndex {
     return children;
   }
 
-  // 一致した節を、順位の順に返す。1文書から返すのは2件まで（仕様9.2）。
+  // Returns matched sections in rank order. At most 2 per document (spec 9.2).
   search(input: IndexQuery): RankedHit[] {
-    // 指定どおりの文字列。exactとpathは、空白も含めてこのまま照合する。
+    // The query as given. exact and path match it verbatim, whitespace included.
     const verbatim = normalizeForSearch(input.query);
     if (verbatim.trim() === '') return [];
-    // textの検索では、語の区切りの違いを問わないよう、空白をそろえる。
+    // For text search, whitespace is normalized so word separators do not matter.
     const query = input.mode === 'text' ? verbatim.replace(/\s+/g, ' ').trim() : verbatim;
     const terms = uniqueTokens(input.query);
     const included = (documentId: string) =>
       input.documents === null || input.documents.has(documentId);
-    // 確定した文書の項目だけを使う。入れている途中の項目は、MiniSearchにあっても返さない。
+    // Only entries of committed documents are used. Entries being added are not returned even if MiniSearch has them.
     const usable = (stored: Stored) =>
       this.#documents.get(stored.meta.documentId) === stored && included(stored.meta.documentId);
 
-    // 候補は節の単位で持つ。entryは、抜粋に使う部分。inBodyは、その部分の本文に一致があるか。
+    // Candidates are per section. entry is the part used for the excerpt. inBody is whether that part matched in the body.
     interface Candidate {
       stored: Stored;
       entry: Entry;
@@ -484,10 +484,10 @@ export class SearchIndex {
         candidates.set(key, { stored, entry, inBody, kind, score });
         return;
       }
-      // 強い種類の一致を採り、scoreは高いほうを残す。
+      // Take the stronger match kind and keep the higher score.
       if (MATCH_RANK[kind] < MATCH_RANK[existing.kind]) existing.kind = kind;
       existing.score = Math.max(existing.score, score);
-      // 抜粋に使う部分は、一致の種類とは別に選ぶ。本文に一致した部分を、見出しだけの一致で置き換えない。
+      // The excerpt part is chosen independently of the match kind. A body match is never replaced by a heading-only match.
       if (inBody && !existing.inBody) {
         existing.entry = entry;
         existing.inBody = true;
@@ -495,23 +495,23 @@ export class SearchIndex {
     };
 
     if (input.mode === 'text' && terms.length > 0) {
-      // 全部の検索語が、同じ節（とその上位の見出し）に現れるものだけ。語を勝手に減らして、別の検索へ変えない。
-      // 長い節は分けて入れているので、語ごとに一致する部分を引き、節の単位でまとめて判定する。
-      // 上位の見出しにある語は、配下の節の一致として数える（上位の見出しを節ごとに複製しない）。
+      // Only sections where every term appears (in the section or its ancestor headings). Terms are never dropped to turn it into another search.
+      // Long sections are split, so matching parts are looked up per term and aggregated per section.
+      // Terms in ancestor headings count as matches of descendant sections (ancestor headings are not duplicated per section).
       const run = (kind: MatchKind, options: { prefix: boolean; fuzzy: boolean }) => {
         let matched: Map<string, SectionMatch> | null = null;
         for (const term of terms) {
           const results = this.#mini.search(term, {
             boost: BOOST,
             prefix: options.prefix ? (candidate) => candidate.length >= PREFIX_MIN_LENGTH : false,
-            // 文字の違いは1つまで。語の長さに比例させない。
+            // At most one character difference, regardless of term length.
             fuzzy: options.fuzzy
               ? (candidate) => (allowsFuzzy(candidate) ? FUZZY_DISTANCE : false)
               : false,
             tokenize: (text) => [text],
             processTerm: (value) => value,
           });
-          // この語が一致した節。節の中で最もscoreの高い部分と、本文に一致した部分を覚える。
+          // Sections matched by this term. Remember the highest scoring part and the body-matched part per section.
           const satisfied = new Map<string, SectionMatch>();
           for (const result of results) {
             const found = this.#entries.get(String(result.id));
@@ -531,8 +531,8 @@ export class SearchIndex {
             }
             satisfied.set(key, current);
           }
-          // 見出しに一致した節の配下の節にも、一致を数える。引き継ぐのは見出しのfieldだけのscore
-          // （親の節のtitle・path・本文への一致は、配下の節の一致にしない）。
+          // Also count matches for descendants of sections whose heading matched. Only the heading field score is inherited
+          // (matches on the parent's title, path, or body do not count for descendants).
           const headings = this.#mini.search(term, {
             fields: ['heading'],
             boost: { heading: BOOST.heading },
@@ -577,9 +577,9 @@ export class SearchIndex {
           if (matched.size === 0) return;
         }
         for (const [key, value] of matched ?? []) {
-          // 弱い種類の検索は、強い種類で見つかった節を上書きしない。
+          // A weaker search does not overwrite sections found by a stronger one.
           if (candidates.has(key)) continue;
-          // 抜粋には、本文に一致した部分を優先して使う。
+          // Prefer the body-matched part for the excerpt.
           const entry =
             value.bodyEntry ?? value.entry ?? value.stored.heads.get(value.sectionIndex);
           if (entry) offer(value.stored, entry, kind, value.score, value.bodyEntry !== null);
@@ -590,26 +590,26 @@ export class SearchIndex {
       run('fuzzy', { prefix: true, fuzzy: true });
     }
 
-    // file名・pathの完全一致は、指定どおりの文字列と、空白をそろえた文字列のどちらでも見る。
+    // Exact file name or path matches are checked against both the verbatim and the whitespace-normalized query.
     const exactNames = new Set([verbatim, query]);
     for (const stored of this.#documents.values()) {
       if (!included(stored.meta.documentId)) continue;
       const first = stored.entries[0];
       if (!first) continue;
-      // file名またはpathが、queryと完全に一致する文書。
+      // Documents whose file name or path exactly equals the query.
       const pathExact =
         exactNames.has(stored.normalizedName) ||
         stored.normalizedPaths.some((path) => exactNames.has(path));
       if (pathExact) offer(stored, first, 'path-exact', 0, false);
       if (input.mode === 'path') {
-        // pathの検索は、file名とpathだけを対象にする。本文は見ない。
+        // Path search looks only at file names and paths, not the body.
         if (!pathExact && stored.normalizedPaths.some((path) => path.includes(query))) {
           offer(stored, first, 'phrase', 0, false);
         }
         continue;
       }
-      // queryが、連続した文字列としてそのまま現れる節。
-      // 語がばらばらに現れるだけの節（text）より上に置く。重みは、語の一致で付いたscoreをそのまま使う。
+      // Sections where the query appears verbatim as a literal string.
+      // Ranked above sections where the terms appear scattered (text). The score from the term match is used as is.
       const titleOrPath =
         stored.normalizedTitle.includes(query) ||
         stored.normalizedPaths.some((path) => path.includes(query));
@@ -622,16 +622,16 @@ export class SearchIndex {
         if (input.mode === 'exact' || known?.kind === 'text') {
           offer(stored, entry, 'phrase', 0, inBody);
         } else if (!ASCII_ONLY.test(query)) {
-          // 語への分割では取りこぼす、日本語などの連続した文字列。
+          // Literal strings that tokenization misses, such as Japanese.
           offer(stored, entry, 'phrase', 0, inBody);
         } else if (!known && codePointLength(query) >= PREFIX_MIN_LENGTH) {
-          // 英数の語の途中までの文字列。語としては一致していないので、前方一致と同じ扱いにする。
-          // 前方一致と同じく、1文字では使わない。
+          // A truncated ASCII word. It does not match as a term, so treat it like a prefix match.
+          // Like prefix matching, not used for a single character.
           offer(stored, entry, 'prefix', 0, inBody);
         }
       }
     }
-    // 連続した文字列の一致だけを求める検索では、語の一致だけの候補は返さない。
+    // Searches that require literal matches do not return candidates matched only by terms.
     const ranked = [...candidates.values()]
       .filter(
         (candidate) =>
@@ -665,7 +665,7 @@ export class SearchIndex {
         excerpt: excerptOf(body, normalizeForSearch(body), [query, ...terms]),
         matchKind: kind,
         score: Math.round(score * 1000) / 1000,
-        // 解析結果に原文の位置がないので、推測した行番号は返さない（仕様8.3）。
+        // Analysis has no source positions, so guessed line numbers are not returned (spec 8.3).
         sourceRange: null,
         extraction: meta.format === 'markdown' ? 'markdown' : 'static-html',
       });

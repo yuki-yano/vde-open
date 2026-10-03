@@ -20,9 +20,9 @@ export interface SidebarProps {
 }
 
 const STATE_LABEL: Record<string, string> = {
-  missing: 'fileなし',
-  unreadable: '読めない',
-  updating: '更新中',
+  missing: 'File missing',
+  unreadable: 'Unreadable',
+  updating: 'Updating',
   error: 'error',
 };
 
@@ -75,8 +75,12 @@ function DocumentRow({
           </Badge>
         )}
         {document.pendingRequestIds.length > 0 && (
-          <Badge className="shrink-0" data-testid="pending-question">
-            回答待ち
+          <Badge
+            className="shrink-0"
+            data-testid="pending-question"
+            title="A question is awaiting your answer"
+          >
+            Question
           </Badge>
         )}
       </button>
@@ -85,8 +89,8 @@ function DocumentRow({
         variant="ghost"
         size="icon-xs"
         className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-        aria-label={`${document.title} を一覧から外す`}
-        title="一覧から外す（fileは削除しません）"
+        aria-label={`Remove ${document.title} from the list`}
+        title="Remove from the list (the file is not deleted)"
         onClick={onClose}
       >
         <X aria-hidden="true" />
@@ -151,9 +155,9 @@ export function Sidebar(props: SidebarProps) {
   };
 
   return (
-    <nav aria-label="開いている文書" className="flex h-full min-h-0 flex-col">
+    <nav aria-label="Open documents" className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <h2 className="text-sm font-medium">開いている文書（{documents.length}）</h2>
+        <h2 className="text-sm font-medium">Open documents ({documents.length})</h2>
         <ToggleGroup
           value={[view]}
           onValueChange={(value) => {
@@ -161,24 +165,23 @@ export function Sidebar(props: SidebarProps) {
             if (next === 'flat' || next === 'tree') onViewChange(next);
           }}
           size="sm"
-          aria-label="一覧の表示方法"
+          aria-label="List layout"
         >
-          <ToggleGroupItem value="flat">順番</ToggleGroupItem>
-          <ToggleGroupItem value="tree">階層</ToggleGroupItem>
+          <ToggleGroupItem value="flat">Flat</ToggleGroupItem>
+          <ToggleGroupItem value="tree">Tree</ToggleGroupItem>
         </ToggleGroup>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {documents.length === 0 ? (
           <p className="px-2 py-4 text-sm text-muted-foreground">
-            開いている文書はありません。CLIで <code>vo &lt;file&gt;</code>{' '}
-            を実行すると、ここに表示されます。
+            No documents are open. Run <code>vo &lt;file&gt;</code> in the CLI to show them here.
           </p>
         ) : view === 'tree' ? (
           <Tree nodes={buildTree(documents)} depth={0} props={{ activeId, onSelect, onClose }} />
         ) : (
           <ul className="flex flex-col gap-0.5">
             {documents.map((document, index) => (
-              // dragでの並べ替え。keyboardでは、各行の「上へ／下へ移動」を使う。
+              // Reorder by drag. With the keyboard, use "Move up" / "Move down" on each row.
               // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
               <li
                 key={document.documentId}
@@ -196,13 +199,13 @@ export function Sidebar(props: SidebarProps) {
                   onSelect={() => onSelect(document.documentId)}
                   onClose={() => onClose(document.documentId)}
                 >
-                  {/* dragを使わずに並べ替える手段。動かせない方向のbuttonは出さない。 */}
+                  {/* A way to reorder without dragging. Do not show the button for a direction the item cannot move in. */}
                   {index > 0 && (
                     <Button
                       variant="ghost"
                       size="icon-xs"
                       className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-                      aria-label={`${document.title} を上へ移動`}
+                      aria-label={`Move ${document.title} up`}
                       onClick={() => onReorder(move(order, index, index - 1))}
                     >
                       <ChevronUp aria-hidden="true" />
@@ -213,7 +216,7 @@ export function Sidebar(props: SidebarProps) {
                       variant="ghost"
                       size="icon-xs"
                       className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-                      aria-label={`${document.title} を下へ移動`}
+                      aria-label={`Move ${document.title} down`}
                       onClick={() => onReorder(move(order, index, index + 1))}
                     >
                       <ChevronDown aria-hidden="true" />

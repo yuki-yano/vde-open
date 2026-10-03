@@ -7,23 +7,23 @@ export interface PathEnvironment {
   env: NodeJS.ProcessEnv;
   platform: NodeJS.Platform;
   homeDir: string;
-  // POSIXのuid。Windowsではnull。
+  // POSIX uid. null on Windows.
   uid: number | null;
 }
 
 const APP_DIR = 'vde-open';
 
-// state rootは1ユーザーにつき1つ。VDE_OPEN_HOMEは試験と開発の分離にだけ使う（仕様6.1）。
+// One state root per user. VDE_OPEN_HOME is used only to separate tests and development (spec 6.1).
 export function resolveStateRoot(environment: PathEnvironment): string {
   const { env, platform, homeDir } = environment;
   const override = env['VDE_OPEN_HOME'];
   if (override !== undefined && override !== '') {
     if (!isAbsolute(override)) {
-      throw new VdeError('E_INVALID_ARGUMENT', 'VDE_OPEN_HOMEは絶対pathで指定してください。', {
+      throw new VdeError('E_INVALID_ARGUMENT', 'VDE_OPEN_HOME must be an absolute path.', {
         value: override,
       });
     }
-    // 末尾や重複の区切りを正規化する。runtimeの位置はこのpathから決まる。
+    // Normalize trailing and duplicate separators. The runtime location is derived from this path.
     return resolve(override);
   }
   if (platform === 'darwin') return join(homeDir, 'Library', 'Application Support', APP_DIR);
@@ -37,14 +37,14 @@ export function resolveStateRoot(environment: PathEnvironment): string {
 }
 
 export interface RuntimeLocation {
-  // socketとIPC keyを置く所有者専用のdirectory。
+  // Owner-only directory that holds the socket and the IPC key.
   runtimeDir: string;
-  // Unix domain socketのpath、またはWindowsのnamed pipe名。
+  // Path of the Unix domain socket, or the named pipe name on Windows.
   socketPath: string;
   keyPath: string;
 }
 
-// state rootが長くてもsocketのpath長制限に収まるよう、短い固定位置にhashで置く。
+// Place it at a short fixed location keyed by hash so a long state root still fits the socket path length limit.
 export function resolveRuntimeLocation(
   stateRoot: string,
   environment: PathEnvironment,

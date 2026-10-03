@@ -2,7 +2,7 @@ const KiB = 1024;
 const MiB = 1024 * KiB;
 const GiB = 1024 * MiB;
 
-// 仕様7.4の初期上限。変更はADRに記録する。
+// Initial limits from spec 7.4. Changes are recorded in an ADR.
 export const LIMITS = {
   openDocuments: 2000,
   documentBytes: 10 * MiB,
@@ -26,9 +26,9 @@ export const LIMITS = {
   bootstrapTicketTtlMs: 60 * 1000,
   sessionIdleMs: 12 * 60 * 60 * 1000,
   sseHeartbeatMs: 15 * 1000,
-  // 1つの通知の接続で、書き終わっていない通知の数。超えた通知は捨て、取り直しの合図にまとめる。
+  // Number of events not yet written on one notification connection. Events beyond it are dropped and replaced by a resync signal.
   ssePendingEvents: 256,
-  // 書き込みが進まないまま、この時間が過ぎた通知の接続は切る。
+  // A notification connection whose writes make no progress for this long is closed.
   sseStallMs: 60 * 1000,
   assetBytes: 20 * MiB,
   documentAssetBytes: 100 * MiB,
@@ -37,28 +37,28 @@ export const LIMITS = {
   renderGrantsPerSession: 64,
   searchLimitDefault: 5,
   searchLimitMax: 50,
-  // queryの長さ（Unicode code points）と、検索語の数。
+  // Query length (Unicode code points) and number of search terms.
   searchQueryCodePoints: 512,
   searchTerms: 32,
-  // 検索結果の抜粋の長さ（Unicode code points）。
+  // Length of a search result excerpt (Unicode code points).
   searchExcerptCodePoints: 240,
-  // 1文書から返すhitの数。大きい文書が候補を占めないようにする。
+  // Hits returned per document. Keeps a large document from filling the candidates.
   searchHitsPerDocument: 2,
-  // 検索が、indexへの反映を待つ上限。
+  // Maximum time a search waits for the index to catch up.
   searchIndexWaitMs: 2000,
-  // 質問定義と回答（JSONのUTF-8の大きさ）。
+  // Question definition and answer (UTF-8 size of the JSON).
   questionnaireBytes: 64 * KiB,
   answerBytes: 64 * KiB,
-  // 1つの質問のfield数と、文字列の回答の長さ（Unicode code points）。
+  // Fields per question and length of a string answer (Unicode code points).
   questionFields: 32,
   answerStringLength: 4000,
-  // 回答を待つ時間（秒）。
+  // Time to wait for an answer (seconds).
   feedbackWaitDefaultSeconds: 120,
   feedbackWaitMaxSeconds: 3600,
-  // HTMLと本体の間の通信（MessagePort）の1件の大きさ（JSONのUTF-8）と、件数（仕様11.7）。
+  // Size of one message (UTF-8 of the JSON) and message rate for the communication between the HTML and the host (MessagePort) (spec 11.7).
   bridgeInboundFrameBytes: 128 * KiB,
   bridgeOutboundFrameBytes: 256 * KiB,
   bridgeMessagesPerSecond: 20,
-  // 1つの表示で記録する、登録されていないfileの読み込みの数。
+  // Number of unregistered file loads recorded per view.
   renderMissingPerGrant: 32,
 } as const;

@@ -1,5 +1,5 @@
-// Markdown文書の、画像の参照とlinkを調べる。描画は本体（React）で行うので、
-// ここで決めるのは、どの画像を表示でき、どのlinkを開けるかだけ。
+// Inspect the image references and links of a Markdown document. Rendering is done by the host (React),
+// so this only decides which images can be shown and which links can be opened.
 import type { BlockNode, InlineNode } from '@tanstack/markdown';
 import { parseMarkdown } from '@tanstack/markdown/parser';
 
@@ -24,7 +24,7 @@ const MAX_LINK_TEXT = 120;
 
 interface Parsed {
   blocks: BlockNode[];
-  // 文書に書かれた画像のURL。表示しないものも含む。
+  // Image URLs written in the document. Includes the ones not shown.
   imageUrls: string[];
 }
 
@@ -48,7 +48,7 @@ function visitInline(nodes: InlineNode[], visit: (node: InlineNode) => void): vo
   }
 }
 
-// 構造の深さは、解析の時点で上限（64段）を確かめている。
+// Structure depth is checked against the limit (64 levels) at parse time.
 function visitBlocks(nodes: BlockNode[], visit: (node: InlineNode) => void): void {
   for (const node of nodes) {
     switch (node.type) {
@@ -75,7 +75,7 @@ function visitBlocks(nodes: BlockNode[], visit: (node: InlineNode) => void): voi
   }
 }
 
-// Markdownが参照するlocalの画像の候補を集める。
+// Collect candidate local images the Markdown references.
 export function scanMarkdownReferences(source: string): ScannedReference[] {
   return parseWithImages(source).imageUrls.map((url) => ({ url, context: 'image' }));
 }
@@ -91,7 +91,7 @@ export function analyzeMarkdownRender(
 ): MarkdownRenderInfo {
   const baseDir = dirnameOfLogicalPath(input.documentLogicalPath);
   const parsed = parseWithImages(input.source);
-  // 表示できない画像の理由を記録する。表示するURLは、本体が同じ規則で作る。
+  // Record why images cannot be shown. The host builds the shown URLs with the same rules.
   for (const url of parsed.imageUrls) resolveAssetUrl(url, 'image', baseDir, input.assets, log);
 
   const links: StaticLink[] = [];

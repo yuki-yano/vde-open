@@ -1,45 +1,45 @@
 import { LIMITS, type ServerEvent } from '@vde-open/shared';
 
 export interface EventQueueOptions {
-  // 1件の通知を書く。受け手へ渡し終えたら解決する。
+  // Writes one notification. Resolves once it has been handed to the receiver.
   writeEvent: (event: ServerEvent) => Promise<unknown>;
-  // 接続を保つための空の行を書く。
+  // Writes an empty line to keep the connection alive.
   writeHeartbeat: () => Promise<unknown>;
-  // 書く直前の確認。falseなら書かない（sessionの失効など。接続を終えるのは呼び出し側）。
+  // Check right before writing. If false, do not write (session expired, etc. The caller ends the connection).
   beforeWrite: () => boolean;
-  // 書き込みに失敗した。
+  // A write failed.
   onError: () => void;
-  // 書き終わっていない通知の上限。指定がなければ`LIMITS.ssePendingEvents`。
+  // Maximum number of pending notifications. Defaults to `LIMITS.ssePendingEvents`.
   limit?: number;
   now?: () => number;
 }
 
 export interface EventQueue {
-  // 書き終わっていない通知の数（取り直しの合図とheartbeatを含む）。
+  // Number of pending notifications (including the resync marker and heartbeats).
   readonly pending: number;
-  // 書き込みが進まないまま過ぎた時間。待ち行列が空なら0。
+  // Time elapsed without write progress. 0 if the queue is empty.
   stalledFor(): number;
   send(event: ServerEvent): void;
-  // 待ち行列が空のときだけ、heartbeatを並べる。
+  // Queues a heartbeat only when the queue is empty.
   heartbeat(): void;
-  // これより後は書かない（並んでいる分も書かない）。
+  // Writes nothing after this (including what is already queued).
   stop(): void;
-  // 並んでいる書き込みがすべて終わったら解決する。
+  // Resolves once every queued write has finished.
   settled(): Promise<void>;
 }
 
-// 1つの通知の接続の、書き込みの待ち行列（仕様6.5）。書き込みは順に行う。
-// 受け手が読まない間は、上限を超えた通知を捨てて1つの取り直しの合図（resync-required）にまとめ、
-// 待ち行列を増やさない。
+// Write queue for one notification connection (spec 6.5). Writes are performed in order.
+// While the receiver does not read, notifications over the limit are dropped and collapsed into one resync marker (resync-required),
+// so the queue does not grow.
 export function createEventQueue(options: EventQueueOptions): EventQueue {
   const limit = options.limit ?? LIMITS.ssePendingEvents;
   const now = options.now ?? Date.now;
   let pending = 0;
   let writes: Promise<void> = Promise.resolve();
-  // 最後に書き込みが進んだ時刻（待ち行列が空から増えた時刻を含む）。
+  // Time of the last write progress (including when the queue grew from empty).
   let progressAt = now();
   let stopped = false;
-  // 取り直しの合図を並べてから、書くまでの間か。
+  // Whether a resync marker is queued but not yet written.
   let resyncQueued = false;
 
   const enqueue = (write: () => Promise<unknown>) => {
@@ -72,9 +72,9 @@ export function createEventQueue(options: EventQueueOptions): EventQueue {
         enqueue(() => options.writeEvent(event));
         return;
       }
-      // 合図は、合図を書くまでに捨てた通知より後に届くので、受け手が合図を受けてから取り直せば、
-      // 捨てた変更も含む。合図の連番は最初に捨てた通知の連番にする。合図より前に並んだ通知は
-      // それより小さく、後に並ぶ通知は大きいので、届く連番は増え続ける。
+      // The marker arrives after the notifications dropped before it was written, so if the receiver resyncs after
+      // receiving the marker, the dropped changes are included. The marker's sequence is that of the first dropped
+      // notification. Notifications queued before the marker are smaller and those after are larger, so delivered sequences keep increasing.
       if (resyncQueued) return;
       resyncQueued = true;
       const marker: ServerEvent = {

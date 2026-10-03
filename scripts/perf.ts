@@ -1,7 +1,7 @@
-// 性能の実測（仕様16.1、PERF-001・PERF-002）。値は設計目標に対する実測で、CIのassertionにはしない。
-// 管理画面の測定には、PlaywrightのChromium（headless）を使う。
-// 配布物（apps/cli/dist）を使い、一時の VDE_OPEN_HOME で動かす。本物のstateには触れない。
-// 使い方: pnpm build && pnpm perf
+// Performance measurement (spec 16.1, PERF-001 and PERF-002). The values are measurements against the design targets, not CI assertions.
+// The management UI is measured with Playwright's Chromium (headless).
+// Uses the distribution (apps/cli/dist) and runs with a temporary VDE_OPEN_HOME. The real state is not touched.
+// Usage: pnpm build && pnpm perf
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, tmpdir } from 'node:os';
@@ -22,8 +22,8 @@ interface Fixture {
 }
 
 const FIXTURES: Fixture[] = [
-  { name: '標準（100文書／10MiB）', documents: 100, totalBytes: 10 * 1024 * 1024 },
-  { name: '負荷（1,000文書／50MiB）', documents: 1000, totalBytes: 50 * 1024 * 1024 },
+  { name: 'standard (100 documents / 10 MiB)', documents: 100, totalBytes: 10 * 1024 * 1024 },
+  { name: 'load (1,000 documents / 50 MiB)', documents: 1000, totalBytes: 50 * 1024 * 1024 },
 ];
 
 const QUERIES = [
@@ -40,7 +40,7 @@ const QUERIES = [
 ];
 const SEARCH_ROUNDS = 5;
 
-// 決まった内容の文書を作る（同じ引数なら、毎回同じ内容）。
+// Build a document with fixed content (the same arguments always give the same content).
 function documentText(index: number, bytes: number): string {
   const words = [
     'sessionの期限は12時間で、操作がなければ失効する。',
@@ -86,12 +86,12 @@ async function measureUi(
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     const started = performance.now();
     await page.goto(url);
-    const sidebar = page.getByRole('navigation', { name: '開いている文書' });
+    const sidebar = page.getByRole('navigation', { name: 'Open documents' });
     await sidebar
-      .getByRole('heading', { name: `開いている文書（${String(count)}）` })
+      .getByRole('heading', { name: `Open documents (${String(count)})` })
       .waitFor({ timeout: 120_000 });
     const rows = await sidebar.locator('li').count();
-    if (rows !== count) throw new Error(`一覧の件数が ${String(rows)} です`);
+    if (rows !== count) throw new Error(`the list has ${String(rows)} rows`);
     const sidebarMs = performance.now() - started;
 
     const title = `文書${String(count - 1)}`;
@@ -100,13 +100,13 @@ async function measureUi(
     await row.scrollIntoViewIfNeeded();
     await row.click();
     await page
-      .getByRole('region', { name: '文書の表示' })
+      .getByRole('region', { name: 'Document view' })
       .getByRole('heading', { level: 1, name: title, exact: true })
       .first()
       .waitFor({ timeout: 60_000 });
     const selectMs = performance.now() - selectStarted;
 
-    const marker = `保存した後の行 ${String(Date.now())}`;
+    const marker = `line after save ${String(Date.now())}`;
     const reflectStarted = performance.now();
     writeFileSync(lastPath, `${lastText}\n${marker}\n`);
     await page.getByText(marker).waitFor({ timeout: 60_000 });
@@ -137,7 +137,7 @@ async function measure(fixture: Fixture): Promise<Record<string, string | number
       encoding: 'utf8',
     });
   try {
-    // cold open: daemonの起動から、全文書の登録まで。
+    // cold open: from starting the daemon to registering all documents.
     const coldStarted = performance.now();
     cli(['open', 'docs', '--recursive']);
     const coldOpenMs = performance.now() - coldStarted;
@@ -148,14 +148,14 @@ async function measure(fixture: Fixture): Promise<Record<string, string | number
       homeDir: process.env['HOME'] ?? '',
       uid: typeof process.getuid === 'function' ? process.getuid() : null,
     }).connectExisting();
-    if (!ipc) throw new Error('daemonへ接続できません');
+    if (!ipc) throw new Error('cannot connect to the daemon');
     const call = async <T>(method: string, params: unknown = {}): Promise<T> => {
       const envelope = await ipc.request<T>(method, params, { timeoutMs: 120_000 });
       if (!envelope.ok) throw new Error(`${method}: ${JSON.stringify(envelope.error)}`);
       return envelope.data;
     };
     try {
-      // 索引: 全文書が検索の対象になるまで。
+      // indexing: until all documents are searchable.
       const indexStarted = performance.now();
       for (;;) {
         const result = await call<{ searchedDocuments: number; registeredDocuments: number }>(
@@ -163,12 +163,13 @@ async function measure(fixture: Fixture): Promise<Record<string, string | number
           { query: 'session', limit: 1 },
         ).catch(() => null);
         if (result !== null && result.searchedDocuments >= fixture.documents) break;
-        if (performance.now() - indexStarted > 600_000) throw new Error('索引が10分で終わりません');
+        if (performance.now() - indexStarted > 600_000)
+          throw new Error('indexing did not finish within 10 minutes');
         await sleep(100);
       }
       const indexMs = performance.now() - indexStarted;
 
-      // warm検索: 決まったqueryを繰り返す。
+      // warm search: repeat fixed queries.
       const searchMs: number[] = [];
       for (let roundIndex = 0; roundIndex < SEARCH_ROUNDS; roundIndex += 1) {
         for (const query of QUERIES) {
@@ -179,7 +180,7 @@ async function measure(fixture: Fixture): Promise<Record<string, string | number
       }
 
       type Listed = Array<{ documentId: string; revision: string; displayPath: string | null }>;
-      // 一覧は1回500件まで。続きはcursorで取る。
+      // The list returns at most 500 per call. Fetch the rest with the cursor.
       const listAll = async (): Promise<Listed> => {
         const all: Listed = [];
         let cursor: string | null = null;
@@ -197,18 +198,18 @@ async function measure(fixture: Fixture): Promise<Record<string, string | number
       const listed = { documents: await listAll() };
       const listMs = performance.now() - listStarted;
       const target = listed.documents[Math.floor(listed.documents.length / 2)];
-      if (!target) throw new Error('文書がありません');
+      if (!target) throw new Error('no documents');
       const readStarted = performance.now();
       await call('documents.read', { documentId: target.documentId });
       const readMs = performance.now() - readStarted;
 
-      // 更新の反映: fileを書き換えてから、一覧の版が変わるまで（監視の経路）。
+      // update reflection: from rewriting the file until the revision in the list changes (the watch path).
       const updatePath = join(work, 'docs', 'doc-0000.md');
       const isFirst = (document: { displayPath: string | null }) =>
         document.displayPath?.endsWith('doc-0000.md') === true;
       const previous = listed.documents.find(isFirst)?.revision;
       const updateStarted = performance.now();
-      writeFileSync(updatePath, `${documentText(0, perDocument)}\n更新した行\n`);
+      writeFileSync(updatePath, `${documentText(0, perDocument)}\nupdated line\n`);
       let updateMs = -1;
       for (;;) {
         const updated = (await listAll()).find(isFirst);
@@ -220,8 +221,8 @@ async function measure(fixture: Fixture): Promise<Record<string, string | number
         await sleep(20);
       }
 
-      // 管理画面（Chromium、headless）: 一覧に全文書が出るまで、末尾の文書を選んで表示するまで、
-      // 表示中の文書を保存してから本文の表示が変わるまで（DOMで確かめる）。
+      // management UI (Chromium, headless): until all documents appear in the list, until the last document is selected and shown,
+      // and from saving the shown document until its displayed body changes (checked in the DOM).
       const ui = await measureUi(
         execFileSync(process.execPath, [cliEntry, 'ui', '--print-url'], {
           cwd: work,
@@ -260,7 +261,7 @@ async function measure(fixture: Fixture): Promise<Record<string, string | number
     try {
       cli(['daemon', 'stop']);
     } catch {
-      // 停止済み。
+      // already stopped.
     }
     rmSync(base, { recursive: true, force: true });
   }

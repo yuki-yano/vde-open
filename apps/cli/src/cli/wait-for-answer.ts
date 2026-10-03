@@ -10,7 +10,7 @@ import {
 
 import type { IpcConnection } from '../server/ipc-client.ts';
 
-// 回答の待機を、daemonの停止・再起動の間も続けるときに、接続し直す対象のerror。
+// Errors that trigger a reconnect so that waiting for the answer continues across daemon stops and restarts.
 const RECONNECTABLE = new Set([
   'E_DAEMON_STOPPING',
   'E_DAEMON_UNAVAILABLE',
@@ -18,39 +18,39 @@ const RECONNECTABLE = new Set([
   'E_DAEMON_LOCKED',
 ]);
 const RECONNECT_INTERVAL_MS = 250;
-// daemonの応答を待つ通信の期限は、待機の期限より少し長くする。待機の期限は別に打ち切るので、
-// 通信の期限は、daemonの期限での応答を通信の失敗として扱わないためだけに使う。
+// The IPC timeout for the daemon response is slightly longer than the wait deadline. The wait deadline is
+// enforced separately, so the IPC timeout only keeps the daemon-side timeout response from counting as an IPC failure.
 const IPC_GRACE_MS = 1000;
 
 export interface WaitForAnswerOptions {
   requestId: string;
   timeoutMs: number;
-  // daemonへ接続する。起動していなければ起動する。signalが中断されたら、起動の待ちと接続をやめ、
-  // timerを残さない（待機を終えた後にprocessを生かし続けない）。
+  // Connect to the daemon, starting it if needed. When the signal is aborted, stop waiting for startup and
+  // connecting, and leave no timers behind (do not keep the process alive after the wait ends).
   connect: (signal: AbortSignal) => Promise<IpcConnection>;
-  // 中断（SIGINT）の合図を購読する。購読をやめる関数を返す。
+  // Subscribe to the interrupt (SIGINT) signal. Returns a function that unsubscribes.
   subscribeInterrupt: (listener: () => void) => () => void;
 }
 
-// 回答が確定するか、中止されるまで待つ（仕様11.6、SYS-013）。期限は開始時に決め、接続・再接続・
-// daemonの応答の待ちを、すべてその期限で打ち切る。daemonが止まって接続し直しても、期限は延ばさない。
-// 時間切れと中断では、質問は回答待ちのまま。
+// Wait until the answer is submitted or the question is cancelled (spec 11.6, SYS-013). The deadline is set at
+// the start, and connecting, reconnecting, and waiting for the daemon response all stop at that deadline.
+// Reconnecting after the daemon stops does not extend it. On timeout or interrupt, the question stays pending.
 export async function waitForAnswer(
   options: WaitForAnswerOptions,
 ): Promise<Envelope<FeedbackForAgent>> {
   const { requestId, connect } = options;
   const deadline = Date.now() + options.timeoutMs;
   const timeoutError = () =>
-    new VdeError('E_TIMEOUT', '回答を待つ時間が過ぎました。質問は回答待ちのままです。', {
+    new VdeError('E_TIMEOUT', 'The wait for the answer timed out. The question is still pending.', {
       requestId,
       status: 'pending',
     });
   const interruptedError = () =>
-    new VdeError('E_INTERRUPTED', '待機を中断しました。質問は回答待ちのままです。', {
+    new VdeError('E_INTERRUPTED', 'The wait was interrupted. The question is still pending.', {
       requestId,
     });
   let interrupted = false;
-  // 待機を終えるときに、まだ動いている接続の処理と再接続の待ちをやめさせる。
+  // When the wait ends, abandon any connection process and reconnect delay still in progress.
   const abandon = new AbortController();
   const stops = new Set<() => void>();
   const unsubscribe = options.subscribeInterrupt(() => {
@@ -58,7 +58,7 @@ export async function waitForAnswer(
     for (const stop of stops) stop();
   });
 
-  // 処理を、期限か中断までだけ待つ。間に合わなかった結果（後から成立した接続）はdiscardで片付ける。
+  // Wait for the work only until the deadline or an interrupt. A result that arrives late (a connection that opened afterwards) is cleaned up by discard.
   const bounded = <T>(work: Promise<T>, discard: (value: T) => void): Promise<T> =>
     new Promise<T>((resolve, reject) => {
       let settled = false;
@@ -91,7 +91,7 @@ export async function waitForAnswer(
       let connection: IpcConnection | null = null;
       try {
         connection = await bounded(connect(abandon.signal), (late) => late.close());
-        // 接続にかかった時間を引いた、残りの時間だけ待つ。
+        // Wait only for the time remaining after the connection took its share.
         const remaining = deadline - Date.now();
         if (remaining <= 0) throw timeoutError();
         const envelope = await bounded(
@@ -119,6 +119,6 @@ export async function waitForAnswer(
     }
   } finally {
     unsubscribe();
-    abandon.abort(new VdeError('E_INTERRUPTED', '待機を終えました。'));
+    abandon.abort(new VdeError('E_INTERRUPTED', 'The wait has ended.'));
   }
 }

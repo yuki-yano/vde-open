@@ -10,7 +10,7 @@ const eventOf = (sequence: number): ServerEvent => ({
   catalogVersion: 1,
 });
 
-// 書き込みの完了を、試験の側で1件ずつ進める。
+// The test advances write completion one at a time.
 function harness(limit: number) {
   const written: ServerEvent[] = [];
   const waiting: Array<() => void> = [];
@@ -31,7 +31,7 @@ function harness(limit: number) {
     onError: () => undefined,
   });
   const flush = () => new Promise((resolve) => setImmediate(resolve));
-  // 書き込み中の1件を終え、次の書き込みが始まるまで待つ。
+  // Finish the write in progress and wait until the next write starts.
   const complete = async () => {
     waiting.shift()?.();
     await flush();
@@ -48,20 +48,20 @@ function harness(limit: number) {
   };
 }
 
-describe('通知の待ち行列', () => {
-  it('上限を超えた通知は捨てて取り直しの合図にまとめ、書き込みの途中に通知が続いても連番は増え続ける', async () => {
+describe('notification queue', () => {
+  it('drops notifications over the limit into a resync marker, and sequences keep increasing even as notifications continue mid-write', async () => {
     const t = harness(4);
     for (const sequence of [1, 2, 3, 4]) t.queue.send(eventOf(sequence));
-    // 5と6は上限を超えたので捨て、合図（連番は最初に捨てた5）を1つだけ並べる。
+    // 5 and 6 exceed the limit, so drop them and queue just one marker (sequence 5, the first dropped).
     t.queue.send(eventOf(5));
     t.queue.send(eventOf(6));
     expect(t.queue.pending).toBe(5);
     await t.flush();
-    // 1件書き終えても、まだ上限なので7も捨てる（合図は並んだまま）。
+    // After one write finishes, still at the limit, so 7 is dropped too (the marker stays queued).
     await t.complete();
     t.queue.send(eventOf(7));
     expect(t.queue.pending).toBe(4);
-    // さらに1件書き終えると上限を下回り、8は合図の後ろに並ぶ。
+    // After one more write finishes, below the limit, so 8 is queued behind the marker.
     await t.complete();
     t.queue.send(eventOf(8));
     for (let index = 0; index < 6; index += 1) await t.complete();
@@ -76,13 +76,13 @@ describe('通知の待ち行列', () => {
     expect(t.queue.pending).toBe(0);
   });
 
-  it('合図を書いた後にあふれたら、新しい合図を並べる', async () => {
+  it('queues a new marker when overflowing after a marker was written', async () => {
     const t = harness(1);
     t.queue.send(eventOf(1));
     t.queue.send(eventOf(2));
     await t.flush();
     await t.complete();
-    // 合図（2）の書き込み中に、3を捨てると、新しい合図を並べる。
+    // Dropping 3 while the marker (2) is being written queues a new marker.
     t.queue.send(eventOf(3));
     for (let index = 0; index < 3; index += 1) await t.complete();
     expect(t.written.map((event) => `${event.type}:${String(event.sequence)}`)).toEqual([
@@ -92,7 +92,7 @@ describe('通知の待ち行列', () => {
     ]);
   });
 
-  it('heartbeatは待ち行列が空のときだけ並べ、書き込みが進まない時間を数える', async () => {
+  it('queues heartbeats only when the queue is empty, and counts time without write progress', async () => {
     const t = harness(4);
     t.queue.heartbeat();
     await t.flush();
@@ -105,7 +105,7 @@ describe('通知の待ち行列', () => {
     expect(t.queue.pending).toBe(1);
   });
 
-  it('止めた後と、書く直前の確認で拒まれた後は書かない', async () => {
+  it('writes nothing after stop, or after the pre-write check refuses', async () => {
     const t = harness(4);
     t.queue.send(eventOf(1));
     t.queue.send(eventOf(2));

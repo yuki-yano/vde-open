@@ -13,9 +13,9 @@ test.afterEach(async () => {
 });
 
 const sidebarOf = (page: import('@playwright/test').Page) =>
-  page.getByRole('navigation', { name: '開いている文書' });
+  page.getByRole('navigation', { name: 'Open documents' });
 
-test('DOC-007 / DOC-008: 階層表示で同名のfileを見分けられ、並べ替えは保存される', async ({
+test('DOC-007 / DOC-008: the tree view tells same-named files apart, and reordering is saved', async ({
   page,
 }) => {
   t.write('alpha/docs/a.md', '# alphaの文書\n');
@@ -25,22 +25,22 @@ test('DOC-007 / DOC-008: 階層表示で同名のfileを見分けられ、並べ
   await page.goto(await t.bootstrapUrl());
   const sidebar = sidebarOf(page);
 
-  // 順番の表示で、上へ移動する。
+  // In the flat view, move an item up.
   await expect(sidebar.getByRole('listitem')).toHaveText([/alphaの文書/, /betaの文書/, /説明/]);
-  await sidebar.getByRole('button', { name: '説明 を上へ移動' }).click();
+  await sidebar.getByRole('button', { name: 'Move 説明 up' }).click();
   await expect(sidebar.getByRole('listitem')).toHaveText([/alphaの文書/, /説明/, /betaの文書/]);
 
-  // 階層の表示では、rootの違いが残る。fileは動かない。
-  await sidebar.getByRole('button', { name: '階層' }).click();
+  // In the tree view, the difference in roots remains. Files are not moved.
+  await sidebar.getByRole('button', { name: 'Tree' }).click();
   const tree = sidebar.getByRole('tree');
   await expect(tree).toContainText('alpha/docs');
   await expect(tree).toContainText('beta/docs');
   await expect(tree.getByRole('button', { name: 'a.md' })).toHaveCount(2);
 
-  // 並べ替えと表示方法は、読み込み直しても保たれる。
+  // The order and the layout survive a reload.
   await page.reload();
   await expect(sidebarOf(page).getByRole('tree')).toBeVisible();
-  await sidebarOf(page).getByRole('button', { name: '順番' }).click();
+  await sidebarOf(page).getByRole('button', { name: 'Flat' }).click();
   await expect(sidebarOf(page).getByRole('listitem')).toHaveText([
     /alphaの文書/,
     /説明/,
@@ -54,7 +54,7 @@ test('DOC-007 / DOC-008: 階層表示で同名のfileを見分けられ、並べ
   ]);
 });
 
-test('DOC-013: 原文とプレビューを切り替えられ、更新を止めている間は表示が変わらない', async ({
+test('DOC-013: Source and Preview can be switched, and the view does not change while updates are paused', async ({
   page,
 }) => {
   t.write('a.md', '# 見出し\n\n**最初**の本文\n');
@@ -63,26 +63,26 @@ test('DOC-013: 原文とプレビューを切り替えられ、更新を止め�
   const body = page.getByTestId('document-body');
   await expect(body.locator('strong')).toHaveText('最初');
 
-  // 原文へ切り替えても、内容は同じ。
-  await page.getByRole('button', { name: '原文' }).click();
+  // Switching to Source shows the same content.
+  await page.getByRole('button', { name: 'Source' }).click();
   await expect(body.locator('pre')).toHaveText('# 見出し\n\n**最初**の本文\n');
-  await page.getByRole('button', { name: 'プレビュー' }).click();
+  await page.getByRole('button', { name: 'Preview' }).click();
   await expect(body.locator('strong')).toHaveText('最初');
 
-  // 更新を止めると、停止中であることを示し、保存しても表示は変わらない。
-  await page.getByRole('button', { name: '更新を止める' }).click();
-  await expect(page.getByText('更新停止中')).toBeVisible();
+  // Pausing updates shows that they are paused, and a save does not change the view.
+  await page.getByRole('button', { name: 'Pause updates' }).click();
+  await expect(page.getByText('Updates paused')).toBeVisible();
   t.atomicWrite('a.md', '# 見出し\n\n**更新後**の本文\n');
-  await expect(page.getByText('新しい版があります')).toBeVisible();
+  await expect(page.getByText('A newer revision is available')).toBeVisible();
   await expect(body.locator('strong')).toHaveText('最初');
 
-  // 再開すると、最新の内容になる。
-  await page.getByRole('button', { name: '更新を再開' }).click();
+  // Resuming shows the latest content.
+  await page.getByRole('button', { name: 'Resume updates' }).click();
   await expect(body.locator('strong')).toHaveText('更新後');
-  await expect(page.getByText('更新停止中')).toHaveCount(0);
+  await expect(page.getByText('Updates paused')).toHaveCount(0);
 });
 
-test('DOC-014: 表示していない文書が更新されても、読んでいる文書と位置を奪わない', async ({
+test('DOC-014: an update to a document not being shown does not steal the document being read or its position', async ({
   page,
 }) => {
   const long = Array.from({ length: 200 }, (_, index) => `段落 ${String(index + 1)}`).join('\n\n');
@@ -105,12 +105,12 @@ test('DOC-014: 表示していない文書が更新されても、読んでい�
   ).toBeVisible();
   expect(await body.evaluate((element) => element.scrollTop)).toBe(1500);
 
-  // 読んでいる文書そのものが更新されても、位置を保つ。
+  // Even when the document being read is updated, the position is kept.
   t.atomicWrite('reading.md', `# 読んでいる文書\n\n${long}\n\n追記\n`);
   await expect(body).toContainText('追記');
   expect(await body.evaluate((element) => element.scrollTop)).toBe(1500);
 
-  // 明示的なfocusの指示のときだけ、表示する文書が切り替わる。
+  // Only an explicit focus request switches the shown document.
   const listed = await t.json<{ documents: Array<{ documentId: string; title: string }> }>([
     'list',
   ]);
@@ -121,32 +121,34 @@ test('DOC-014: 表示していない文書が更新されても、読んでい�
   ).toBeVisible();
 });
 
-test('MD-006: 構造の上限を超える文書は、原文の表示へ切り替えて理由を示す', async ({ page }) => {
+test('MD-006: a document over the structure limits switches to the Source view and explains why', async ({
+  page,
+}) => {
   t.write('deep.md', `# 深い文書\n\n${'> '.repeat(70)}底\n`);
   t.write('normal.md', '# 普通の文書\n');
   await t.json(['open', 'deep.md', 'normal.md']);
   await page.goto(await t.bootstrapUrl());
-  await expect(page.getByText('入れ子が上限（64段）を超えている')).toBeVisible();
+  await expect(page.getByText('nested deeper than 64 levels')).toBeVisible();
   await expect(page.getByTestId('document-body').locator('pre')).toContainText('底');
 
-  // 他の文書は、そのまま表示できる。
+  // Other documents are shown as usual.
   await sidebarOf(page).getByRole('button', { name: '普通の文書', exact: true }).click();
   await expect(page.getByTestId('document-body').locator('h1')).toHaveText('普通の文書');
 });
 
-test('一覧から外しても、fileは残る', async ({ page }) => {
+test('removing from the list keeps the file', async ({ page }) => {
   t.write('a.md', '# 残すfile\n');
   await t.json(['open', 'a.md']);
   await page.goto(await t.bootstrapUrl());
-  await sidebarOf(page).getByRole('button', { name: '残すfile を一覧から外す' }).click();
-  await expect(sidebarOf(page)).toContainText('開いている文書はありません');
+  await sidebarOf(page).getByRole('button', { name: 'Remove 残すfile from the list' }).click();
+  await expect(sidebarOf(page)).toContainText('No documents are open');
   const { existsSync } = await import('node:fs');
   const { join } = await import('node:path');
   expect(existsSync(join(t.work, 'a.md'))).toBe(true);
 });
 
-test('見出しの一覧が1回の応答に収まらない文書でも、すべての見出しを表示する', async ({ page }) => {
-  // 見出しの一覧のJSONが、1回の応答の上限（1MiB）を超える文書。
+test('shows every heading even when the outline does not fit in one response', async ({ page }) => {
+  // A document whose outline JSON exceeds the per-response limit (1MiB).
   const headings = Array.from(
     { length: 1500 },
     (_, index) => `## 見出し${String(index).padStart(4, '0')} ${'x'.repeat(380)}\n\n本文。\n`,
@@ -154,7 +156,7 @@ test('見出しの一覧が1回の応答に収まらない文書でも、すべ�
   t.write('many.md', `# 多くの見出し\n\n${headings.join('\n')}`);
   await t.json(['open', 'many.md']);
   await page.goto(await t.bootstrapUrl());
-  const outline = page.getByRole('complementary', { name: '見出し' });
+  const outline = page.getByRole('complementary', { name: 'Outline' });
   await expect(outline.getByRole('listitem')).toHaveCount(1501);
   await expect(outline.getByRole('listitem').last()).toContainText('見出し1499');
   await expect(outline.getByRole('alert')).toHaveCount(0);

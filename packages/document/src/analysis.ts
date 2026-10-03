@@ -10,40 +10,40 @@ import { parse, type DefaultTreeAdapterMap } from 'parse5';
 
 import { classifyLink, isRelativeReference } from './references.ts';
 
-// 解析結果の上限（仕様7.4）。超えた文書は解析errorとし、原文の表示へ切り替える。
+// Limits on the parse result (spec 7.4). A document beyond them is a parse error and falls back to the source view.
 export const PARSER_LIMITS = { maxNodes: 100_000, maxDepth: 64 } as const;
 
 export class ParseLimitError extends Error {
   readonly limit: 'nodes' | 'depth';
 
   constructor(limit: 'nodes' | 'depth') {
-    super(`文書の構造が上限を超えています: ${limit}`);
+    super(`The document structure exceeds the limit: ${limit}.`);
     this.name = 'ParseLimitError';
     this.limit = limit;
   }
 }
 
 export interface OutlineItem {
-  // sec_0001から始まる。sec_0000は最初の見出しより前の序文に使う。revisionの中でだけ安定。
+  // Starts at sec_0001. sec_0000 is used for the preamble before the first heading. Stable only within a revision.
   sectionId: string;
   level: number;
   title: string;
-  // 祖先の見出しと自分自身のtitle。
+  // Titles of the ancestor headings and of this heading.
   headingPath: string[];
-  // 表示上のanchor。UIの描画と同じ規則で付ける。
+  // Anchor in the view. Assigned by the same rules as the UI rendering.
   anchor: string;
 }
 
-// 検索と部分取得の単位（仕様8.3）。見出しから、次の見出しの直前までの本文。
-// 下位の見出しの本文は、上位の節へ重ねて入れない。祖先の見出しはheadingPathで渡す。
+// Unit of search and partial reads (spec 8.3). The text from a heading up to just before the next heading.
+// Text under a lower heading is not folded into the upper section. Ancestor headings are passed in headingPath.
 export interface Section {
-  // 見出しの節はoutlineと同じ番号。sec_0000は、最初の見出しより前の序文。
+  // A heading section has the same number as in the outline. sec_0000 is the preamble before the first heading.
   sectionId: string;
-  // 見出しの深さ。序文は0。
+  // Heading depth. 0 for the preamble.
   level: number;
   title: string;
   headingPath: string[];
-  // 抽出した本文（見出しの文字は含まない）。原文ではなく、表示される文字を取り出したもの。
+  // Extracted text (excluding the heading text). The displayed characters, not the source.
   text: string;
 }
 
@@ -53,8 +53,8 @@ export interface DocumentAnalysis {
   sections: Section[];
 }
 
-// 見出しのanchor。parserに任せると日本語の見出しがすべて同じslugになるので、
-// parserが渡す位置の番号から作る。連番にはならないが、文書内で一意になる。
+// Heading anchor. Left to the parser, Japanese headings would all get the same slug,
+// so it is built from the position index the parser passes. Not sequential, but unique within the document.
 const headingAnchor = (_text: string, index: number): string => `h${String(index + 1)}`;
 
 const SAFE_LINK = /^(https?:|mailto:)/i;
@@ -63,15 +63,15 @@ export function isSafeLink(url: string): boolean {
   return url.startsWith('#') || SAFE_LINK.test(url);
 }
 
-// URLは解析の時点で絞る。
-// 画像は、文書からの相対参照だけを残す。表示できるのは、登録済みのlocal fileだけ（描画側で確かめる）。
-// linkは、外部のhttp(s)・mailto、文書内の見出し、localの文書への相対linkを残す。
+// URLs are narrowed at parse time.
+// Images keep only relative references from the document. Only registered local files can be shown (checked by the renderer).
+// Links keep external http(s) and mailto, headings in the document, and relative links to local documents.
 export const markdownUrlTransform: UrlTransform = (url, kind) => {
   if (kind === 'image') return isRelativeReference(url) ? url : null;
   return isSafeLink(url) || classifyLink(url).kind === 'document' ? url : null;
 };
 
-// serverとUIで同じ解析条件を使う。生HTMLは常に無効。
+// The server and the UI use the same parse options. Raw HTML is always disabled.
 export const MARKDOWN_PARSE_OPTIONS: ParseOptions = {
   allowHtml: false,
   frontmatter: true,
@@ -195,7 +195,7 @@ function blockText(node: BlockNode): string {
     case 'code':
       return node.value;
     case 'html':
-      // 生HTMLは実行せず、文字として表示している。検索でも、書かれた文字として扱う。
+      // Raw HTML is not executed; it is shown as text. Search also treats it as the written text.
       return node.value;
     case 'blockquote':
     case 'component':
@@ -219,7 +219,7 @@ function blockText(node: BlockNode): string {
   }
 }
 
-// 構造の深さは、解析の時点で上限（64段）を確かめている。
+// Structure depth is checked against the limit (64 levels) at parse time.
 function blocksText(nodes: BlockNode[]): string {
   return nodes
     .map(blockText)
@@ -229,7 +229,7 @@ function blocksText(nodes: BlockNode[]): string {
 
 function buildSections(outline: OutlineItem[], preamble: string, texts: string[]): Section[] {
   const sections: Section[] = [];
-  // 見出しも本文もない文書も、空の序文を1つ持つ。検索で見つけた節を、同じIDで取得できるようにする。
+  // A document with neither headings nor text still has one empty preamble, so a section found by search can be read by the same ID.
   if (preamble !== '' || outline.length === 0) {
     sections.push({
       sectionId: sectionIdOf(0),
@@ -251,11 +251,11 @@ function buildSections(outline: OutlineItem[], preamble: string, texts: string[]
   return sections;
 }
 
-// root直下の見出しを文書順に扱う（仕様8.3）。引用や箇条書きの中の見出しは節にしない。
+// Headings directly under the root, in document order (spec 8.3). Headings inside quotes or lists do not become sections.
 export function analyzeMarkdown(source: string): DocumentAnalysis {
   const document = parseMarkdownDocument(source);
   const headings: Array<{ level: number; title: string; anchor: string }> = [];
-  // 見出しごとの本文。先頭は、最初の見出しより前の序文。
+  // Text per heading. The first entry is the preamble before the first heading.
   const bodies: BlockNode[][] = [[]];
   for (const node of document.children) {
     if (node.type === 'heading') {
@@ -278,9 +278,9 @@ export function analyzeMarkdown(source: string): DocumentAnalysis {
 
 type HtmlNode = DefaultTreeAdapterMap['node'];
 
-// 実行される内容、表示されない内容、入力欄の値は、文字として拾わない（仕様8.4）。
+// Executed content, hidden content and form field values are not collected as text (spec 8.4).
 const HTML_SKIPPED = new Set(['script', 'style', 'template', 'textarea', 'select', 'title']);
-// 前後で行を分ける要素。
+// Elements that start a new line before and after.
 const HTML_BLOCKS = new Set([
   'address',
   'article',
@@ -313,7 +313,7 @@ const HTML_BLOCKS = new Set([
 ]);
 const HTML_CELLS = new Set(['td', 'th']);
 
-// 要素の中の文字。実行される内容や表示されない内容を持つ子は辿らない。
+// Text inside an element. Children with executed or hidden content are not visited.
 function htmlText(node: HtmlNode): string {
   if (node.nodeName === '#text' && 'value' in node) return node.value;
   if (!('childNodes' in node)) return '';
@@ -324,7 +324,7 @@ function htmlText(node: HtmlNode): string {
   return text;
 }
 
-// 行ごとに空白をまとめ、空の行を除く。
+// Collapse whitespace per line and drop empty lines.
 function tidy(text: string): string {
   return text
     .split('\n')
@@ -333,11 +333,11 @@ function tidy(text: string): string {
     .join('\n');
 }
 
-// HTMLは静的に解析するだけで、scriptは実行しない（仕様8.4）。
-// 取り出すのは、titleと見出しと、本文・codeの文字。CSSでの表示の有無や、scriptが後から作る内容は再現しない。
+// HTML is only analyzed statically; scripts never run (spec 8.4).
+// Extracts the title, the headings, and the text of the body and code. Visibility set by CSS and content scripts create later are not reproduced.
 export function analyzeHtml(source: string): DocumentAnalysis {
   const headings: Array<{ level: number; title: string; anchor: string }> = [];
-  // 見出しごとの本文。先頭は、最初の見出しより前の序文。
+  // Text per heading. The first entry is the preamble before the first heading.
   const bodies: string[] = [''];
   let title: string | null = null;
   let visited = 0;
@@ -365,13 +365,13 @@ export function analyzeHtml(source: string): DocumentAnalysis {
           title: collapse(htmlText(node)),
           anchor: id ?? `h${String(headings.length + 1)}`,
         });
-        // 見出しの文字は、本文には入れない。ここから次の見出しまでが、この節の本文。
+        // Heading text is not part of the body. From here to the next heading is this section's text.
         bodies.push('');
         return;
       }
     }
     if ('childNodes' in node) {
-      // HTMLの入れ子は深くなりやすい。構造の上限ではなく、再帰の安全のために打ち切る。
+      // HTML nesting easily gets deep. This cutoff is for recursion safety, not a structure limit.
       if (depth > 512) throw new ParseLimitError('depth');
       const separator = HTML_BLOCKS.has(node.nodeName)
         ? '\n'
@@ -383,7 +383,7 @@ export function analyzeHtml(source: string): DocumentAnalysis {
       append(separator);
     }
   };
-  // scriptは動かさない前提で解析する。noscriptの中身も、表示される文字として拾う。
+  // Parse assuming scripts do not run. The contents of noscript are collected as displayed text too.
   walk(parse(source, { scriptingEnabled: false }), 0);
   const outline = buildOutline(headings);
   const [preamble, ...texts] = bodies.map(tidy);

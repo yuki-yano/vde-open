@@ -50,7 +50,7 @@ export interface CliContext extends CliIo {
   environment: PathEnvironment;
   stdoutIsTty: boolean;
   stdin: {
-    // shellのpipeまたはredirectでdataが渡されているか。
+    // Whether data is passed through a shell pipe or redirect.
     isPiped: boolean;
     read: () => Promise<Buffer>;
   };
@@ -58,8 +58,8 @@ export interface CliContext extends CliIo {
 
 export const CLI_VERSION: string = packageJson.version;
 
-// 表示名は呼び出し名（vde-open／vo）によらず固定する。両名の出力を一致させ、
-// 呼び出し名からstateやdaemonの識別子を作らないため。
+// The display name is fixed regardless of the invoked name (vde-open / vo). Both names
+// produce the same output, and no state or daemon identifier is derived from the invoked name.
 const PROGRAM_NAME = 'vde-open';
 
 interface CommandOutcome<T> {
@@ -84,7 +84,7 @@ function toErrorBody(error: unknown): ErrorBody {
   }
   return {
     code: 'E_INTERNAL',
-    message: '内部errorが発生しました。',
+    message: 'An internal error occurred.',
     retryable: false,
     details: {},
   };
@@ -104,12 +104,10 @@ function unwrap<T>(envelope: Envelope<T>): CommandOutcome<T> {
 
 function parseInteger(label: string, min: number, max: number) {
   return (value: string): number => {
-    if (!/^\d+$/.test(value)) throw new InvalidArgumentError(`${label}は整数で指定してください。`);
+    if (!/^\d+$/.test(value)) throw new InvalidArgumentError(`${label} must be an integer.`);
     const parsed = Number(value);
     if (parsed < min || parsed > max) {
-      throw new InvalidArgumentError(
-        `${label}は${String(min)}〜${String(max)}で指定してください。`,
-      );
+      throw new InvalidArgumentError(`${label} must be between ${String(min)} and ${String(max)}.`);
     }
     return parsed;
   };
@@ -117,23 +115,23 @@ function parseInteger(label: string, min: number, max: number) {
 
 function parseLines(value: string): { start: number; end: number } {
   const match = /^(\d+):(\d+)$/.exec(value);
-  if (!match) throw new InvalidArgumentError('--linesはA:Bの形で指定してください。');
+  if (!match) throw new InvalidArgumentError('--lines must be in the form A:B.');
   const start = Number(match[1]);
   const end = Number(match[2]);
   if (start < 1 || end < start) {
-    throw new InvalidArgumentError('--linesは1以上で、A<=Bになるように指定してください。');
+    throw new InvalidArgumentError('--lines must be 1 or greater, with A <= B.');
   }
   return { start, end };
 }
 
 function parseFormat(value: string): 'auto' | 'markdown' | 'html' {
   if (value === 'auto' || value === 'markdown' || value === 'html') return value;
-  throw new InvalidArgumentError('--formatはauto、markdown、htmlのいずれかです。');
+  throw new InvalidArgumentError('--format must be one of auto, markdown, or html.');
 }
 
 function parseHtmlMode(value: string): 'static' | 'interactive' {
   if (value === 'static' || value === 'interactive') return value;
-  throw new InvalidArgumentError('--html-modeはstaticかinteractiveを指定してください。');
+  throw new InvalidArgumentError('--html-mode must be static or interactive.');
 }
 
 function describeDocument(document: DocumentSummary): string {
@@ -143,14 +141,18 @@ function describeDocument(document: DocumentSummary): string {
 
 function decodeStdin(bytes: Buffer): string {
   if (bytes.byteLength > LIMITS.documentBytes) {
-    throw new VdeError('E_LIMIT_EXCEEDED', 'stdinの内容が1文書の大きさの上限を超えています。', {
-      limit: 'documentBytes',
-      max: LIMITS.documentBytes,
-      actual: bytes.byteLength,
-    });
+    throw new VdeError(
+      'E_LIMIT_EXCEEDED',
+      'The stdin content exceeds the size limit for one document.',
+      {
+        limit: 'documentBytes',
+        max: LIMITS.documentBytes,
+        actual: bytes.byteLength,
+      },
+    );
   }
   if (bytes.includes(0)) {
-    throw new VdeError('E_INVALID_SOURCE', 'stdinの内容は開けません（contains-nul）。', {
+    throw new VdeError('E_INVALID_SOURCE', 'The stdin content cannot be opened (contains-nul).', {
       path: 'stdin',
       reason: 'contains-nul',
     });
@@ -158,7 +160,7 @@ function decodeStdin(bytes: Buffer): string {
   try {
     return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
-    throw new VdeError('E_INVALID_SOURCE', 'stdinの内容は開けません（invalid-utf8）。', {
+    throw new VdeError('E_INVALID_SOURCE', 'The stdin content cannot be opened (invalid-utf8).', {
       path: 'stdin',
       reason: 'invalid-utf8',
     });
@@ -203,33 +205,35 @@ interface AskOptions {
 
 function parseFeedbackStatus(value: string): 'pending' | 'submitted' | 'cancelled' {
   if (value === 'pending' || value === 'submitted' || value === 'cancelled') return value;
-  throw new InvalidArgumentError('--statusはpending、submitted、cancelledのいずれかです。');
+  throw new InvalidArgumentError('--status must be one of pending, submitted, or cancelled.');
 }
 
 function describeRequest(request: FeedbackForAgent): string {
   return `${request.requestId}  ${request.status}  ${escapeForTerminal(request.title)}  ${request.documentId}`;
 }
 
-// 回答を表示する。値は利用者が入力した内容なので、端末の制御文字を無害にする。
+// Show the answers. The values were typed by a person, so neutralize terminal control characters.
 function describeAnswers(request: FeedbackForAgent): string {
   const lines = [describeRequest(request)];
   if (request.submission) {
-    lines.push(`回答 ${request.submission.submissionId}（${request.submission.submittedAt}）`);
+    lines.push(`answer ${request.submission.submissionId} (${request.submission.submittedAt})`);
     for (const [name, value] of Object.entries(request.submission.answers)) {
       lines.push(
         `  ${escapeForTerminal(name)}: ${escapeContentForTerminal(JSON.stringify(value))}`,
       );
     }
     if (request.submission.confirmedAgainstOlderRevision) {
-      lines.push('  （新しい版があることを確認したうえで、質問の版に対して回答されました）');
+      lines.push(
+        "  (answered against the question's revision after confirming that a newer revision exists)",
+      );
     }
   }
-  if (request.cancellation) lines.push(`中止: ${request.cancellation.reason}`);
-  if (request.acknowledgedAt) lines.push(`取得済み: ${request.acknowledgedAt}`);
+  if (request.cancellation) lines.push(`cancelled: ${request.cancellation.reason}`);
+  if (request.acknowledgedAt) lines.push(`acknowledged: ${request.acknowledgedAt}`);
   return lines.join('\n');
 }
 
-// 質問定義のfileを読む。大きさは読む前に確かめる。内容の検証はdaemonが行う。
+// Read the questionnaire file. Check the size before reading. The daemon validates the content.
 async function readQuestionnaire(cwd: string, path: string): Promise<string> {
   const absolute = resolve(cwd, path);
   let size: number;
@@ -238,10 +242,10 @@ async function readQuestionnaire(cwd: string, path: string): Promise<string> {
     if (!info.isFile()) throw new Error('not-file');
     size = info.size;
   } catch {
-    throw new VdeError('E_PATH_NOT_FOUND', '質問定義のfileを読めません。', { path });
+    throw new VdeError('E_PATH_NOT_FOUND', 'The questionnaire file cannot be read.', { path });
   }
   if (size > LIMITS.questionnaireBytes) {
-    throw new VdeError('E_LIMIT_EXCEEDED', '質問定義が大きすぎます。', {
+    throw new VdeError('E_LIMIT_EXCEEDED', 'The questionnaire is too large.', {
       limit: 'questionnaireBytes',
       max: LIMITS.questionnaireBytes,
       actual: size,
@@ -252,13 +256,15 @@ async function readQuestionnaire(cwd: string, path: string): Promise<string> {
       await readFile(absolute),
     );
   } catch {
-    throw new VdeError('E_QUESTIONNAIRE_INVALID', '質問定義をUTF-8として読めません。', { path });
+    throw new VdeError('E_QUESTIONNAIRE_INVALID', 'The questionnaire cannot be read as UTF-8.', {
+      path,
+    });
   }
 }
 
 function parseSearchMode(value: string): 'text' | 'exact' | 'path' {
   if (value === 'text' || value === 'exact' || value === 'path') return value;
-  throw new InvalidArgumentError('--modeはtext、exact、pathのいずれかです。');
+  throw new InvalidArgumentError('--mode must be one of text, exact, or path.');
 }
 
 interface ReadOptions {
@@ -287,7 +293,7 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     }
   };
 
-  // 各commandの共通処理。JSONならenvelopeを1個だけstdoutへ出す（仕様5.6）。
+  // Shared handling for every command. With JSON, write exactly one envelope to stdout (spec 5.6).
   const execute = async <T>(
     command: string,
     json: boolean,
@@ -324,7 +330,7 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     }
   };
 
-  // browserで管理UIを開く。開けなかったら、登録などの結果とは別にwarningとして伝える。
+  // Open the management UI in the browser. If that fails, report it as a warning separate from the result of the open itself.
   const openBrowser = async (connection: IpcConnection): Promise<Warning[]> => {
     const { data } = unwrap(await connection.request<BootstrapResult>('ui.bootstrap', {}));
     if (await browser.open(data.bootstrapUrl)) return [];
@@ -332,7 +338,7 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
       {
         code: 'W_BROWSER_OPEN_FAILED',
         message:
-          'browserを開けませんでした。`vde-open ui --print-url`で表示したURLを、browserで開いてください。',
+          'The browser could not be opened. Open the URL shown by `vde-open ui --print-url` in your browser.',
         details: { uiUrl: data.uiUrl },
       },
     ];
@@ -343,8 +349,10 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     try {
       if (printUrl) {
         const { data } = unwrap(await connection.request<BootstrapResult>('ui.bootstrap', {}));
-        // 秘密を含むURL。通常の結果（JSON）には混ぜず、明示されたときだけ出す。
-        context.stderr('次のURLは60秒間・1回だけ有効な秘密を含みます。共有しないでください。\n');
+        // A URL that contains a secret. Keep it out of the normal result (JSON) and print it only when asked explicitly.
+        context.stderr(
+          'This URL contains a one-time secret valid for 60 seconds. Do not share it.\n',
+        );
         context.stdout(`${data.bootstrapUrl}\n`);
         return { data: { uiUrl: data.uiUrl, opened: false } };
       }
@@ -360,17 +368,17 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
   program
     .name(PROGRAM_NAME)
     .description(
-      '開いたMarkdown／HTMLをブラウザで表示し、Agentが一覧・検索・部分取得できるようにするローカルCLI',
+      'Local CLI that shows opened Markdown and HTML in the browser and lets agents list, search, and read parts of them',
     )
-    .version(CLI_VERSION, '-V, --version', 'versionを表示する')
-    .helpOption('-h, --help', 'helpを表示する')
+    .version(CLI_VERSION, '-V, --version', 'Show the version')
+    .helpOption('-h, --help', 'Show help')
     .addHelpText(
       'after',
-      '\n`vo`は`vde-open`と同じコマンドです。fileを直接渡すと`open`として扱います（例: vo a.md）。\n引数なしで実行すると、管理UIをbrowserで開きます。',
+      '\n`vo` is the same command as `vde-open`. Passing a file directly is treated as `open` (for example: vo a.md).\nRunning with no arguments opens the management UI in the browser.',
     )
     .exitOverride()
     .configureOutput({ writeOut: context.stdout, writeErr: context.stderr })
-    // 引数なしは`ui`と同じ（仕様5.1）。
+    // No arguments is the same as `ui` (spec 5.1).
     .action(async () => {
       await execute<UiResult>(
         'ui',
@@ -381,56 +389,62 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     });
 
   const openCommand = program.command('open');
-  // parserがoptionとして認識した指定だけを数える。`--`より後のfile名やoptionの値は数えない。
+  // Count only what the parser recognized as options. File names after `--` and option values are not counted.
   const seenOpenFlags = new Set<'open' | 'no-open'>();
   openCommand.on('option:open', () => seenOpenFlags.add('open'));
   openCommand.on('option:no-open', () => seenOpenFlags.add('no-open'));
   openCommand
-    .description('文書を開く。directoryやglobは、対象の文書を列挙して開く')
-    .argument('[paths...]', 'file、directory、glob。`-`はstdin')
-    .option('--format <format>', 'auto、markdown、html。stdinでは必須', parseFormat, 'auto')
-    .option('--title <text>', '表示するtitle。1文書のときだけ')
-    .option('--key <key>', 'stdinの文書を同じ1件として更新するためのkey。1文書のときだけ')
-    .option('-R, --recursive', 'directoryを再帰的に列挙する', false)
-    .option('-w, --watch', 'directory／globに新しく現れた文書も開く', false)
+    .description('Open documents. A directory or glob is expanded to the matching documents')
+    .argument('[paths...]', 'File, directory, or glob. `-` means stdin')
+    .option('--format <format>', 'auto, markdown, or html. Required for stdin', parseFormat, 'auto')
+    .option('--title <text>', 'Title to display. Only for a single document')
+    .option(
+      '--key <key>',
+      'Key that updates the stdin document as the same entry. Only for a single document',
+    )
+    .option('-R, --recursive', 'List directories recursively', false)
+    .option('-w, --watch', 'Also open documents that newly appear in the directory or glob', false)
     .option(
       '--html-mode <mode>',
-      'HTMLの表示方法。static（既定。scriptを動かさない）、interactive（scriptを動かすことを許可する）',
+      'How to show HTML. static (default; scripts do not run) or interactive (scripts are allowed to run)',
       parseHtmlMode,
     )
     .option(
       '--assets-root <dir>',
-      '画像やCSSなどのlocal fileを読める範囲。指定がなければ、文書のあるdirectory',
+      'Range of local files (images, CSS, etc.) that may be read. Defaults to the directory of the document',
     )
     .option(
       '--asset <path>',
-      '文書の解析では見つからないlocal fileを個別に登録する（assets-rootからの相対path）。複数回指定できる',
+      'Register a local file that document parsing does not find (path relative to assets-root). Can be repeated',
       (value: string, previous: string[]) => [...previous, value],
       [] as string[],
     )
-    .option('--open', 'browserで管理UIを開く')
-    .option('--no-open', 'browserを開かない')
-    .option('--focus', '最初に指定した文書を表示中の文書にする', false)
-    .option('--json', '結果をJSONで出力する', false)
+    .option('--open', 'Open the management UI in the browser')
+    .option('--no-open', 'Do not open the browser')
+    .option('--focus', 'Make the first specified document the displayed document', false)
+    .option('--json', 'Output the result as JSON', false)
     .action(async (paths: string[], options: OpenOptions) => {
       await execute<OpenResult>(
         'open',
         options.json,
         async () => {
           if (seenOpenFlags.size === 2) {
-            throw new VdeError('E_INVALID_ARGUMENT', '--openと--no-openは同時に指定できません。');
+            throw new VdeError(
+              'E_INVALID_ARGUMENT',
+              '--open and --no-open cannot be used together.',
+            );
           }
           const explicitStdin = paths.includes('-');
           const filePaths = paths.filter((path) => path !== '-');
           const fromStdin = explicitStdin || (filePaths.length === 0 && context.stdin.isPiped);
           if (fromStdin && filePaths.length > 0) {
-            throw new VdeError('E_INVALID_ARGUMENT', 'stdinとpathは同時に指定できません。');
+            throw new VdeError('E_INVALID_ARGUMENT', 'stdin and paths cannot be used together.');
           }
-          // pipeで内容が渡されているのにpathもある場合、どちらを開くのか決められない。
+          // When content is piped in but paths are also given, there is no way to decide which to open.
           if (!fromStdin && context.stdin.isPiped) {
             throw new VdeError(
               'E_INVALID_ARGUMENT',
-              'stdinとpathは同時に指定できません。pathを開くときは、stdinへ内容を渡さないでください。',
+              'stdin and paths cannot be used together. Do not pipe content to stdin when opening paths.',
             );
           }
           const base = {
@@ -447,9 +461,12 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
           let params: Record<string, unknown>;
           if (fromStdin) {
             if (options.format === 'auto') {
-              throw new VdeError('E_INVALID_ARGUMENT', 'stdinから開くときは--formatが必要です。');
+              throw new VdeError(
+                'E_INVALID_ARGUMENT',
+                '--format is required when opening from stdin.',
+              );
             }
-            // EOFまで読み切ってから登録する。途中の内容を完成した文書として扱わない。
+            // Read through EOF before registering. Partial content is not treated as a complete document.
             params = {
               ...base,
               paths: [],
@@ -467,8 +484,8 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
             if (options.focus && first) {
               await connection.request('documents.focus', { documentId: first.documentId });
             }
-            // 開く・browserを開く・focusするは、それぞれ独立した操作（仕様5.2）。
-            // 指定がなければ、端末からの実行で、daemonを新しく起動したときだけbrowserを開く。
+            // Opening, opening the browser, and focusing are independent operations (spec 5.2).
+            // Without an explicit flag, open the browser only when run from a terminal and the daemon was newly started.
             const shouldOpen = options.open ?? (!options.json && context.stdoutIsTty && started);
             if (shouldOpen) warnings.push(...(await openBrowser(connection)));
             return { ...outcome, warnings };
@@ -480,23 +497,23 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
           [
             ...data.documents.map(describeDocument),
             ...data.watchRules.map(
-              (rule) => `監視: ${rule.watchId}  ${escapeForTerminal(rule.pattern ?? rule.root)}`,
+              (rule) => `watch: ${rule.watchId}  ${escapeForTerminal(rule.pattern ?? rule.root)}`,
             ),
-            `${String(data.documents.length)}件（新規 ${String(data.created)}、更新 ${String(data.updated)}、変更なし ${String(data.unchanged)}）`,
+            `documents: ${String(data.documents.length)} (new ${String(data.created)}, updated ${String(data.updated)}, unchanged ${String(data.unchanged)})`,
           ].join('\n'),
       );
     });
 
   program
     .command('list')
-    .description('開いている文書を一覧する')
+    .description('List open documents')
     .option(
       '--limit <n>',
-      `件数（既定${String(LIMITS.listLimitDefault)}、最大${String(LIMITS.listLimitMax)}）`,
+      `Number of results (default ${String(LIMITS.listLimitDefault)}, max ${String(LIMITS.listLimitMax)})`,
       parseInteger('--limit', 1, LIMITS.listLimitMax),
     )
-    .option('--cursor <cursor>', '前回の結果のnextCursor')
-    .option('--json', '結果をJSONで出力する', false)
+    .option('--cursor <cursor>', 'nextCursor from the previous result')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (options: { limit?: number; cursor?: string; json: boolean }) => {
       await execute<ListResult>(
         'list',
@@ -509,38 +526,38 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
         (data) =>
           [
             ...data.documents.map(describeDocument),
-            `${String(data.documents.length)}件／開いている文書 ${String(data.totalDocuments)}件`,
+            `showing ${String(data.documents.length)} of ${String(data.totalDocuments)} open documents`,
           ].join('\n'),
       );
     });
 
   program
     .command('search')
-    .description('開いている文書を検索する。対象は、開いている文書だけ')
-    .argument('<query>', '検索する語。文字として扱い、正規表現としては解釈しない')
+    .description('Search open documents. Only open documents are searched')
+    .argument('<query>', 'Words to search for. Treated literally, not as a regular expression')
     .option(
       '--mode <mode>',
-      'text（語の一致。既定）、exact（連続した文字列だけ）、path（file名とpathだけ）',
+      'text (word match; default), exact (contiguous string only), or path (file name and path only)',
       parseSearchMode,
     )
     .option(
       '--limit <n>',
-      `件数（既定${String(LIMITS.searchLimitDefault)}、最大${String(LIMITS.searchLimitMax)}）`,
+      `Number of results (default ${String(LIMITS.searchLimitDefault)}, max ${String(LIMITS.searchLimitMax)})`,
       parseInteger('--limit', 1, LIMITS.searchLimitMax),
     )
     .option(
       '--document <documentId>',
-      '対象を絞る文書ID。複数回指定できる',
+      'Document ID to restrict the search to. Can be repeated',
       (value: string, previous: string[]) => [...previous, value],
       [] as string[],
     )
     .option(
       '--max-bytes <n>',
-      `結果の上限byte数（既定${String(LIMITS.readMaxBytesDefault)}）`,
+      `Maximum bytes of results (default ${String(LIMITS.readMaxBytesDefault)})`,
       parseInteger('--max-bytes', 1, Number.MAX_SAFE_INTEGER),
     )
-    .option('--cursor <cursor>', '前回の結果のnextCursor')
-    .option('--json', '結果をJSONで出力する', false)
+    .option('--cursor <cursor>', 'nextCursor from the previous result')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (query: string, options: SearchOptions) => {
       await execute<SearchResult>(
         'search',
@@ -552,7 +569,7 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
           ) {
             throw new VdeError(
               'E_INVALID_ARGUMENT',
-              `--max-bytesは${String(LIMITS.readMaxBytesMin)}〜${String(LIMITS.readMaxBytesMax)}で指定してください。`,
+              `--max-bytes must be between ${String(LIMITS.readMaxBytesMin)} and ${String(LIMITS.readMaxBytesMax)}.`,
               { min: LIMITS.readMaxBytesMin, max: LIMITS.readMaxBytesMax },
             );
           }
@@ -569,12 +586,12 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
           [
             ...data.hits.map(
               (hit) =>
-                `${hit.documentId}  ${hit.sectionId}  ${escapeForTerminal(hit.title)}${hit.headingPath.length > 0 ? `  ＞ ${escapeForTerminal(hit.headingPath.join(' ＞ '))}` : ''}\n    ${escapeForTerminal(hit.excerpt)}`,
+                `${hit.documentId}  ${hit.sectionId}  ${escapeForTerminal(hit.title)}${hit.headingPath.length > 0 ? `  > ${escapeForTerminal(hit.headingPath.join(' > '))}` : ''}\n    ${escapeForTerminal(hit.excerpt)}`,
             ),
-            `${String(data.hits.length)}件／検索した文書 ${String(data.searchedDocuments)}件（開いている文書 ${String(data.registeredDocuments)}件）${data.truncated ? '　続きがあります' : ''}`,
+            `hits: ${String(data.hits.length)} / searched documents: ${String(data.searchedDocuments)} (open documents: ${String(data.registeredDocuments)})${data.truncated ? '  more results available' : ''}`,
             ...(data.incomplete
               ? [
-                  `一部の文書は検索できていません（準備中 ${String(data.indexingDocuments.length)}件、失敗 ${String(data.failedDocuments.length)}件）`,
+                  `Some documents could not be searched (indexing ${String(data.indexingDocuments.length)}, failed ${String(data.failedDocuments.length)})`,
                 ]
               : []),
           ].join('\n'),
@@ -583,19 +600,22 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
 
   program
     .command('read')
-    .description('開いている文書の原文、見出しの構造、または1つの節の本文を取得する')
-    .argument('<documentId>', '文書ID')
-    .option('--outline', '見出しの構造を取得する', false)
-    .option('--section <sectionId>', '1つの節の、抽出した本文を取得する（例: sec_0002）')
-    .option('--lines <A:B>', '原文の行範囲（1始まり、両端を含む）', parseLines)
-    .option('--revision <revision>', '取得する版。保持されていなければerror')
+    .description('Read the source of an open document, its outline, or the body of one section')
+    .argument('<documentId>', 'Document ID')
+    .option('--outline', 'Read the outline', false)
+    .option(
+      '--section <sectionId>',
+      'Read the extracted body of one section (for example: sec_0002)',
+    )
+    .option('--lines <A:B>', 'Line range of the source (1-based, inclusive)', parseLines)
+    .option('--revision <revision>', 'Revision to read. Fails if it is no longer kept')
     .option(
       '--max-bytes <n>',
-      `本文の上限byte数（既定${String(LIMITS.readMaxBytesDefault)}）`,
+      `Maximum bytes of the body (default ${String(LIMITS.readMaxBytesDefault)})`,
       parseInteger('--max-bytes', 1, Number.MAX_SAFE_INTEGER),
     )
-    .option('--cursor <cursor>', '前回の結果のnextCursor')
-    .option('--json', '結果をJSONで出力する', false)
+    .option('--cursor <cursor>', 'nextCursor from the previous result')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (documentId: string, options: ReadOptions) => {
       await execute<ReadResult>(
         'read',
@@ -607,7 +627,7 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
           ) {
             throw new VdeError(
               'E_INVALID_ARGUMENT',
-              `--max-bytesは${String(LIMITS.readMaxBytesMin)}〜${String(LIMITS.readMaxBytesMax)}で指定してください。`,
+              `--max-bytes must be between ${String(LIMITS.readMaxBytesMin)} and ${String(LIMITS.readMaxBytesMax)}.`,
               { min: LIMITS.readMaxBytesMin, max: LIMITS.readMaxBytesMax },
             );
           }
@@ -619,14 +639,14 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
           if (selectors > 1) {
             throw new VdeError(
               'E_INVALID_ARGUMENT',
-              '--outline、--section、--linesは、どれか1つだけ指定できます。',
+              'Only one of --outline, --section, or --lines can be specified.',
             );
           }
-          // cursorは、発行したときの版と取得の種類で続きを取る。範囲や版は変えられない。
+          // A cursor continues with the revision and read kind it was issued for. The range and revision cannot change.
           if (options.cursor !== undefined && (selectors > 0 || options.revision !== undefined)) {
             throw new VdeError(
               'E_INVALID_ARGUMENT',
-              '--cursorと、--revision・--outline・--section・--linesは併用できません。',
+              '--cursor cannot be combined with --revision, --outline, --section, or --lines.',
             );
           }
           return viaDaemon('documents.read', {
@@ -656,56 +676,56 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
 
   program
     .command('close')
-    .description('文書を一覧から外す。原本は削除しない')
-    .argument('[targets...]', '文書IDまたはpath')
-    .option('--all', '開いている文書をすべて閉じ、監視ruleも解除する', false)
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Remove documents from the list. The original files are not deleted')
+    .argument('[targets...]', 'Document ID or path')
+    .option('--all', 'Close all open documents and remove the watch rules too', false)
+    .option('--json', 'Output the result as JSON', false)
     .action(async (targets: string[], options: { all: boolean; json: boolean }) => {
       await execute<CloseResult>(
         'close',
         options.json,
         () => viaDaemon('documents.close', { cwd: context.cwd, targets, all: options.all }),
         (data) =>
-          `${String(data.closed.length)}件を閉じました（すでに閉じていた文書 ${String(data.alreadyClosed.length)}件）`,
+          `closed: ${String(data.closed.length)} (already closed: ${String(data.alreadyClosed.length)})`,
       );
     });
 
   program
     .command('focus')
-    .description('管理UIで表示する文書を切り替える')
-    .argument('<documentId>', '文書ID')
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Switch the document displayed in the management UI')
+    .argument('<documentId>', 'Document ID')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (documentId: string, options: { json: boolean }) => {
       await execute<{ documentId: string }>(
         'focus',
         options.json,
         () => viaDaemon('documents.focus', { documentId }),
-        (data) => `表示する文書を切り替えました: ${data.documentId}`,
+        (data) => `Switched the displayed document to ${data.documentId}`,
       );
     });
 
   program
     .command('refresh')
-    .description('fileを読み直す。指定がなければ、開いているfileのすべて')
-    .argument('[documentId]', '文書ID')
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Re-read files. Without an argument, all open files')
+    .argument('[documentId]', 'Document ID')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (documentId: string | undefined, options: { json: boolean }) => {
       await execute<RefreshResult>(
         'refresh',
         options.json,
         () => viaDaemon('documents.refresh', documentId === undefined ? {} : { documentId }),
         (data) =>
-          `${String(data.documents.length)}件を確認し、${String(data.changed.length)}件を更新しました`,
+          `checked ${String(data.documents.length)} documents, updated ${String(data.changed.length)}`,
       );
     });
 
   const renderRules = (data: WatchListResult) =>
     data.watchRules.length === 0
-      ? '監視ruleはありません'
+      ? 'No watch rules'
       : data.watchRules
           .map(
             (rule) =>
-              `${rule.watchId}  ${rule.kind}  ${escapeForTerminal(rule.pattern ?? rule.root)}${rule.recursive ? '  (再帰)' : ''}`,
+              `${rule.watchId}  ${rule.kind}  ${escapeForTerminal(rule.pattern ?? rule.root)}${rule.recursive ? '  (recursive)' : ''}`,
           )
           .join('\n');
 
@@ -715,36 +735,45 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
   askCommand.on('option:no-open', () => seenAskFlags.add('no-open'));
   askCommand
     .description(
-      '人に質問する。回答は管理UIで入力・送信され、`feedback wait`で受け取る。秘密（password・API key）の入力には使わない',
+      'Ask a person a question. The answer is entered and submitted in the management UI and received with `feedback wait`. Do not use it for secrets (passwords, API keys)',
     )
-    .argument('<questionnaire>', '質問定義のJSON file')
-    .option('--document <documentId>', '開いている文書へ質問する')
-    .option('--revision <revision>', '--documentの、質問する版。指定がなければ現在の版')
-    .option('--view <path>', '文書を開いてから、その版へ質問する')
+    .argument('<questionnaire>', 'Questionnaire JSON file')
+    .option('--document <documentId>', 'Ask about an open document')
+    .option(
+      '--revision <revision>',
+      'Revision of --document to ask about. Defaults to the current revision',
+    )
+    .option('--view <path>', 'Open the document, then ask about that revision')
     .option(
       '--html-mode <mode>',
-      '--viewで開くHTMLの表示方法。interactiveなら、HTMLから回答案を送れる',
+      'How to show HTML opened with --view. With interactive, the HTML can send draft answers',
       parseHtmlMode,
     )
-    .option('--assets-root <dir>', '--viewで開く文書の、local fileを読める範囲')
+    .option('--assets-root <dir>', 'Range of local files that the --view document may read')
     .option(
       '--asset <path>',
-      '--viewで開く文書の、個別に登録するlocal file（複数回指定できる）',
+      'Local file to register individually for the --view document (can be repeated)',
       (value: string, previous: string[]) => [...previous, value],
       [] as string[],
     )
-    .option('--operation-id <uuid>', '再試行で同じ質問を重ねて作らないための識別子')
-    .option('--open', 'browserで管理UIを開く')
-    .option('--no-open', 'browserを開かない')
-    .option('--focus', '質問した文書を表示中の文書にする', false)
-    .option('--json', '結果をJSONで出力する', false)
+    .option(
+      '--operation-id <uuid>',
+      'Identifier that keeps a retry from creating the same question twice',
+    )
+    .option('--open', 'Open the management UI in the browser')
+    .option('--no-open', 'Do not open the browser')
+    .option('--focus', 'Make the asked document the displayed document', false)
+    .option('--json', 'Output the result as JSON', false)
     .action(async (questionnaire: string, options: AskOptions) => {
       await execute<FeedbackCreateResult>(
         'ask',
         options.json,
         async () => {
           if (seenAskFlags.size === 2) {
-            throw new VdeError('E_INVALID_ARGUMENT', '--openと--no-openは同時に指定できません。');
+            throw new VdeError(
+              'E_INVALID_ARGUMENT',
+              '--open and --no-open cannot be used together.',
+            );
           }
           const params = {
             cwd: context.cwd,
@@ -776,20 +805,22 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
           }
         },
         (data) =>
-          `${describeRequest(data.request)}${data.replayed ? '\n（同じoperation IDの質問を返しました）' : ''}`,
+          `${describeRequest(data.request)}${data.replayed ? '\n(returned the existing question with the same operation ID)' : ''}`,
       );
     });
 
-  // 回答を待つ。daemonが止まったり再起動したりしても、最初に決めた期限まで接続し直して待つ。
-  // 期限を過ぎても、中断しても、質問は回答待ちのまま（仕様11.3）。
+  // Wait for the answer. Even if the daemon stops or restarts, reconnect and keep waiting until the deadline set at the start.
+  // On timeout or interrupt, the question stays pending (spec 11.3).
   const feedbackCommand = program
     .command('feedback')
-    .description('質問の状態と回答を確認する。回答案（送信前の入力）は返さない');
+    .description(
+      'Check the status and answers of questions. Draft answers (input before submit) are not returned',
+    );
   feedbackCommand
     .command('list')
-    .description('質問を一覧する')
-    .option('--status <status>', 'pending、submitted、cancelled', parseFeedbackStatus)
-    .option('--json', '結果をJSONで出力する', false)
+    .description('List questions')
+    .option('--status <status>', 'pending, submitted, or cancelled', parseFeedbackStatus)
+    .option('--json', 'Output the result as JSON', false)
     .action(async (options: { status?: string; json: boolean }) => {
       await execute<FeedbackListResult>(
         'feedback.list',
@@ -800,14 +831,17 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
             options.status === undefined ? {} : { status: options.status },
           ),
         (data) =>
-          [...data.requests.map(describeRequest), `${String(data.requests.length)}件`].join('\n'),
+          [
+            ...data.requests.map(describeRequest),
+            `questions: ${String(data.requests.length)}`,
+          ].join('\n'),
       );
     });
   feedbackCommand
     .command('get')
-    .description('質問の状態と、確定した回答を取得する。取得済みの印は付けない')
-    .argument('<requestId>', '質問のID')
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Get the status of a question and its submitted answers. Does not acknowledge')
+    .argument('<requestId>', 'Question ID')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (requestId: string, options: { json: boolean }) => {
       await execute<FeedbackForAgent>(
         'feedback.get',
@@ -818,15 +852,17 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     });
   feedbackCommand
     .command('wait')
-    .description('回答が確定するか、中止されるまで待つ。期限を過ぎても、質問は回答待ちのまま')
-    .argument('<requestId>', '質問のID')
+    .description(
+      'Wait until the answer is submitted or the question is cancelled. After the timeout, the question stays pending',
+    )
+    .argument('<requestId>', 'Question ID')
     .option(
       '--timeout <seconds>',
-      `待つ秒数（既定${String(LIMITS.feedbackWaitDefaultSeconds)}、最大${String(LIMITS.feedbackWaitMaxSeconds)}）`,
+      `Seconds to wait (default ${String(LIMITS.feedbackWaitDefaultSeconds)}, max ${String(LIMITS.feedbackWaitMaxSeconds)})`,
       parseInteger('--timeout', 1, LIMITS.feedbackWaitMaxSeconds),
       LIMITS.feedbackWaitDefaultSeconds,
     )
-    .option('--json', '結果をJSONで出力する', false)
+    .option('--json', 'Output the result as JSON', false)
     .action(async (requestId: string, options: { timeout: number; json: boolean }) => {
       await execute<FeedbackForAgent>(
         'feedback.wait',
@@ -848,10 +884,12 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     });
   feedbackCommand
     .command('ack')
-    .description('確定した回答を取得・処理したことを記録する。何度実行しても同じ結果')
-    .argument('<requestId>', '質問のID')
-    .requiredOption('--submission-id <submissionId>', '回答のID（getやwaitの結果）')
-    .option('--json', '結果をJSONで出力する', false)
+    .description(
+      'Record that the submitted answers were received and handled. Repeating it gives the same result',
+    )
+    .argument('<requestId>', 'Question ID')
+    .requiredOption('--submission-id <submissionId>', 'Answer ID (from the result of get or wait)')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (requestId: string, options: { submissionId: string; json: boolean }) => {
       await execute<FeedbackForAgent>(
         'feedback.ack',
@@ -862,9 +900,9 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     });
   feedbackCommand
     .command('cancel')
-    .description('回答待ちの質問を中止する')
-    .argument('<requestId>', '質問のID')
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Cancel a pending question')
+    .argument('<requestId>', 'Question ID')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (requestId: string, options: { json: boolean }) => {
       await execute<FeedbackForAgent>(
         'feedback.cancel',
@@ -875,24 +913,26 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     });
   feedbackCommand
     .command('forget')
-    .description('終わった質問の記録を消す。回答待ちの質問は消せない。原本と文書は消さない')
-    .argument('<requestId>', '質問のID')
-    .option('--yes', '消すことを確認する', false)
-    .option('--json', '結果をJSONで出力する', false)
+    .description(
+      'Delete the record of a finished question. A pending question cannot be deleted. Files and documents are kept',
+    )
+    .argument('<requestId>', 'Question ID')
+    .option('--yes', 'Confirm the deletion', false)
+    .option('--json', 'Output the result as JSON', false)
     .action(async (requestId: string, options: { yes: boolean; json: boolean }) => {
       await execute<{ requestId: string; forgotten: boolean }>(
         'feedback.forget',
         options.json,
         () => viaDaemon('feedback.forget', { requestId, confirmed: options.yes }),
-        (data) => `${data.requestId}  消しました`,
+        (data) => `${data.requestId}  deleted`,
       );
     });
 
-  const watchCommand = program.command('watch').description('監視ruleを確認・解除する');
+  const watchCommand = program.command('watch').description('List and remove watch rules');
   watchCommand
     .command('list')
-    .description('監視ruleを一覧する')
-    .option('--json', '結果をJSONで出力する', false)
+    .description('List watch rules')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (options: { json: boolean }) => {
       await execute<WatchListResult>(
         'watch.list',
@@ -903,9 +943,9 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     });
   watchCommand
     .command('remove')
-    .description('監視ruleを解除する。開いている文書は閉じない')
-    .argument('<watchId>', '監視ruleのID')
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Remove a watch rule. Open documents stay open')
+    .argument('<watchId>', 'Watch rule ID')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (watchId: string, options: { json: boolean }) => {
       await execute<WatchListResult>(
         'watch.remove',
@@ -917,15 +957,15 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
 
   program
     .command('ui')
-    .description('管理UIをbrowserで開く')
-    .option('--print-url', 'browserを開かず、一回限りのURLを表示する', false)
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Open the management UI in the browser')
+    .option('--print-url', 'Print a one-time URL instead of opening the browser', false)
+    .option('--json', 'Output the result as JSON', false)
     .action(async (options: { printUrl: boolean; json: boolean }) => {
       if (options.printUrl && options.json) {
         fail(
           new VdeError(
             'E_INVALID_ARGUMENT',
-            '--print-urlの出力は秘密を含むため、--jsonとは併用できません。',
+            '--print-url cannot be combined with --json because its output contains a secret.',
           ),
           true,
         );
@@ -941,14 +981,14 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
 
   const renderStatus = (status: DaemonStatus) =>
     status.state === 'running'
-      ? `running  pid=${String(status.pid)}  開いている文書 ${String(status.openDocuments)}件  ${status.uiUrl ?? ''}`
+      ? `running  pid=${String(status.pid)}  open documents: ${String(status.openDocuments)}  ${status.uiUrl ?? ''}`
       : 'stopped';
 
-  const daemon = program.command('daemon').description('daemonを起動・確認・停止する');
+  const daemon = program.command('daemon').description('Start, inspect, and stop the daemon');
   daemon
     .command('status')
-    .description('daemonの状態を表示する。停止中でも新しく起動しない')
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Show the daemon status. Does not start a new daemon when stopped')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (options: { json: boolean }) => {
       await execute<DaemonStatus>(
         'daemon.status',
@@ -967,8 +1007,8 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     });
   daemon
     .command('start')
-    .description('daemonを起動する。起動済みならそのまま使う')
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Start the daemon. Reuses it if already running')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (options: { json: boolean }) => {
       await execute<DaemonStatus>(
         'daemon.start',
@@ -979,20 +1019,20 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     });
   daemon
     .command('stop')
-    .description('daemonを停止する。開いている文書の登録は残る')
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Stop the daemon. Open documents stay registered')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (options: { json: boolean }) => {
       await execute<{ state: 'stopped'; wasRunning: boolean }>(
         'daemon.stop',
         options.json,
         async () => ({ data: { state: 'stopped', ...(await control.stop()) } }),
-        (data) => (data.wasRunning ? '停止しました' : '起動していません'),
+        (data) => (data.wasRunning ? 'Stopped' : 'Not running'),
       );
     });
   daemon
     .command('restart')
-    .description('daemonを停止してから起動する')
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Stop the daemon, then start it')
+    .option('--json', 'Output the result as JSON', false)
     .action(async (options: { json: boolean }) => {
       await execute<DaemonStatus>(
         'daemon.restart',
@@ -1007,15 +1047,15 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
 
   program
     .command('serve')
-    .description('daemonを前景で動かす。Ctrl+Cで停止する')
+    .description('Run the daemon in the foreground. Press Ctrl+C to stop')
     .option(
       '--port <n>',
-      '管理UIのport。指定がなければ空きportを使う',
+      'Port for the management UI. Defaults to a free port',
       parseInteger('--port', 1, 65535),
     )
     .option(
       '--preview-port <n>',
-      '文書を表示するlistenerのport。指定がなければ空きportを使う',
+      'Port for the listener that shows documents. Defaults to a free port',
       parseInteger('--preview-port', 1, 65535),
     )
     .action(async (options: { port?: number; previewPort?: number }) => {
@@ -1027,7 +1067,7 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
           ...(options.previewPort === undefined ? {} : { previewPort: options.previewPort }),
         });
         context.stderr(
-          `daemonを前景で起動しました（pid=${String(process.pid)}、${handle.uiUrl}）。Ctrl+Cで停止します。\n`,
+          `Started the daemon in the foreground (pid=${String(process.pid)}, ${handle.uiUrl}). Press Ctrl+C to stop.\n`,
         );
         const onSignal = () => void handle.stop('signal');
         process.once('SIGINT', onSignal);
@@ -1042,10 +1082,14 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
 
   program
     .command('doctor')
-    .description('stateとdaemonの状態を診断する')
-    .option('--repair', '検証済みのbackupからの回復と、停止済みdaemonのruntime回収を行う', false)
-    .option('--yes', '--repairの実行を確認済みとする', false)
-    .option('--json', '結果をJSONで出力する', false)
+    .description('Diagnose the state and the daemon')
+    .option(
+      '--repair',
+      'Recover from a verified backup and reclaim the runtime of a stopped daemon',
+      false,
+    )
+    .option('--yes', 'Confirm running --repair', false)
+    .option('--json', 'Output the result as JSON', false)
     .action(async (options: { repair: boolean; yes: boolean; json: boolean }) => {
       await execute<DoctorReport>(
         'doctor',
@@ -1054,7 +1098,7 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
           if (options.repair && !options.yes) {
             throw new VdeError(
               'E_CONFIRMATION_REQUIRED',
-              '--repairはstateを書き換えることがあります。実行するには--yesを付けてください。',
+              '--repair may rewrite the state. Add --yes to run it.',
             );
           }
           const result = await runDoctor({
@@ -1070,17 +1114,17 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
             `state root: ${escapeForTerminal(report.stateRoot.path)}`,
             `state: ${report.state.status}`,
             `backup: ${report.previousState.status}`,
-            `daemon: ${report.daemon.reachable ? 'running' : 'stopped'}（lock: ${report.daemon.lock}）`,
-            ...report.problems.map((problem) => `問題: ${problem.code} ${problem.message}`),
-            ...report.repairs.map((repair) => `修復: ${repair}`),
-            report.problems.length === 0 ? '問題は見つかりませんでした。' : '',
+            `daemon: ${report.daemon.reachable ? 'running' : 'stopped'} (lock: ${report.daemon.lock})`,
+            ...report.problems.map((problem) => `problem: ${problem.code} ${problem.message}`),
+            ...report.repairs.map((repair) => `repair: ${repair}`),
+            report.problems.length === 0 ? 'No problems found.' : '',
           ]
             .filter((line) => line !== '')
             .join('\n'),
       );
     });
 
-  // subcommandの一覧と、値を取るopenのoptionを、commandの定義から取る。
+  // Take the list of subcommands and the value-taking open options from the command definitions.
   const valueOptions = new Set<string>();
   for (const option of openCommand.options) {
     if (!option.required && !option.optional) continue;
@@ -1097,7 +1141,7 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
   } catch (error) {
     if (error instanceof CommanderError) {
       if (error.exitCode === 0) return ExitCode.success;
-      // 引数のerror。commanderの説明はstderrへ出ている。JSONならenvelopeも返す。
+      // Argument error. Commander has already written its explanation to stderr. With JSON, also return an envelope.
       if (wantsJson) {
         context.stdout(
           `${safeJson(

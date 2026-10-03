@@ -24,7 +24,7 @@ type WorkerReply =
   | { id: number; ok: true; result: unknown }
   | { id: number; ok: false; reason: string };
 
-// idは送るときに付ける。
+// The id is attached when sending.
 type ParseWork = ParseRequest extends infer Request
   ? Request extends { id: number }
     ? Omit<Request, 'id'>
@@ -32,13 +32,13 @@ type ParseWork = ParseRequest extends infer Request
   : never;
 
 export interface ParseService {
-  // workerのheap（資源の漏れの確認に使う。daemon.diagnostics）。workerがなければnull。
-  // signalが中断されたら（daemonの停止）、先に並んだ解析を待たずにE_DAEMON_STOPPINGで終える。
+  // The worker's heap (used for resource leak checks; daemon.diagnostics). Null when there is no worker.
+  // If the signal is aborted (the daemon is stopping), ends with E_DAEMON_STOPPING without waiting for queued parses.
   diagnostics(collectGarbage: boolean, signal?: AbortSignal): Promise<WorkerDiagnostics | null>;
   analyze(format: DocumentFormat, text: string): Promise<DocumentAnalysis>;
-  // 文書やCSSが参照するlocal fileの候補を集める。
+  // Collects candidate local files referenced by the document or CSS.
   scan(kind: ScanKind, text: string): Promise<ScannedReference[]>;
-  // 表示するための変換（HTMLの静的変換、CSSの参照の検査、linkの抽出）。
+  // Transforms for display (static HTML transform, CSS reference checks, link extraction).
   render(input: RenderInput): Promise<RenderOutput>;
   close(): Promise<void>;
 }
@@ -48,8 +48,8 @@ export interface ParseServiceOptions {
   workerPath?: string;
 }
 
-// 解析は1つのworkerで順に行う。時間内に終わらなければworkerごと止めて作り直すので、
-// 解析が終わらない文書があっても、daemonは止まらない（仕様8.1）。
+// Parsing runs sequentially on a single worker. If it does not finish in time, the whole worker is
+// stopped and recreated, so a document that never finishes parsing does not stop the daemon (spec 8.1).
 export function createParseService(options: ParseServiceOptions = {}): ParseService {
   const timeoutMs = options.timeoutMs ?? LIMITS.parseTimeoutMs;
   const workerPath = options.workerPath ?? parseWorkerPath();
@@ -84,13 +84,17 @@ export function createParseService(options: ParseServiceOptions = {}): ParseServ
       if (reply.ok) waiter.resolve(reply.result);
       else {
         waiter.reject(
-          new VdeError('E_PARSE_FAILED', '文書を解析できませんでした。', { reason: reply.reason }),
+          new VdeError('E_PARSE_FAILED', 'The document could not be parsed.', {
+            reason: reply.reason,
+          }),
         );
       }
     });
     created.on('error', () => {
       if (worker === created) worker = null;
-      failAll(new VdeError('E_PARSE_FAILED', '文書を解析できませんでした。', { reason: 'worker' }));
+      failAll(
+        new VdeError('E_PARSE_FAILED', 'The document could not be parsed.', { reason: 'worker' }),
+      );
     });
     worker = created;
     return created;
@@ -98,16 +102,16 @@ export function createParseService(options: ParseServiceOptions = {}): ParseServ
 
   const request = <T>(work: ParseWork): Promise<T> => {
     if (closed) {
-      return Promise.reject(new VdeError('E_DAEMON_STOPPING', 'daemonは停止処理中です。'));
+      return Promise.reject(new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));
     }
     return new Promise<T>((resolve, reject) => {
       const id = nextId;
       nextId += 1;
       const timer = setTimeout(() => {
-        // 時間切れの解析は、workerを止めて回収する。待っている他の解析もやり直しになる。
+        // A timed-out parse stops and reclaims the worker. Other waiting parses must be retried too.
         discardWorker();
         failAll(
-          new VdeError('E_PARSE_FAILED', '文書の解析が時間内に終わりませんでした。', {
+          new VdeError('E_PARSE_FAILED', 'Parsing the document did not finish in time.', {
             reason: 'timeout',
             timeoutMs,
           }),
@@ -128,7 +132,7 @@ export function createParseService(options: ParseServiceOptions = {}): ParseServ
     render: (input) => request({ op: 'render', input }),
     async close() {
       closed = true;
-      failAll(new VdeError('E_DAEMON_STOPPING', 'daemonは停止処理中です。'));
+      failAll(new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));
       const current = worker;
       worker = null;
       if (current) await current.terminate();

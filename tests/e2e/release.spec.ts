@@ -12,7 +12,7 @@ const DEV_ORIGIN = 'http://127.0.0.1:5173';
 let t: E2eHome;
 
 test.beforeEach(() => {
-  // 開発用の設定を渡しても、配布物では効かないことを確かめる。
+  // Confirm that development settings have no effect on the distribution even when passed.
   t = createE2eHome({
     VDE_OPEN_DEV_UI_ORIGIN: DEV_ORIGIN,
     VDE_OPEN_DEV_BACKEND: 'http://127.0.0.1:43117',
@@ -29,7 +29,9 @@ function filesUnder(directory: string): string[] {
   );
 }
 
-test('SEC-020: 開発用のoriginの許可とHMRは、配布物に残っていない', async ({ request }) => {
+test('SEC-020: the development origin allowance and HMR are not left in the distribution', async ({
+  request,
+}) => {
   t.write('site/index.html', '<p>本文</p>');
   const opened = await t.json<{ documents: Array<{ documentId: string }> }>([
     'open',
@@ -38,7 +40,7 @@ test('SEC-020: 開発用のoriginの許可とHMRは、配布物に残ってい�
   const ui = (await t.uiUrl()).replace(/\/$/, '');
   const ticket = (await t.bootstrapUrl()).split('#bootstrap=')[1] as string;
 
-  // 開発用のoriginからは、ticketを交換できない。
+  // The ticket cannot be exchanged from the development origin.
   const fromDev = await request.post(`${ui}/_/api/v1/sessions/bootstrap`, {
     headers: { Origin: DEV_ORIGIN, 'Content-Type': 'application/json' },
     data: { ticket },
@@ -52,7 +54,7 @@ test('SEC-020: 開発用のoriginの許可とHMRは、配布物に残ってい�
   });
   const { token } = ((await exchanged.json()) as { data: { token: string } }).data;
 
-  // 有効なsessionでも、開発用のoriginを名乗るrequestは受け付けない。
+  // Even with a valid session, requests claiming the development origin are rejected.
   const authorized = { Authorization: `Bearer ${token}` };
   const devRead = await request.get(`${ui}/_/api/v1/documents`, {
     headers: { ...authorized, Origin: DEV_ORIGIN },
@@ -63,7 +65,7 @@ test('SEC-020: 開発用のoriginの許可とHMRは、配布物に残ってい�
   });
   expect(crossSite.status()).toBe(401);
 
-  // 管理UIと文書の表示のpolicyに、開発用の例外がない。
+  // The policies of the management UI and the document view have no development exceptions.
   const index = await request.get(`${ui}/`);
   const uiCsp = index.headers()['content-security-policy'] ?? '';
   for (const forbidden of ['unsafe-eval', 'ws:', 'wss:', DEV_ORIGIN, '5173', '*']) {
@@ -76,11 +78,11 @@ test('SEC-020: 開発用のoriginの許可とHMRは、配布物に残ってい�
   );
   const { documentUrl } = ((await granted.json()) as { data: { documentUrl: string } }).data;
   const documentCsp = (await request.get(documentUrl)).headers()['content-security-policy'] ?? '';
-  // 文書を埋め込めるのは、管理UIのoriginだけ。開発用のoriginは含まない。
+  // Only the management UI origin may embed the document. The development origin is not included.
   expect(documentCsp).toContain(`frame-ancestors ${ui};`);
   expect(documentCsp).not.toContain(DEV_ORIGIN);
 
-  // 同梱のUIに、Viteの開発用client・HMR・開発用originの指定が含まれていない。
+  // The bundled UI contains no Vite development client, HMR, or development origin.
   const webFiles = filesUnder(join(dist, 'web'));
   expect(webFiles.length).toBeGreaterThan(0);
   for (const file of webFiles.filter((path) => /\.(html|js|css)$/.test(path))) {
@@ -90,7 +92,7 @@ test('SEC-020: 開発用のoriginの許可とHMRは、配布物に残ってい�
     }
   }
   expect((await request.get(`${ui}/@vite/client`)).status()).toBe(404);
-  // daemonの配布物は、開発用の変数を「sourceから実行したとき」にだけ読む。
+  // The daemon distribution reads development variables only when run from source.
   const daemon = readFileSync(join(dist, 'daemon.js'), 'utf8');
   expect(daemon).not.toContain('allowedHosts');
 });

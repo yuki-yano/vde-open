@@ -32,7 +32,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await daemon?.stop('test-cleanup');
-  // lockを失ったdaemonは、自分のものと確かめられないruntime fileを消さない。試験の後始末として消す。
+  // A daemon that lost its lock does not delete runtime files it cannot confirm as its own. Delete them as test cleanup.
   const { runtimeDir } = resolveRuntimeLocation(resolveStateRoot(environment), environment);
   await rm(runtimeDir, { recursive: true, force: true });
   await rm(base, { recursive: true, force: true });
@@ -40,7 +40,7 @@ afterEach(async () => {
 
 async function openDocument(path: string) {
   const connection = await createDaemonControl(environment).connectExisting();
-  if (!connection) throw new Error('daemonへ接続できません');
+  if (!connection) throw new Error('Cannot connect to the daemon.');
   try {
     return await connection.request<{ documents: Array<{ documentId: string }>; created: number }>(
       'documents.open',
@@ -51,8 +51,8 @@ async function openDocument(path: string) {
   }
 }
 
-describe('SYS-010 replace後の保存失敗（daemon単位）', () => {
-  it('E_COMMIT_INDETERMINATEを返して終了し、再起動後の再送は二重に適用されない', async () => {
+describe('SYS-010 save failure after the replace (at the daemon level)', () => {
+  it('returns E_COMMIT_INDETERMINATE and exits, and a resend after restart is not applied twice', async () => {
     await writeFile(join(base, 'a.md'), '# a\n');
     let failSync = false;
     const fs: StoreFs = {
@@ -72,11 +72,11 @@ describe('SYS-010 replace後の保存失敗（daemon単位）', () => {
       ok: false,
       error: { code: 'E_COMMIT_INDETERMINATE', retryable: true },
     });
-    // daemonは書込みを止めて終了し、runtime fileとlockを残さない。
+    // The daemon stops writing and exits, leaving no runtime files or lock.
     await daemon.stopped;
     expect(await createDaemonControl(environment).connectExisting()).toBeNull();
 
-    // 再起動後はディスクのstateを正とする。同じ操作を再送しても文書は1件のまま。
+    // After a restart, the state on disk is authoritative. Resending the same operation still leaves one document.
     daemon = await startDaemon({ environment, version: 'test' });
     const retried = await openDocument('a.md');
     expect(retried).toMatchObject({ ok: true, data: { created: 0 } });
@@ -87,13 +87,13 @@ describe('SYS-010 replace後の保存失敗（daemon単位）', () => {
   });
 });
 
-describe('lockを失ったdaemon', () => {
-  it('書込みを止めて終了し、後継のlockとruntime fileに触れない', async () => {
+describe('a daemon that lost its lock', () => {
+  it('stops writing and exits without touching the successor lock and runtime files', async () => {
     daemon = await startDaemon({ environment, version: 'test' });
     const home = join(base, 'home');
     const { keyPath } = resolveRuntimeLocation(home, environment);
     const keyBefore = await readFile(keyPath);
-    // 別の所有者が、次の世代のlockを取った状態を作る。
+    // Simulate another owner having acquired the next generation of the lock.
     const successor = join(home, 'daemon.lock.000000000002');
     await writeFile(
       successor,
@@ -108,8 +108,8 @@ describe('lockを失ったdaemon', () => {
   });
 });
 
-describe('停止とcommitの交差', () => {
-  it('実行中のcommitが終わるまでlockを解放せず、次のdaemonを起動させない', async () => {
+describe('stop overlapping with a commit', () => {
+  it('keeps the lock until the running commit finishes and does not let the next daemon start', async () => {
     await writeFile(join(base, 'a.md'), '# a\n');
     const home = join(base, 'home');
     let releaseWrite: () => void = () => undefined;
@@ -120,7 +120,7 @@ describe('停止とcommitの交差', () => {
     let block = false;
     const fs: StoreFs = {
       ...nodeStoreFs,
-      // 次stateの一時fileを書く直前で止める。
+      // Pause right before writing the next state temporary file.
       writeFileDurable: async (path, data, mode) => {
         if (block && path.includes('.tmp-state-')) {
           enteredWrite();
@@ -141,7 +141,7 @@ describe('停止とcommitの交差', () => {
       stopFinished = true;
     });
 
-    // commitの途中では停止が完了せず、lockも保持したまま。
+    // While the commit is in progress, stopping does not complete and the lock is still held.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(stopFinished).toBe(false);
     expect(await holdsLock(home, 'daemon.lock', daemon.daemonId)).toBe(true);
@@ -154,7 +154,7 @@ describe('停止とcommitの交差', () => {
     expect(await opening).toMatchObject({ ok: true, data: { created: 1 } });
     expect(await holdsLock(home, 'daemon.lock', daemon.daemonId)).toBe(false);
 
-    // 停止が完了した後は起動でき、commit済みの文書を復元する。
+    // After stopping completes, it can start and restores the committed document.
     daemon = await startDaemon({ environment, version: 'test' });
     const connection = await createDaemonControl(environment).connectExisting();
     const list = await connection?.request<{ totalDocuments: number }>('documents.list', {});
@@ -162,13 +162,13 @@ describe('停止とcommitの交差', () => {
     expect(list).toMatchObject({ ok: true, data: { totalDocuments: 1 } });
   });
 
-  it('停止処理に入った後のrequestは受け付けない', async () => {
+  it('rejects requests after stopping has begun', async () => {
     await writeFile(join(base, 'a.md'), '# a\n');
     daemon = await startDaemon({ environment, version: 'test' });
     const connection = await createDaemonControl(environment).connectExisting();
-    if (!connection) throw new Error('daemonへ接続できません');
+    if (!connection) throw new Error('Cannot connect to the daemon.');
     const stopping = daemon.stop('test');
-    // 停止の進み具合により、拒否の応答か、接続の切断のどちらかになる。成功にはならない。
+    // Depending on how far stopping has progressed, this is either a rejection response or a dropped connection. It never succeeds.
     const outcome = await connection.request('documents.open', { cwd: base, paths: ['a.md'] }).then(
       (envelope) => (envelope.ok ? 'accepted' : envelope.error.code),
       (error: { code: string }) => error.code,
@@ -185,9 +185,9 @@ describe('停止とcommitの交差', () => {
   });
 });
 
-describe('診断と停止の交差', () => {
-  it('索引の同期を待っている診断があっても、停止を待たせない', async () => {
-    // 解析を遅くして、索引の同期に時間がかかる状態にする（8文書×500ms）。
+describe('diagnostics overlapping with stop', () => {
+  it('does not delay stopping while diagnostics wait for index sync', async () => {
+    // Slow down parsing so index sync takes a while (8 documents x 500ms).
     const real = createParseService();
     const slow: ParseService = {
       ...real,
@@ -197,19 +197,19 @@ describe('診断と停止の交差', () => {
       },
     };
     for (let index = 0; index < 8; index += 1) {
-      await writeFile(join(base, `${String(index)}.md`), `# 文書${String(index)}\n\n本文\n`);
+      await writeFile(join(base, `${String(index)}.md`), `# Document ${String(index)}\n\nBody\n`);
     }
     daemon = await startDaemon({ environment, version: 'test', parse: slow });
     for (let index = 0; index < 8; index += 1) await openDocument(`${String(index)}.md`);
     const connection = await createDaemonControl(environment).connectExisting();
-    if (!connection) throw new Error('daemonへ接続できません');
+    if (!connection) throw new Error('Cannot connect to the daemon.');
     const diagnosing = connection
       .request('daemon.diagnostics', { collectGarbage: true }, { timeoutMs: 30_000 })
       .then(
         (envelope) => (envelope.ok ? 'completed' : envelope.error.code),
         (error: { code: string }) => error.code,
       );
-    // 診断が索引の同期を待ち始めてから、停止する。
+    // Stop after diagnostics start waiting for index sync.
     await new Promise((resolve) => setTimeout(resolve, 200));
     const started = Date.now();
     await daemon.stop('test');
@@ -219,8 +219,8 @@ describe('診断と停止の交差', () => {
   });
 });
 
-describe('未知のmethodと不正な引数', () => {
-  it('error codeで応答し、daemonは動き続ける', async () => {
+describe('unknown method and invalid arguments', () => {
+  it('responds with an error code and the daemon keeps running', async () => {
     daemon = await startDaemon({ environment, version: 'test' });
     const connection = await createDaemonControl(environment).connectExisting();
     try {

@@ -10,17 +10,17 @@ export type GrantState =
 
 interface Loaded {
   key: string;
-  // 取得を始めた時点の、文書の状態の更新時刻。
+  // The document's state-update time at the moment the fetch started.
   updatedAt: string;
   state: GrantState;
 }
 
-// どの時点の状態に対して取得するか、を表す値。この値が変わったときだけ、同じ版を取り直す。
+// A value that says which point in time the fetch is for. Only when this value changes is the same revision refetched.
 //
-// 文書が参照するfileを調べられなかった文書は、版が同じまま調べ終えることがある（参照のない文書）。
-// その場合だけ、取得した後に文書の状態が更新されていたら、取り直して表示の注意書きを最新にする。
-// 判定は「取得した時点の更新時刻」と「いま届いている更新時刻」の比較で行う。
-// 取得した結果そのものは、取り直しの理由にしない（取得するたびに取り直す、という循環を作らない）。
+// A document whose referenced files could not be scanned may finish scanning without a new revision (a document with no references).
+// Only in that case, if the document's state was updated after the fetch, refetch to bring the view's notes up to date.
+// The decision compares "the update time at fetch" with "the update time now".
+// The fetched result itself is never a reason to refetch (that would loop: every fetch triggers another).
 export function fetchTokenOf(
   loaded: Pick<Loaded, 'updatedAt' | 'state'> | null,
   updatedAt: string,
@@ -32,8 +32,8 @@ export function fetchTokenOf(
   return scanFailed ? updatedAt : loaded.updatedAt;
 }
 
-// 表示から外した権限を、いま返してよいものと、まだ返せないものに分ける。
-// displayedは、いま画面に出している表示の権限。これは、画面から外れるまで返さない。
+// Split the grants retired from the view into those that may be released now and those that may not yet.
+// displayed is the grant of the view currently on screen. It is not released until it leaves the screen.
 export function splitRetired(
   retired: readonly string[],
   displayed: string | null,
@@ -44,23 +44,23 @@ export function splitRetired(
   };
 }
 
-// 表示の取得の条件。modeとrequestIdも、版と同じく、表示の権限を分ける。
+// Conditions for fetching a view. mode and requestId, like the revision, distinguish render grants.
 export interface GrantOptions {
   mode: HtmlMode;
-  // 回答待ちの質問を表示するなら、その質問。版と表示方法はdaemonが質問から決める（modeは使わない）。
+  // If showing a question awaiting an answer, that question. The daemon decides the revision and view mode from the question (mode is not used).
   requestId: string | null;
-  // 同じ条件で、新しい表示（新しいinstance）として取り直すときに変える値。
+  // A value that changes when refetching under the same conditions as a new view (a new instance).
   nonce: number;
 }
 
 const STATIC_OPTIONS: GrantOptions = { mode: 'static', requestId: null, nonce: 0 };
 
-// 表示する版ごとに、表示用の権限を取得する。
-// updatedAtは、文書の状態が最後に更新された時刻（一覧のsummaryの値）。
+// Fetch a render grant for each revision to show.
+// updatedAt is the time the document's state was last updated (the value in the list summary).
 //
-// 権限を返すのは、画面の表示を差し替え終えた後と、表示をやめたときだけ。
-// 画面に出ている表示の権限を、先に返すことはしない（仕様10.2）。
-// 取り直しの間と、取り直しに失敗したときは、表示中の権限をそのまま使う。
+// Grants are released only after the on-screen view has been replaced, and when the view is dismissed.
+// The grant of the view on screen is never released first (spec 10.2).
+// While refetching, and when the refetch fails, the grant in use stays in use.
 export function useRenderGrant(
   api: Api,
   documentId: string,
@@ -70,24 +70,24 @@ export function useRenderGrant(
 ): GrantState {
   const { mode, requestId, nonce } = options;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  // 表示に使っている権限と、その権限の対象（文書と版）。
+  // The grant in use for the view, and what it is for (document and revision).
   const held = useRef<{ key: string; grant: string } | null>(null);
-  // 表示から外すことにした権限。画面の差し替えが反映された後に返す。
+  // Grants retired from the view. Released after the screen update has been applied.
   const retired = useRef<string[]>([]);
   const key = `${documentId}\n${revision ?? ''}\n${mode}\n${requestId ?? ''}\n${String(nonce)}`;
   const shown = loaded !== null && loaded.key === key ? loaded : null;
   const fetchToken = fetchTokenOf(shown, updatedAt);
-  // この描画で画面に出す表示の権限。
+  // The grant of the view this render puts on screen.
   const displayed = shown?.state.status === 'ready' ? shown.state.grant.grant : null;
 
   useEffect(() => {
-    // 表示中の権限を、表示から外す。返すのは、stateの更新が画面へ反映された後（下のeffect）。
+    // Retire the grant in use from the view. It is released after the state update reaches the screen (the effect below).
     const retireHeld = () => {
       if (held.current !== null) retired.current.push(held.current.grant);
       held.current = null;
     };
     if (revision === null) {
-      // 表示する版がない。この時点で、前の版の表示は画面から外れている。
+      // No revision to show. At this point, the previous revision's view has left the screen.
       retireHeld();
       return undefined;
     }
@@ -99,11 +99,11 @@ export function useRenderGrant(
     void issuing.then(
       (grant) => {
         if (cancelled) {
-          // 取得を待っている間に不要になった。表示には使っていないので、そのまま返す。
+          // No longer needed while waiting for the fetch. It was never used for the view, so release it right away.
           void api.releaseGrants([grant.grant]).catch(() => undefined);
           return;
         }
-        // 表示を新しい権限へ差し替える。前の権限は、差し替えが画面へ反映されてから返す。
+        // Switch the view to the new grant. The previous grant is released after the switch reaches the screen.
         retireHeld();
         held.current = { key, grant: grant.grant };
         setLoaded({ key, updatedAt: fetchToken, state: { status: 'ready', grant } });
@@ -111,8 +111,8 @@ export function useRenderGrant(
       (reason: unknown) => {
         if (cancelled) return;
         if (held.current?.key === key) {
-          // 同じ版の取り直しに失敗した。表示中の権限と内容を保つ。
-          // 取得を試みた時点だけを記録し、次に文書の状態が更新されるまで、取り直さない。
+          // Refetching the same revision failed. Keep the grant and content in use.
+          // Record only that an attempt was made, and do not refetch until the document's state is next updated.
           setLoaded((current) =>
             current !== null && current.key === key
               ? { ...current, updatedAt: fetchToken }
@@ -120,14 +120,14 @@ export function useRenderGrant(
           );
           return;
         }
-        // 別の版の表示へ切り替えられなかった。前の版の権限は、もう使わない。
+        // Could not switch to another revision's view. The previous revision's grant is no longer used.
         retireHeld();
         setLoaded({
           key,
           updatedAt: fetchToken,
           state: {
             status: 'failed',
-            message: reason instanceof Error ? reason.message : '表示を準備できませんでした。',
+            message: reason instanceof Error ? reason.message : 'Could not prepare the view.',
           },
         });
       },
@@ -137,10 +137,10 @@ export function useRenderGrant(
     };
   }, [api, documentId, revision, mode, requestId, key, fetchToken]);
 
-  // 画面の更新のたびに、その後で、表示から外した権限を返す。
-  // effectは、自分が属する描画が画面へ反映された後に動く。その描画で画面に出している権限は返さない。
-  // 新しい権限を受け取ってから、それを使う描画が反映されるまでの間に、前の描画のeffectが動くことがある。
-  // そのeffectにとっては、前の権限がまだ画面に出ているので、返さずに残し、次の描画のeffectに任せる。
+  // After every screen update, release the grants retired from the view.
+  // An effect runs after the render it belongs to has reached the screen. It does not release the grant that render put on screen.
+  // Between receiving a new grant and the render that uses it reaching the screen, the previous render's effect may run.
+  // For that effect, the previous grant is still on screen, so it keeps it and leaves it to the next render's effect.
   useEffect(() => {
     const { release, keep } = splitRetired(retired.current, displayed);
     if (release.length === 0) return;
@@ -148,7 +148,7 @@ export function useRenderGrant(
     void api.releaseGrants(release).catch(() => undefined);
   });
 
-  // 表示をやめるときに、使っていた権限と、まだ返していない権限を返す。
+  // When the view is dismissed, release the grant in use and any grants not yet released.
   useEffect(
     () => () => {
       const grants = retired.current.splice(0);
@@ -159,6 +159,6 @@ export function useRenderGrant(
     [api],
   );
 
-  // 権限は、取得した版にだけ結び付ける。別の版の権限は使わない。
+  // A grant is tied only to the revision it was fetched for. Another revision's grant is not used.
   return shown?.state ?? { status: 'loading' };
 }

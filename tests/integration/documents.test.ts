@@ -50,8 +50,8 @@ async function listDocuments(): Promise<Summary[]> {
   return (await t.run(['list', '--json'])).json<ListData>().data.documents;
 }
 
-describe('CLI-003 開いた文書を別の呼び出しから一覧・closeする', () => {
-  it('同じdaemonと同じdocumentIdを操作する', async () => {
+describe('CLI-003 listing and closing an opened document from another invocation', () => {
+  it('operates on the same daemon and the same documentId', async () => {
     t.write('a.md', '# 一つ目\n');
     const opened = (await t.run(['open', 'a.md', '--json'])).json<OpenData>();
     expect(opened.ok).toBe(true);
@@ -66,11 +66,11 @@ describe('CLI-003 開いた文書を別の呼び出しから一覧・closeする
     expect(
       (await t.run(['daemon', 'status', '--json'])).json<{ daemonId: string }>().data.daemonId,
     ).toBe(daemonId);
-    // closeは原本を削除しない。
+    // close does not delete the source file.
     expect(readFileSync(join(t.work, 'a.md'), 'utf8')).toBe('# 一つ目\n');
   });
 
-  it('最上位のfile引数はopenとして扱う', async () => {
+  it('treats top-level file arguments as open', async () => {
     t.write('a.md', '# a\n');
     t.write('b.html', '<title>b</title>');
     const opened = (await t.run(['a.md', 'b.html', '--json'])).json<OpenData>();
@@ -81,8 +81,8 @@ describe('CLI-003 開いた文書を別の呼び出しから一覧・closeする
   });
 });
 
-describe('CLI-004 同時に20回open', () => {
-  it('daemonは1つで、同じfileは1件、stateは壊れない', async () => {
+describe('CLI-004 20 concurrent opens', () => {
+  it('one daemon, one entry for the same file, and the state is not corrupted', async () => {
     t.write('a.md', '# 同時\n');
     const results = await Promise.all(
       Array.from({ length: 20 }, () => t.run(['open', 'a.md', '--json'])),
@@ -105,8 +105,8 @@ describe('CLI-004 同時に20回open', () => {
   });
 });
 
-describe('CLI-005 特殊なpath', () => {
-  it('日本語・空白・先頭ハイフン・subcommandと同名のfileを、明示openと--で開ける', async () => {
+describe('CLI-005 special paths', () => {
+  it('opens files with Japanese, spaces, a leading hyphen, or a subcommand name via explicit open and --', async () => {
     t.write('日本語 メモ.md', '# 日本語\n');
     t.write('-dash.md', '# dash\n');
     t.write('read', '# 同名\n');
@@ -128,7 +128,7 @@ describe('CLI-005 特殊なpath', () => {
     expect(await listDocuments()).toHaveLength(4);
   });
 
-  it('optionの値がsubcommandと同じ文字列でも、fileを開く', async () => {
+  it('opens the file even when an option value equals a subcommand name', async () => {
     t.write('a.md', '# a\n');
     const opened = (await t.run(['--title', 'read', 'a.md', '--json'])).json<OpenData>();
     expect(opened.data.documents[0]).toMatchObject({ title: 'read', displayPath: 'a.md' });
@@ -138,7 +138,7 @@ describe('CLI-005 特殊なpath', () => {
     expect(stdin.data.documents[0]?.key).toBe('list');
   });
 
-  it('shellの文字列として解釈しない', async () => {
+  it('does not interpret as a shell string', async () => {
     const name = '$(touch pwned);`touch pwned2`&a.md';
     t.write(name, '# 安全\n');
     const opened = await t.run(['open', name, '--json']);
@@ -148,8 +148,8 @@ describe('CLI-005 特殊なpath', () => {
   });
 });
 
-describe('CLI-006 stdinからの登録', () => {
-  it('format指定で登録し、同じkeyなら同じIDを更新する', async () => {
+describe('CLI-006 registering from stdin', () => {
+  it('registers with an explicit format, and updates the same ID for the same key', async () => {
     const first = (
       await t.run(['open', '-', '--format', 'markdown', '--key', 'review', '--json'], {
         stdin: '# レビュー 1\n',
@@ -163,7 +163,7 @@ describe('CLI-006 stdinからの登録', () => {
       displayPath: null,
     });
 
-    // 引数なしでも、stdinに内容が渡されていればstdinから開く。
+    // Even without arguments, opens from stdin when content is piped in.
     const second = (
       await t.run(['--format', 'markdown', '--key', 'review', '--json'], {
         stdin: '# レビュー 2\n',
@@ -174,14 +174,14 @@ describe('CLI-006 stdinからの登録', () => {
     expect(second.data.documents[0]?.revision).not.toBe(first.data.documents[0]?.revision);
     expect(second.data.documents[0]?.title).toBe('レビュー 2');
 
-    // keyがなければ、呼び出しごとに新しい文書になる。
+    // Without a key, each invocation creates a new document.
     await t.run(['open', '-', '--format', 'markdown', '--json'], { stdin: '# 無名\n' });
     await t.run(['open', '-', '--format', 'markdown', '--json'], { stdin: '# 無名\n' });
     expect(await listDocuments()).toHaveLength(3);
   });
 
-  it('EOFまで読み切ってから登録し、途中の内容で成功を返さない', () => {
-    // 本物のpipeで、内容を2回に分けて遅れて書く。
+  it('reads to EOF before registering, and does not return success with partial content', () => {
+    // With a real pipe, write the content in two delayed parts.
     const script = `(printf '# 前半'; sleep 0.4; printf 'と後半\\n本文\\n') | "$NODE" "$CLI" open - --format markdown --json`;
     const stdout = execFileSync('sh', ['-c', script], {
       cwd: t.work,
@@ -193,15 +193,15 @@ describe('CLI-006 stdinからの登録', () => {
   });
 });
 
-describe('CLI-007 stdinの誤った指定', () => {
-  it('formatなしのstdinはexit 2で、何も登録しない', async () => {
+describe('CLI-007 wrong stdin usage', () => {
+  it('stdin without a format exits 2 and registers nothing', async () => {
     const result = await t.run(['open', '-', '--json'], { stdin: '# x\n' });
     expect(result.exitCode).toBe(2);
     expect(result.json().error.code).toBe('E_INVALID_ARGUMENT');
     expect(await listDocuments()).toEqual([]);
   });
 
-  it('pathとstdinの併用はexit 2で、何も登録しない', async () => {
+  it('combining a path with stdin exits 2 and registers nothing', async () => {
     t.write('a.md', '# a\n');
     const piped = await t.run(['open', 'a.md', '--json'], { stdin: '# x\n' });
     expect(piped.exitCode).toBe(2);
@@ -215,8 +215,8 @@ describe('CLI-007 stdinの誤った指定', () => {
   });
 });
 
-describe('CLI-008 不明な拡張子', () => {
-  it('autoでは拒否し、形式を明示したときだけ登録する', async () => {
+describe('CLI-008 unknown extension', () => {
+  it('rejects with auto, and registers only when the format is explicit', async () => {
     t.write('notes.txt', '# メモ\n');
     const auto = await t.run(['open', 'notes.txt', '--json']);
     expect(auto.exitCode).toBe(2);
@@ -230,8 +230,8 @@ describe('CLI-008 不明な拡張子', () => {
   });
 });
 
-describe('CLI-008 重複として除かれる指定の形式検査', () => {
-  it('同じfileを指す未知拡張子の指定は、指定の順序によらず拒否する', async () => {
+describe('CLI-008 format check of arguments removed as duplicates', () => {
+  it('rejects an unknown-extension argument pointing to the same file, regardless of argument order', async () => {
     const real = t.write('a.md', '# a\n');
     symlinkSync(real, join(t.work, 'alias.txt'));
 
@@ -248,7 +248,7 @@ describe('CLI-008 重複として除かれる指定の形式検査', () => {
       expect(await listDocuments()).toEqual([]);
     }
 
-    // 形式を明示すれば、1件の文書として開ける。
+    // With an explicit format, it opens as one document.
     const explicit = (
       await t.run(['open', 'a.md', 'alias.txt', '--format', 'markdown', '--json'])
     ).json<OpenData>();
@@ -257,26 +257,26 @@ describe('CLI-008 重複として除かれる指定の形式検査', () => {
   });
 });
 
-describe('CLI-010 削除済みのoption', () => {
+describe('CLI-010 removed options', () => {
   it.each([
     ['--target', 'x'],
     ['--tag', 'y'],
     ['--workspace', 'z'],
-  ])('%s は無視せずerrorにし、何も登録しない', async (option, value) => {
+  ])('%s is an error rather than ignored, and registers nothing', async (option, value) => {
     t.write('a.md', '# a\n');
     const result = await t.run(['open', 'a.md', option, value, '--json']);
     expect(result.exitCode).toBe(2);
     expect(result.json().error.code).toBe('E_INVALID_ARGUMENT');
     expect(result.stderr).toContain(option);
-    // 起動していないdaemonを、このerrorのために起動しない。
+    // Does not start a stopped daemon just for this error.
     expect((await t.run(['daemon', 'status', '--json'])).json<{ state: string }>().data.state).toBe(
       'stopped',
     );
   });
 });
 
-describe('CLI-011 複数指定の一部が開けない', () => {
-  it('1件が存在しなければ、全体を登録しない', async () => {
+describe('CLI-011 some of several arguments cannot be opened', () => {
+  it('registers nothing if one does not exist', async () => {
     t.write('a.md', '# a\n');
     t.write('b.md', '# b\n');
     const result = await t.run(['open', 'a.md', 'missing.md', 'b.md', '--json']);
@@ -288,7 +288,7 @@ describe('CLI-011 複数指定の一部が開けない', () => {
     expect(await listDocuments()).toEqual([]);
   });
 
-  it('1件が大きさの上限を超えれば、全体を登録しない', async () => {
+  it('registers nothing if one exceeds the size limit', async () => {
     t.write('a.md', '# a\n');
     t.write('huge.md', Buffer.alloc(10 * 1024 * 1024 + 1, 0x61));
     const result = await t.run(['open', 'a.md', 'huge.md', '--json']);
@@ -302,8 +302,8 @@ describe('CLI-011 複数指定の一部が開けない', () => {
   });
 });
 
-describe('重複する指定と文書数の上限', () => {
-  it('同じfileを上限より多く指定しても、1件の文書として開ける', async () => {
+describe('duplicate arguments and the document count limit', () => {
+  it('opens as one document even when the same file is given more times than the limit', async () => {
     t.write('a.md', '# a\n');
     const args = ['open', ...Array.from({ length: 2001 }, () => 'a.md'), '--json'];
     const opened = (await t.run(args)).json<OpenData>();
@@ -311,7 +311,7 @@ describe('重複する指定と文書数の上限', () => {
     expect(opened.data.documents).toHaveLength(1);
   });
 
-  it('directory・glob・直接の指定が重なっても、文書ごとに1件として数える', async () => {
+  it('counts one per document even when directory, glob, and direct arguments overlap', async () => {
     t.write('docs/a.md', '# a\n');
     t.write('docs/b.md', '# b\n');
     t.write('docs/notes.txt', '# メモ\n');
@@ -323,8 +323,8 @@ describe('重複する指定と文書数の上限', () => {
   });
 });
 
-describe('上限を超える数の文書', () => {
-  it('読み込む前に件数で拒否し、何も登録しない', async () => {
+describe('more documents than the limit', () => {
+  it('rejects by count before reading, and registers nothing', async () => {
     for (let index = 0; index < 2001; index += 1) {
       t.write(`many/${String(index).padStart(4, '0')}.md`, `# ${String(index)}\n`);
     }
@@ -338,8 +338,8 @@ describe('上限を超える数の文書', () => {
   });
 });
 
-describe('CLI-012 keyの衝突', () => {
-  it('別のfileが同じkeyを取ろうとしたら拒否し、元の文書を保つ', async () => {
+describe('CLI-012 key conflict', () => {
+  it('rejects another file taking the same key, and keeps the original document', async () => {
     t.write('a.md', '# a\n');
     t.write('b.md', '# b\n');
     const first = (await t.run(['open', 'a.md', '--key', 'k', '--json'])).json<OpenData>();
@@ -366,13 +366,13 @@ describe('CLI-012 keyの衝突', () => {
   });
 });
 
-describe('CLI-016 制御文字を含むtitleとpath', () => {
-  it('端末制御を実行させず、escapeして出力する', async () => {
+describe('CLI-016 title and path with control characters', () => {
+  it('escapes the output instead of letting terminal controls run', async () => {
     const name = 'bad\u001b[31mname.md';
     t.write(name, '# \u001b]0;乗っ取り\u0007 \u009b31m 見出し\n');
     const json = await t.run(['open', name, '--title', 'x\u001b[2Jy', '--json']);
     expect(json.exitCode).toBe(0);
-    // JSONは1行で、生の制御文字（改行以外）を含まない。
+    // The JSON is one line and contains no raw control characters (other than the newline).
     expect(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/.test(json.stdout)).toBe(false);
     expect(json.json<OpenData>().data.documents[0]?.title).toBe('x\u001b[2Jy');
 
@@ -383,8 +383,8 @@ describe('CLI-016 制御文字を含むtitleとpath', () => {
   });
 });
 
-describe('DOC-001 同じfileの重複登録', () => {
-  it('2回開いても、symlink経由で開いても、1件のまま', async () => {
+describe('DOC-001 duplicate registration of the same file', () => {
+  it('stays one entry when opened twice or through a symlink', async () => {
     const real = t.write('docs/a.md', '# a\n');
     symlinkSync(real, join(t.work, 'link.md'));
     const first = (await t.run(['open', 'docs/a.md', '--json'])).json<OpenData>();
@@ -400,8 +400,8 @@ describe('DOC-001 同じfileの重複登録', () => {
   });
 });
 
-describe('DOC-002 明示したsymlinkの付け替え', () => {
-  it('新しいtargetを自動では読まず、開き直したときだけ登録する', async () => {
+describe('DOC-002 retargeting an explicitly given symlink', () => {
+  it('does not read the new target automatically, and registers it only on reopen', async () => {
     const first = t.write('one.md', '# 一つ目\n');
     const second = t.write('two.md', '# 二つ目\n');
     const link = join(t.work, 'current.md');
@@ -421,7 +421,7 @@ describe('DOC-002 明示したsymlinkの付け替え', () => {
   });
 });
 
-describe('DOC-003 directoryとglob', () => {
+describe('DOC-003 directories and globs', () => {
   beforeEach(() => {
     t.write('docs/a.md', '# a\n');
     t.write('docs/b.html', '<title>b</title>');
@@ -439,17 +439,17 @@ describe('DOC-003 directoryとglob', () => {
   const titles = async (args: string[]) =>
     (await t.run([...args, '--json'])).json<OpenData>().data.documents.map((d) => d.title);
 
-  it('directoryは直下だけ、-Rは再帰。隠し・除外directory・symlinkは対象外', async () => {
+  it('a directory means direct children only, -R recurses; hidden files, excluded directories, and symlinks are skipped', async () => {
     expect(await titles(['open', 'docs'])).toEqual(['a', 'b']);
     expect(await titles(['open', 'docs', '-R'])).toEqual(['a', 'b', 'c', 'd']);
   });
 
-  it('quoteしたglobは、それ自体が再帰の指定になる', async () => {
+  it('a quoted glob is itself a recursive specification', async () => {
     expect(await titles(['open', 'docs/**/*.md'])).toEqual(['a', 'c']);
     expect(await titles(['open', 'docs/*.html'])).toEqual(['b']);
   });
 
-  it('対象が1件もなければ登録せずerrorにする', async () => {
+  it('errors without registering when nothing matches', async () => {
     t.write('empty/x.txt', 'x');
     const result = await t.run(['open', 'empty', '--json']);
     expect(result.exitCode).toBe(3);
@@ -457,24 +457,27 @@ describe('DOC-003 directoryとglob', () => {
   });
 });
 
-describe('DOC-015 読めない種類の入力', () => {
-  it.skipIf(process.platform === 'win32')('FIFOやdeviceは待たされずに拒否する', async () => {
-    execFileSync('mkfifo', [join(t.work, 'pipe.md')]);
-    const startedAt = Date.now();
-    const fifo = await t.run(['open', 'pipe.md', '--json']);
-    expect(Date.now() - startedAt).toBeLessThan(5000);
-    expect(fifo.exitCode).toBe(2);
-    expect(fifo.json().error).toMatchObject({
-      code: 'E_INVALID_SOURCE',
-      details: { problems: [{ reason: 'not-a-regular-file' }] },
-    });
+describe('DOC-015 unreadable kinds of input', () => {
+  it.skipIf(process.platform === 'win32')(
+    'rejects FIFOs and devices without blocking',
+    async () => {
+      execFileSync('mkfifo', [join(t.work, 'pipe.md')]);
+      const startedAt = Date.now();
+      const fifo = await t.run(['open', 'pipe.md', '--json']);
+      expect(Date.now() - startedAt).toBeLessThan(5000);
+      expect(fifo.exitCode).toBe(2);
+      expect(fifo.json().error).toMatchObject({
+        code: 'E_INVALID_SOURCE',
+        details: { problems: [{ reason: 'not-a-regular-file' }] },
+      });
 
-    const device = await t.run(['open', '/dev/null', '--format', 'markdown', '--json']);
-    expect(device.exitCode).toBe(2);
-    expect(await listDocuments()).toEqual([]);
-  });
+      const device = await t.run(['open', '/dev/null', '--format', 'markdown', '--json']);
+      expect(device.exitCode).toBe(2);
+      expect(await listDocuments()).toEqual([]);
+    },
+  );
 
-  it('binary、NUL、不正なUTF-8を拒否し、原本を変更しない', async () => {
+  it('rejects binary, NUL, and invalid UTF-8, and does not modify the source file', async () => {
     const nul = Buffer.from('# 見出し\n\u0000本文\n', 'utf8');
     const invalid = Buffer.from([0x23, 0x20, 0xff, 0xfe, 0x0a]);
     t.write('nul.md', nul);
@@ -498,8 +501,8 @@ describe('DOC-015 読めない種類の入力', () => {
   });
 });
 
-describe('readとclose', () => {
-  it('原文・行範囲・版を指定して取得し、小さい上限ではcursorで続きを取得する', async () => {
+describe('read and close', () => {
+  it('reads the source, a line range, and a revision, and continues with a cursor under a small limit', async () => {
     const source = fixture('auth.md');
     t.write('auth.md', source);
     const opened = (await t.run(['open', 'auth.md', '--json'])).json<OpenData>();
@@ -515,7 +518,7 @@ describe('readとclose', () => {
     );
     expect(lines.data.sourceRange).toMatchObject({ lineStart: 6, lineEnd: 8 });
 
-    // 最小の上限で読み進め、つなぐと原文に戻る。
+    // Read through with the minimum limit; joined, it reproduces the source.
     let cursor: string | null = null;
     let joined = '';
     for (let step = 0; step < 100; step += 1) {
@@ -534,7 +537,7 @@ describe('readとclose', () => {
     expect(tooSmall.json().error.code).toBe('E_INVALID_ARGUMENT');
   });
 
-  it('更新後も指定した版を返し、保持していない版を現在の版で代用しない', async () => {
+  it('returns the requested revision after an update, and does not substitute the current revision for an unretained one', async () => {
     const path = t.write('a.md', '# 版1\n');
     const first = (await t.run(['open', 'a.md', '--json'])).json<OpenData>().data
       .documents[0] as Summary;
@@ -560,7 +563,7 @@ describe('readとclose', () => {
     expect(unknown.json().error.code).toBe('E_REVISION_UNAVAILABLE');
   });
 
-  it('閉じた文書は読めず、closeは冪等で、未知のIDはnot found', async () => {
+  it('a closed document cannot be read, close is idempotent, and an unknown ID is not found', async () => {
     t.write('a.md', '# a\n');
     t.write('b.md', '# b\n');
     const opened = (await t.run(['open', 'a.md', 'b.md', '--json'])).json<OpenData>();
@@ -586,17 +589,17 @@ describe('readとclose', () => {
       '--json',
     ]);
     expect(unknown.exitCode).toBe(3);
-    // 1件でも解決できなければ、どれも閉じない。
+    // If even one cannot be resolved, none is closed.
     expect((await listDocuments()).map((document) => document.documentId)).toEqual([b.documentId]);
 
-    // 開き直すと同じIDを再利用する。
+    // Reopening reuses the same ID.
     const reopened = (await t.run(['open', 'a.md', '--json'])).json<OpenData>();
     expect(reopened.data.documents[0]?.documentId).toBe(a.documentId);
     await t.run(['close', '--all', '--json']);
     expect(await listDocuments()).toEqual([]);
   });
 
-  it('pathでのcloseは、cwdが違う同名のfileを取り違えない', async () => {
+  it('close by path does not confuse same-named files in different cwds', async () => {
     t.write('one/a.md', '# 一つ目\n');
     t.write('two/a.md', '# 二つ目\n');
     const one = join(t.work, 'one');
@@ -612,12 +615,12 @@ describe('readとclose', () => {
       first.data.documents[0]?.documentId,
     ]);
 
-    // 登録していないpathは、同名の文書があってもnot found。
+    // An unregistered path is not found even if a same-named document exists.
     t.write('three/a.md', '# 三つ目\n');
     const unknown = await t.run(['close', 'a.md', '--json'], { cwd: join(t.work, 'three') });
     expect(unknown.exitCode).toBe(3);
 
-    // 削除済みのfileも、登録時と同じpathで閉じられる。
+    // A deleted file can still be closed by the path used at registration.
     unlinkSync(join(one, 'a.md'));
     const removed = (await t.run(['close', 'a.md', '--json'], { cwd: one })).json<{
       closed: string[];
@@ -625,7 +628,7 @@ describe('readとclose', () => {
     expect(removed.data.closed).toEqual([first.data.documents[0]?.documentId]);
   });
 
-  it('一覧はlimitとcursorで続きを取得でき、一覧が変わるとcursorは使えない', async () => {
+  it('the list continues with limit and cursor, and the cursor becomes unusable when the list changes', async () => {
     for (const name of ['a', 'b', 'c']) t.write(`${name}.md`, `# ${name}\n`);
     await t.run(['open', 'a.md', 'b.md', 'c.md', '--json']);
     const first = (await t.run(['list', '--limit', '2', '--json'])).json<ListData>();

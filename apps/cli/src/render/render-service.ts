@@ -19,26 +19,26 @@ import type { StateStore } from '../persistence/state-store.ts';
 import type { SessionService } from '../server/session-service.ts';
 import type { ParseService } from '../workers/parse-service.ts';
 
-// 表示用URLで配信する1つのfile。roleは、応答のheaderを決める。
+// One file served from a preview URL. role determines the response headers.
 export interface PreviewFile {
   body: Buffer;
   mime: string;
   role: 'document' | AssetRole;
-  // 表示用URLの、秘密を含む部分。応答のCSPで、この表示の中だけを許可するために使う。
+  // The secret part of the preview URL. Used in the response CSP to allow only this view.
   grant: string;
-  // 文書の表示方法。interactiveの文書だけ、scriptの実行を許すCSPで配信する。
+  // The document's view mode. Only interactive documents are served with a CSP that allows scripts.
   mode: HtmlMode;
 }
 
 type SnapshotFile =
-  // 変換後のHTMLと、参照を調べ直したCSSは、memoryから配信する。
+  // Rendered HTML and CSS with rewritten references are served from memory.
   | { kind: 'inline'; body: Buffer; mime: string; role: 'document' | AssetRole }
-  // SDKを入れたHTML。SDKの設定（表示ごとに違う）を、beforeとafterの間に入れて配信する。
+  // HTML with the SDK. Served with the SDK config (different per view) inserted between before and after.
   | { kind: 'bridged'; before: Buffer; after: Buffer; mime: string; role: 'document' }
-  // それ以外は、登録時に保存した内容を配信する。
+  // Everything else is served from the content saved at registration.
   | { kind: 'blob'; sha256: string; mime: string; role: AssetRole };
 
-// 1つの版を表示するための内容。版が同じなら、内容も同じ。
+// Content for viewing one revision. The same revision yields the same content.
 interface Snapshot {
   format: DocumentFormat;
   documentLogicalPath: string;
@@ -52,57 +52,57 @@ interface Snapshot {
 interface Grant {
   sessionId: string;
   documentId: string;
-  // 発行したときの、文書の閉じた回数。閉じた後は、開き直しても使えない。
+  // The document's close count at issue time. Unusable after a close, even if reopened.
   openEpoch: number;
   revision: string;
   mode: HtmlMode;
-  // interactiveの表示を発行したときの、scriptの実行の許可の世代。許可が外れるか、許可し直したら使えない。
+  // Script permission generation when the interactive view was issued. Unusable once the permission is revoked or re-granted.
   permission: number | null;
   snapshot: Snapshot;
-  // HTMLと本体の間の通信。SDKへ渡す設定（JSON）を持つ。
+  // Communication between the HTML and the host. Holds the config (JSON) passed to the SDK.
   bridge: { instanceId: string; requestId: string; config: Buffer } | null;
-  // 表示の中から読み込もうとした、登録されていないfile。
+  // Unregistered files the view tried to load.
   missing: Set<string>;
 }
 
-// 表示を発行したrequestの情報。
+// Information about the request that issued the view.
 export interface GrantContext {
-  // 管理UIのorigin。SDKは、このoriginの親とだけ通信を始める。
+  // Origin of the management UI. The SDK only starts communication with a parent of this origin.
   origin: string;
 }
 
 export interface RenderService {
-  // 1つの文書の1つの版を表示するための、限定された権限を発行する（仕様10.2）。
+  // Issues a limited grant to view one revision of one document (spec 10.2).
   createGrant(
     sessionId: string,
     params: unknown,
     context: GrantContext,
   ): Promise<RenderGrantResult>;
-  // 回答待ちの質問が固定した版と表示方法で、表示の権限を発行する（仕様11.4、12.2）。
-  // 表示方法は、質問を作ったときの表示方法と、いまのscriptの実行の許可から決める。
-  // interactiveなら、その質問の回答案をHTMLから送れるよう、SDKを入れる。
+  // Issues a render grant for the revision and view mode pinned by a pending question (spec 11.4, 12.2).
+  // The view mode is decided from the mode when the question was created and the current script permission.
+  // If interactive, the SDK is included so the HTML can send draft answers for that question.
   createGrantForRequest(
     sessionId: string,
     requestId: string,
     context: GrantContext,
   ): Promise<RenderGrantResult>;
-  // SDKを入れた表示の権限が、いまも有効で、そのsessionのもので、質問が回答待ちなら、その質問。
+  // The question, if the SDK-enabled render grant is still valid, belongs to the session, and the question is pending.
   bridgeOf(
     sessionId: string,
     grant: string,
   ): { requestId: string; documentId: string; revision: string } | null;
-  // 表示をやめたときに、権限を回収する。別のsessionの権限には触れない。
+  // Reclaims grants when a view is closed. Grants of other sessions are not touched.
   release(sessionId: string, grants: string[]): number;
-  // 表示用URLが指すfile。権限が無効、または登録されていないpathならnull。
+  // The file a preview URL points to. null if the grant is invalid or the path is not registered.
   resolve(grant: string, logicalPath: string): Promise<PreviewFile | null>;
-  // 表示している版の、文書中のlink。
+  // A link in the document, for the displayed revision.
   linkOf(documentId: string, revision: string, linkId: string): Promise<RenderLink>;
-  // 閉じた文書の権限を失効させる。開き直しても、閉じる前の権限は戻らない。
+  // Revokes grants of closed documents. Grants from before a close do not come back on reopen.
   pruneClosed(): void;
-  // 表示の中から読み込もうとした、登録されていないfile。自分のsessionの権限だけを調べられる。
+  // Unregistered files the view tried to load. Only grants of the caller's own session can be inspected.
   missingOf(sessionId: string, grant: string): string[];
   readonly grantCount: number;
-  // 保持している項目の数（資源の漏れの確認に使う。daemon.diagnostics）。
+  // Counts of retained entries (used to check for resource leaks; daemon.diagnostics).
   retainedCounts(): Record<string, number>;
 }
 
@@ -112,7 +112,7 @@ export interface RenderServiceOptions {
   sessions: SessionService;
   parse: ParseService;
   previewOrigin: () => string;
-  // 表示の中から、登録されていないfileを新しく読み込もうとしたとき（UIへ知らせる）。
+  // Called when the view tries to load a new unregistered file (to notify the UI).
   onMissing?: (documentId: string) => void;
 }
 
@@ -132,7 +132,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
   const grants = new Map<string, Grant>();
   const snapshots = new Map<string, Snapshot>();
 
-  // sessionが破棄されたら、そのsessionが持つ権限もすべて失効する。
+  // When a session is revoked, all grants it holds are revoked too.
   sessions.onAnyRevoke((sessionId) => {
     for (const [key, grant] of grants) if (grant.sessionId === sessionId) grants.delete(key);
   });
@@ -144,12 +144,12 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     withSdk = false,
   ) => {
     const { record, entry } = documents.describeRevision(documentId, revision);
-    // 版は本文とassetの内容で決まり、文書の位置を含まない。同じ内容の文書が別の位置にあれば、
-    // 版は同じでも、配信するpathと相対参照の解決が変わる。表示方法とSDKの有無でも変わる。
+    // The revision depends on the content and assets, not the document location. The same content at another location
+    // has the same revision but different served paths and relative reference resolution. The view mode and SDK presence also matter.
     const cacheKey = `${entry.revision}\n${entry.documentLogicalPath}\n${mode}\n${String(withSdk)}`;
     const cached = snapshots.get(cacheKey);
     if (cached) {
-      // 使ったものを末尾へ移し、古いものから捨てる。
+      // Move the used entry to the end; the oldest is evicted first.
       snapshots.delete(cacheKey);
       snapshots.set(cacheKey, cached);
       return { record, entry, snapshot: cached };
@@ -160,14 +160,14 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     for (const asset of entry.assets) {
       if (asset.role !== 'style') continue;
       const text = decodeUtf8(await store.readBlob(asset.sha256));
-      // UTF-8として読めないCSSは、参照を調べられないので配信しない。
+      // CSS that is not valid UTF-8 cannot be scanned for references, so it is not served.
       if (text !== null) stylesheets.push({ logicalPath: asset.logicalPath, text });
     }
     const readable = new Set(stylesheets.map((sheet) => sheet.logicalPath));
     const usable = entry.assets.filter(
       (asset) => asset.role !== 'style' || readable.has(asset.logicalPath),
     );
-    // SDKの設定を入れる位置の目印。推測できない値なので、文書の中に同じ文字列は現れない。
+    // Marker for where the SDK config goes. Unguessable, so the same string never appears in the document.
     const slot = withSdk ? `__vde_bridge_config_${randomBytes(16).toString('hex')}__` : null;
     const output: RenderOutput = await parse.render({
       format: entry.format,
@@ -192,7 +192,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     }
     if (output.html !== null) {
       const at = slot === null ? -1 : output.html.indexOf(slot);
-      if (slot !== null && at === -1) throw new Error('SDKを入れられませんでした。');
+      if (slot !== null && at === -1) throw new Error('The SDK could not be inserted.');
       files.set(
         entry.documentLogicalPath,
         slot === null
@@ -224,8 +224,8 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     return { record, entry, snapshot };
   };
 
-  // 権限が有効なのは、発行したsessionが有効で、文書が開いている間だけ。
-  // interactiveの表示は、scriptの実行の許可が外れたら使えない。
+  // A grant is valid only while the issuing session is active and the document is open.
+  // An interactive view is unusable once the script permission is revoked.
   const liveGrant = (key: string): Grant | null => {
     const grant = grants.get(key);
     if (!grant) return null;
@@ -243,7 +243,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     return grant;
   };
 
-  // 表示の権限を発行する。requestIdがあれば、その質問の回答案をHTMLから送れるよう、SDKを入れる。
+  // Issues a render grant. With a requestId, the SDK is included so the HTML can send draft answers for that question.
   const issue = async (
     sessionId: string,
     params: {
@@ -255,23 +255,23 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     context: GrantContext,
   ): Promise<RenderGrantResult> => {
     const interactive = params.mode === 'interactive';
-    // scriptを動かす表示は、利用者が明示的に許可したHTMLの文書だけ（仕様10.2）。
-    // 発行した表示は、そのときの許可（世代）に結び付ける。
+    // The interactive view is only for HTML documents the user explicitly allowed (spec 10.2).
+    // The issued view is bound to the permission (generation) at that time.
     const permissionOf = (): number | null => {
       if (!interactive) return null;
       const generation = documents.interactiveGeneration(params.documentId);
       if (generation === null) {
         throw new VdeError(
           'E_INTERACTIVE_NOT_ALLOWED',
-          'この文書では、scriptを動かす表示（interactive）が許可されていません。',
+          'The interactive view is not allowed for this document.',
           { documentId: params.documentId },
         );
       }
       return generation;
     };
     permissionOf();
-    // 変換を待つ間に文書が閉じられたら、閉じる前に始めた発行は成立させない。
-    // 開き直されていれば、開いていることを確かめ直してから発行する。
+    // If the document is closed while rendering, an issue started before the close must not succeed.
+    // If it was reopened, re-check that it is open before issuing.
     const withSdk = params.requestId !== null;
     let openEpoch = documents.openEpoch(params.documentId);
     let prepared = await snapshotOf(params.documentId, params.revision, params.mode, withSdk);
@@ -279,26 +279,26 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       openEpoch = documents.openEpoch(params.documentId);
       prepared = await snapshotOf(params.documentId, params.revision, params.mode, withSdk);
       if (documents.openEpoch(params.documentId) !== openEpoch) {
-        throw new VdeError('E_DOCUMENT_NOT_OPEN', '文書は開かれていません。', {
+        throw new VdeError('E_DOCUMENT_NOT_OPEN', 'The document is not open.', {
           documentId: params.documentId,
         });
       }
     }
-    // 変換を待つ間に許可が外れていれば、発行しない。
+    // If the permission was revoked while rendering, do not issue.
     const permission = permissionOf();
     const { record, entry, snapshot } = prepared;
-    // 変換を待つ間に質問が終わっていれば（中止・確定・削除）、SDKを入れた表示を発行しない（仕様11.6）。
+    // If the question ended while rendering (cancelled, submitted, or forgotten), do not issue an SDK-enabled view (spec 11.6).
     if (params.requestId !== null) {
       const request = Object.hasOwn(store.payload.feedbackRequests, params.requestId)
         ? store.payload.feedbackRequests[params.requestId]
         : undefined;
       if (!request) {
-        throw new VdeError('E_REQUEST_NOT_FOUND', '質問が見つかりません。', {
+        throw new VdeError('E_REQUEST_NOT_FOUND', 'The question was not found.', {
           requestId: params.requestId,
         });
       }
       if (request.status !== 'pending') {
-        throw new VdeError('E_REQUEST_NOT_PENDING', '質問は回答待ちではありません。', {
+        throw new VdeError('E_REQUEST_NOT_PENDING', 'The question is not pending.', {
           requestId: params.requestId,
           status: request.status,
         });
@@ -310,7 +310,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       ) {
         throw new VdeError(
           'E_INVALID_ARGUMENT',
-          'この表示では、その質問の回答案をHTMLから送れません。',
+          'This view cannot send draft answers for that question from the HTML.',
           {
             requestId: params.requestId,
           },
@@ -318,7 +318,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       }
     }
     if (interactive && snapshot.format !== 'html') {
-      throw new VdeError('E_INVALID_ARGUMENT', 'interactiveはHTMLの文書だけで使えます。');
+      throw new VdeError('E_INVALID_ARGUMENT', 'interactive is only available for HTML documents.');
     }
     let bridge: Grant['bridge'] = null;
     if (params.requestId !== null) {
@@ -329,7 +329,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
         config: Buffer.from(JSON.stringify({ instanceId, parentOrigin: context.origin })),
       };
     }
-    // 256bitの乱数。この文書・この版の表示にだけ使え、管理APIには使えない。
+    // 256-bit random value. Usable only to view this document and revision, never for the management API.
     const key = randomBytes(32).toString('base64url');
     grants.set(key, {
       sessionId,
@@ -342,7 +342,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       bridge,
       missing: new Set(),
     });
-    // 1つのsessionが持てる数を限る。超えた分は、古いものから失効させる。
+    // Limits how many grants a session can hold. Excess grants are revoked oldest first.
     const owned = [...grants].filter(([, grant]) => grant.sessionId === sessionId);
     for (const [oldKey] of owned.slice(
       0,
@@ -391,16 +391,16 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
         ? store.payload.feedbackRequests[requestId]
         : undefined;
       if (!request) {
-        throw new VdeError('E_REQUEST_NOT_FOUND', '質問が見つかりません。', { requestId });
+        throw new VdeError('E_REQUEST_NOT_FOUND', 'The question was not found.', { requestId });
       }
       if (request.status !== 'pending') {
-        throw new VdeError('E_REQUEST_NOT_PENDING', '質問は回答待ちではありません。', {
+        throw new VdeError('E_REQUEST_NOT_PENDING', 'The question is not pending.', {
           requestId,
           status: request.status,
         });
       }
-      // staticで作った質問は、後から文書のscriptを許可しても、interactiveにしない。
-      // interactiveで作った質問も、scriptの実行の許可が外れていれば、静的表示にする。
+      // A question created as static does not become interactive even if scripts are allowed later.
+      // A question created as interactive falls back to the static view if the script permission was revoked.
       const interactive =
         request.renderMode === 'interactive' && documents.interactiveAllowed(request.documentId);
       return issue(
@@ -438,10 +438,10 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     async resolve(key, logicalPath) {
       const grant = liveGrant(key);
       if (!grant) return null;
-      // 登録したpathとの完全一致だけで引く。filesystemのpathへは解決しない。
+      // Looked up only by exact match with a registered path. Never resolved to a filesystem path.
       const file = grant.snapshot.files.get(logicalPath);
       if (!file) {
-        // 登録されていないfileの読み込みを記録し、UIで登録の方法を示せるようにする（仕様10.3）。
+        // Records loads of unregistered files so the UI can show how to register them (spec 10.3).
         if (!grant.missing.has(logicalPath) && grant.missing.size < LIMITS.renderMissingPerGrant) {
           grant.missing.add(logicalPath);
           options.onMissing?.(grant.documentId);
@@ -454,7 +454,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
           : file.kind === 'bridged'
             ? Buffer.concat([file.before, grant.bridge?.config ?? Buffer.from('null'), file.after])
             : await store.readBlob(file.sha256);
-      // 内容を読んでいる間に失効していたら、配信しない。
+      // If the grant was revoked while reading the content, do not serve it.
       if (!liveGrant(key)) return null;
       return { body, mime: file.mime, role: file.role, grant: key, mode: grant.mode };
     },
@@ -475,7 +475,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       const { snapshot } = await snapshotOf(documentId, revision);
       const link = snapshot.links.find((candidate) => candidate.linkId === linkId);
       if (!link) {
-        throw new VdeError('E_LINK_NOT_FOUND', 'linkが見つかりません。', { documentId, linkId });
+        throw new VdeError('E_LINK_NOT_FOUND', 'The link was not found.', { documentId, linkId });
       }
       return link;
     },

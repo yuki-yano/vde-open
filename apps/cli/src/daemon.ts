@@ -1,4 +1,4 @@
-// daemonのentry。CLIから切り離して起動され、準備が終わったら親へ結果を1回だけ伝える。
+// Daemon entry. Started detached from the CLI; reports the outcome to the parent exactly once when ready.
 import { isVdeError } from '@vde-open/shared';
 
 import packageJson from '../package.json' with { type: 'json' };
@@ -8,7 +8,7 @@ import { currentPathEnvironment } from './persistence/paths.ts';
 function notifyParent(message: Record<string, unknown>): void {
   if (!process.send) return;
   process.send(message, () => {
-    // 親が待ち続けないよう、通知したら経路を閉じる。
+    // Close the channel after notifying so the parent does not keep waiting.
     if (process.connected) process.disconnect();
   });
 }
@@ -29,7 +29,7 @@ try {
   notifyParent({
     type: 'error',
     code: isVdeError(error) ? error.code : 'E_DAEMON_START_FAILED',
-    message: isVdeError(error) ? error.message : 'daemonを起動できませんでした。',
+    message: isVdeError(error) ? error.message : 'The daemon could not be started.',
     details: isVdeError(error) ? error.details : {},
   });
   process.exitCode = 1;

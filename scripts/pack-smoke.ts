@@ -1,5 +1,5 @@
-// 配布tarballを空のdirectoryへ導入し、両binを検証する（仕様14.4）。
-// 実装済みの手順までを実行する。手順を足すときはここへ追加する。
+// Install the distribution tarball into an empty directory and verify both bins (spec 14.4).
+// Runs the steps implemented so far. Add new steps here.
 import {
   existsSync,
   mkdirSync,
@@ -29,21 +29,21 @@ function fail(message: string): never {
   throw new SmokeFailure(message);
 }
 
-// 手順1: tarballを生成し、中身を検査する。
+// Step 1: generate the tarball and inspect its contents.
 function packTarball(): string {
   if (!existsSync(join(cliDir, 'dist', 'cli.js'))) {
-    fail('apps/cli/dist/cli.js がありません。先に pnpm build を実行してください。');
+    fail('apps/cli/dist/cli.js does not exist. Run pnpm build first.');
   }
   const artifactsDir = join(repoRoot, 'artifacts');
   rmSync(artifactsDir, { recursive: true, force: true });
   mkdirSync(artifactsDir, { recursive: true });
   runPnpm(['pack', '--pack-destination', artifactsDir], { cwd: cliDir });
   const tarballs = readdirSync(artifactsDir).filter((name) => name.endsWith('.tgz'));
-  if (tarballs.length !== 1) fail(`tarballが1つではありません: ${tarballs.join(', ')}`);
+  if (tarballs.length !== 1) fail(`expected exactly one tarball: ${tarballs.join(', ')}`);
   const tarball = join(artifactsDir, tarballs[0] as string);
 
   const listing = captureCommand('tar', ['-tzf', tarball], { cwd: repoRoot });
-  if (listing.status !== 0) fail(`tarballを読めません: ${listing.stderr}`);
+  if (listing.status !== 0) fail(`cannot read the tarball: ${listing.stderr}`);
   const entries = new Set(listing.stdout.split(/\r?\n/).filter(Boolean));
   for (const entry of [
     'package/package.json',
@@ -54,14 +54,17 @@ function packTarball(): string {
     'package/dist/web/index.html',
     'package/docs/agent-usage.md',
     'package/README.md',
+    'package/LICENSE',
+    'package/skills/vde-open/SKILL.md',
     'package/THIRD_PARTY_NOTICES.md',
   ]) {
-    if (!entries.has(entry)) fail(`tarballに ${entry} がありません`);
+    if (!entries.has(entry)) fail(`the tarball lacks ${entry}`);
   }
   for (const entry of entries) {
-    if (entry.endsWith('bundled-modules.json')) fail(`tarballに中間fileがあります: ${entry}`);
+    if (entry.endsWith('bundled-modules.json'))
+      fail(`the tarball contains an intermediate file: ${entry}`);
   }
-  // bundleした依存（JS・CSS・font）のlicense noticeがある（仕様16.3、ADR-0001）。
+  // License notices of bundled dependencies (JS, CSS, fonts) are present (spec 16.3, ADR-0001).
   const notices = captureCommand('tar', ['-xzOf', tarball, 'package/THIRD_PARTY_NOTICES.md'], {
     cwd: repoRoot,
   }).stdout;
@@ -75,13 +78,13 @@ function packTarball(): string {
     ['@fontsource-variable/geist', 'SIL OPEN FONT LICENSE'],
   ] as const) {
     const start = notices.indexOf(`\n## ${name}@`);
-    if (start === -1) fail(`THIRD_PARTY_NOTICES.md に ${name} がありません`);
+    if (start === -1) fail(`THIRD_PARTY_NOTICES.md lacks ${name}`);
     const next = notices.indexOf('\n## ', start + 1);
     if (!notices.slice(start, next === -1 ? undefined : next).includes(text)) {
-      fail(`THIRD_PARTY_NOTICES.md の ${name} に「${text}」がありません`);
+      fail(`${name} in THIRD_PARTY_NOTICES.md lacks "${text}"`);
     }
   }
-  // CLI-015: 導入先でbuildや依存の導入を求めない（install時のscriptも、実行時の依存もない）。
+  // CLI-015: the install target needs no build or dependency installation (no install scripts, no runtime dependencies).
   const manifest = captureCommand('tar', ['-xzOf', tarball, 'package/package.json'], {
     cwd: repoRoot,
   });
@@ -90,29 +93,31 @@ function packTarball(): string {
     dependencies?: Record<string, string>;
   };
   for (const hook of ['preinstall', 'install', 'postinstall', 'prepare']) {
-    if (packed.scripts?.[hook] !== undefined) fail(`tarballに ${hook} scriptがあります`);
+    if (packed.scripts?.[hook] !== undefined) fail(`the tarball has a ${hook} script`);
   }
   if (Object.keys(packed.dependencies ?? {}).length > 0) {
-    fail(`tarballに実行時の依存があります: ${Object.keys(packed.dependencies ?? {}).join(', ')}`);
+    fail(
+      `the tarball has runtime dependencies: ${Object.keys(packed.dependencies ?? {}).join(', ')}`,
+    );
   }
   for (const entry of entries) {
     if (entry.startsWith('package/src/') || entry.endsWith('.ts')) {
-      fail(`tarballにsourceが含まれています: ${entry}`);
+      fail(`the tarball contains source: ${entry}`);
     }
   }
   return tarball;
 }
 
 async function verifyInstalled(tarball: string, installDir: string): Promise<void> {
-  // 手順2: 空のdirectoryへtarballだけを導入する。registryへは問い合わせない。
+  // Step 2: install only the tarball into an empty directory. Do not query the registry.
   writeFileSync(join(installDir, 'package.json'), '{"private":true}\n');
-  // CLI-014: 導入は、shellの設定fileや、既にある別の`vo`を変えない。
-  // 試験用のHOME（既存のshellの設定fileを置く）で導入し、前後の内容を比べる。
+  // CLI-014: installation does not change shell config files or an existing, different `vo`.
+  // Install with a test HOME (holding existing shell config files) and compare the contents before and after.
   const home = join(installDir, 'home');
   mkdirSync(home);
   const shellFiles = ['.zshrc', '.zprofile', '.bashrc', '.bash_profile', '.profile'];
   for (const name of ['.zshrc', '.bashrc']) {
-    writeFileSync(join(home, name), `# ${name}（試験用）\nexport VDE_OPEN_SMOKE=1\n`);
+    writeFileSync(join(home, name), `# ${name} (for the test)\nexport VDE_OPEN_SMOKE=1\n`);
   }
   const shellState = () =>
     JSON.stringify(
@@ -128,8 +133,8 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     env: npmEnv,
   });
 
-  // 既に別の`vo`がある導入先（globalのprefixのbin。PATHに入る場所）へ導入しても、その`vo`を置き換えない。
-  // npmは、--forceがなければ、ほかのpackageのものではないbinを置き換えずに導入をやめる（EEXIST）。
+  // Installing into a target that already has a different `vo` (the global prefix bin, a place on PATH) does not replace that `vo`.
+  // Without --force, npm aborts the installation instead of replacing a bin that belongs to no other package (EEXIST).
   const prefix = join(installDir, 'global-prefix');
   const prefixBin = process.platform === 'win32' ? prefix : join(prefix, 'bin');
   mkdirSync(prefixBin, { recursive: true });
@@ -152,16 +157,19 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     { cwd: installDir, env: npmEnv },
   );
   if (readFileSync(join(prefixBin, existingName), 'utf8') !== existingVo) {
-    fail('導入が、既にある別のvoを変えました');
+    fail('installation changed the existing, different vo');
   }
-  if (global.status === 0) fail('既に別のvoがある導入先へ、導入が成功しました');
+  if (global.status === 0)
+    fail('installation succeeded into a target that already has a different vo');
   if (!global.stderr.includes('EEXIST')) {
-    fail(`既にあるvoとの競合ではない理由で、導入が失敗しました: ${global.stderr}`);
+    fail(
+      `installation failed for a reason other than the conflict with the existing vo: ${global.stderr}`,
+    );
   }
-  if (shellState() !== shellBefore) fail('導入がshellの設定fileを変えました');
+  if (shellState() !== shellBefore) fail('installation changed shell config files');
 
-  // binのshebangが、いま検証に使っているNodeを起動するようにする。
-  // stateは導入先の中の試験用homeに置き、通常のdaemonとstateに触れない。
+  // Make the bin shebang start the Node used for this verification.
+  // Keep the state in a test home inside the install target, not touching the normal daemon and state.
   const stateHome = join(installDir, 'state home');
   const env = {
     ...process.env,
@@ -172,17 +180,17 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
   const runBin = (name: string, args: string[]): string => {
     const result = captureInstalledBin(binDir, name, args, { cwd: installDir, env });
     if (result.status !== 0) {
-      fail(`${name} ${args.join(' ')} が exit ${String(result.status)}: ${result.stderr}`);
+      fail(`${name} ${args.join(' ')} exited with ${String(result.status)}: ${result.stderr}`);
     }
     return result.stdout;
   };
 
-  // 手順3（CLI-002）: 両名のversionとhelpが一致する。
+  // Step 3 (CLI-002): version and help match between both names.
   for (const args of [['--version'], ['--help']]) {
     const long = runBin('vde-open', args);
     const short = runBin('vo', args);
-    if (long.trim() === '') fail(`vde-open ${args.join(' ')} の出力が空です`);
-    if (long !== short) fail(`vde-open と vo の ${args.join(' ')} が一致しません`);
+    if (long.trim() === '') fail(`output of vde-open ${args.join(' ')} is empty`);
+    if (long !== short) fail(`${args.join(' ')} differs between vde-open and vo`);
   }
 
   interface Envelope<T> {
@@ -191,58 +199,57 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
   }
   const runJson = <T>(name: string, args: string[]): T => {
     const envelope = JSON.parse(runBin(name, [...args, '--json'])) as Envelope<T>;
-    if (!envelope.ok) fail(`${name} ${args.join(' ')} が失敗しました`);
+    if (!envelope.ok) fail(`${name} ${args.join(' ')} failed`);
     return envelope.data;
   };
   type Documents = { documents: Array<{ documentId: string }> };
   type Status = { state: string; daemonId: string | null };
 
   try {
-    // 手順4（CLI-003）: 長名で開いた文書を、短名で一覧・closeできる。
+    // Step 4 (CLI-003): a document opened with the long name can be listed and closed with the short name.
     writeFileSync(join(installDir, 'a.md'), '# pack検証\n');
     const opened = runJson<Documents>('vde-open', ['open', 'a.md']);
     const listed = runJson<Documents>('vo', ['list']);
     const openedId = opened.documents[0]?.documentId;
     if (!openedId || listed.documents.map((document) => document.documentId).join() !== openedId) {
-      fail('vde-openで開いた文書が、voの一覧と一致しません');
+      fail('the document opened with vde-open does not match the vo list');
     }
     const daemonId = runJson<Status>('vo', ['daemon', 'status']).daemonId;
     if (runJson<Status>('vde-open', ['daemon', 'status']).daemonId !== daemonId) {
-      fail('vde-openとvoが別のdaemonを使っています');
+      fail('vde-open and vo use different daemons');
     }
-    // 手順6: repoの外のcwdから、同梱のUIと解析workerが動く。cwdのfileは配信しない。
+    // Step 6: from a cwd outside the repo, the bundled UI and parse worker work. Files in cwd are not served.
     const outline = runJson<{ outline: unknown[] }>('vo', ['read', openedId, '--outline']);
-    if (outline.outline.length !== 1) fail('同梱の解析workerで見出しを取得できません');
+    if (outline.outline.length !== 1) fail('cannot get headings with the bundled parse worker');
     const uiUrl = runJson<{ uiUrl: string }>('vde-open', ['daemon', 'status']).uiUrl;
     const page = await fetch(uiUrl);
     const html = await page.text();
     const script = /<script[^>]+src="([^"]+)"/.exec(html)?.[1];
     if (page.status !== 200 || !html.includes('id="root"') || !script) {
-      fail('同梱のUIを配信できていません');
+      fail('the bundled UI is not served');
     }
-    if ((await fetch(new URL(script, uiUrl))).status !== 200)
-      fail('UIのscriptを配信できていません');
+    if ((await fetch(new URL(script, uiUrl))).status !== 200) fail('the UI script is not served');
     if ((await fetch(new URL('a.md', uiUrl))).status !== 404)
-      fail('cwdのfileがUIのoriginから配信されています');
-    // CLI-013: cwdにある秘密のfileも、UIのoriginから配信しない。
+      fail('a file in cwd is served from the UI origin');
+    // CLI-013: secret files in cwd are not served from the UI origin either.
     writeFileSync(join(installDir, '.env'), 'SECRET=pack-smoke\n');
     for (const path of ['.env', '../.env', '%2e%2e/.env']) {
       const response = await fetch(new URL(path, uiUrl));
       if (response.status !== 404 || (await response.text()).includes('SECRET=')) {
-        fail(`cwdの秘密のfileがUIのoriginから配信されています: ${path}`);
+        fail(`a secret file in cwd is served from the UI origin: ${path}`);
       }
     }
 
-    // 手順6の続き: 導入先だけで、検索のworker（同梱のMiniSearch）が動く。
+    // Step 6, continued: the search worker (bundled MiniSearch) works with only the install target.
     const found = runJson<{ hits: Array<{ documentId: string }>; incomplete: boolean }>('vo', [
       'search',
       'pack検証',
     ]);
     if (found.incomplete || found.hits[0]?.documentId !== openedId) {
-      fail('同梱の検索workerで、開いた文書を検索できません');
+      fail('cannot search the opened document with the bundled search worker');
     }
 
-    // 手順6の続き: 導入先だけで、質問の作成と、Agent向けの取得（回答案を返さない）が動く。
+    // Step 6, continued: creating a question and fetching it for the Agent (without draft answers) work with only the install target.
     writeFileSync(
       join(installDir, 'q.json'),
       JSON.stringify({
@@ -265,11 +272,11 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     ]).request;
     const got = runJson<Record<string, unknown>>('vo', ['feedback', 'get', asked.requestId]);
     if (asked.status !== 'pending' || got['status'] !== 'pending' || 'draftAnswers' in got) {
-      fail('導入先で、質問を作成・取得できません');
+      fail('cannot create and fetch a question in the install target');
     }
     runJson('vo', ['feedback', 'cancel', asked.requestId]);
 
-    // 手順6の続き: 導入先だけで、HTMLの静的変換（同梱のparse5とcss-tree）と表示用のlistenerが動く。
+    // Step 6, continued: static HTML conversion (bundled parse5 and css-tree) and the preview listener work with only the install target.
     mkdirSync(join(installDir, 'site'));
     writeFileSync(
       join(installDir, 'site', 'site.css'),
@@ -293,7 +300,7 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
         body: JSON.stringify(body),
       });
       const envelope = (await response.json()) as Envelope<T>;
-      if (!envelope.ok) fail(`${path} が失敗しました（${String(response.status)}）`);
+      if (!envelope.ok) fail(`${path} failed (${String(response.status)})`);
       return envelope.data;
     };
     const { token } = await post<{ token: string }>('/sessions/bootstrap', { ticket });
@@ -304,16 +311,17 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     );
     const rendered = await (await fetch(grant.documentUrl)).text();
     if (!rendered.includes('<p id="p">pack</p>') || rendered.includes('<script')) {
-      fail('HTMLの静的変換が、導入先で動いていません');
+      fail('static HTML conversion does not work in the install target');
     }
     const css = await (await fetch(`${grant.filesBaseUrl}site.css`)).text();
-    if (css !== '.a{color:red}.b{}') fail(`CSSの変換が、導入先で動いていません: ${css}`);
+    if (css !== '.a{color:red}.b{}')
+      fail(`CSS conversion does not work in the install target: ${css}`);
     if ((await fetch(`${grant.filesBaseUrl}a.md`)).status !== 404) {
-      fail('登録していないfileが、表示用のlistenerから配信されています');
+      fail('an unregistered file is served from the preview listener');
     }
     if (htmlId) runJson('vo', ['close', htmlId]);
 
-    // 手順6の続き: 導入先だけで、scriptを動かす表示と、HTMLへの同梱SDKの注入が動く。
+    // Step 6, continued: the interactive view and injecting the bundled SDK into HTML work with only the install target.
     writeFileSync(join(installDir, 'site', 'app.html'), '<script>document.title="app"</script>');
     const interactiveAsk = runJson<{ request: { requestId: string; documentId: string } }>('vo', [
       'ask',
@@ -336,23 +344,23 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
       !appHtml.includes('<script>document.title="app"</script>') ||
       !(appResponse.headers.get('content-security-policy') ?? '').includes('sandbox allow-scripts')
     ) {
-      fail('scriptを動かす表示と、同梱SDKの注入が、導入先で動いていません');
+      fail('the interactive view and the bundled SDK injection do not work in the install target');
     }
     runJson('vo', ['feedback', 'cancel', interactiveAsk.requestId]);
     runJson('vo', ['close', interactiveAsk.documentId]);
 
     runJson('vo', ['close', openedId]);
     if (runJson<Documents>('vde-open', ['list']).documents.length !== 0) {
-      fail('voのcloseがvde-openの一覧に反映されていません');
+      fail('close from vo is not reflected in the vde-open list');
     }
 
-    // 手順7の前半: どちらの名前で起動したdaemonも、もう一方の名前で停止できる。
+    // Step 7, first half: a daemon started with either name can be stopped with the other name.
     runJson('vo', ['daemon', 'stop']);
     if (runJson<Status>('vde-open', ['daemon', 'status']).state !== 'stopped') {
-      fail('voのdaemon stopでdaemonが停止していません');
+      fail('daemon stop from vo did not stop the daemon');
     }
 
-    // 手順5（CLI-004）: 両名から同時に20回開いても、daemonは1つ。
+    // Step 5 (CLI-004): opening 20 times concurrently from both names still gives one daemon.
     const results = await Promise.all(
       Array.from({ length: 20 }, (_, index) =>
         captureInstalledBinAsync(
@@ -368,30 +376,31 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     );
     const ids = new Set<string>();
     for (const result of results) {
-      if (result.status !== 0) fail(`同時openが exit ${String(result.status)}: ${result.stderr}`);
+      if (result.status !== 0)
+        fail(`concurrent open exited with ${String(result.status)}: ${result.stderr}`);
       const id = (JSON.parse(result.stdout) as Envelope<Documents>).data.documents[0]?.documentId;
       if (id) ids.add(id);
     }
-    if (ids.size !== 1) fail(`同時openで文書が${String(ids.size)}件になりました`);
+    if (ids.size !== 1) fail(`concurrent open produced ${String(ids.size)} documents`);
     if (runJson<Documents>('vo', ['list']).documents.length !== 1)
-      fail('同じfileが重複して登録されています');
+      fail('the same file is registered more than once');
     const started = readFileSync(join(stateHome, 'logs', 'daemon.jsonl'), 'utf8')
       .split('\n')
       .filter((line) => line.includes('"event":"daemon.started"'));
-    // 手順4で1回、同時openで1回。同時openの中で複数のdaemonが起動していないこと。
-    if (started.length !== 2) fail(`daemonの起動回数が想定と違います: ${String(started.length)}`);
+    // Once in step 4 and once in the concurrent open. No multiple daemons must have started during the concurrent open.
+    if (started.length !== 2) fail(`unexpected number of daemon starts: ${String(started.length)}`);
   } finally {
-    // 手順7: 検証で起動したdaemonを必ず止める。
+    // Step 7: always stop the daemon started by the verification.
     captureInstalledBin(binDir, 'vde-open', ['daemon', 'stop'], { cwd: installDir, env });
   }
   if (runJson<Status>('vo', ['daemon', 'status']).state !== 'stopped') {
-    fail('検証後にdaemonが残っています');
+    fail('a daemon remains after the verification');
   }
 }
 
 async function main(): Promise<void> {
   const tarball = packTarball();
-  // 空白と日本語を含むpathでも導入・起動できることを同時に確かめる。
+  // Also confirms that installation and startup work with a path containing spaces and Japanese.
   const installDir = mkdtempSync(join(tmpdir(), 'vde-open pack 検証-'));
   try {
     await verifyInstalled(tarball, installDir);
@@ -404,7 +413,7 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error) {
-  // 後始末を終えてから終了させるため、process.exitは呼ばない。
+  // Do not call process.exit, so that cleanup finishes before exiting.
   process.exitCode = 1;
   if (error instanceof SmokeFailure) {
     console.error(`pack-smoke: FAIL: ${error.message}`);

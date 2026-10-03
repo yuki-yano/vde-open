@@ -6,7 +6,7 @@ import type {
   Questionnaire,
 } from '@vde-open/shared';
 
-// 回答の1つのfieldを変える。undefinedなら、未回答（fieldを省く）にする。
+// Change one field of the answers. undefined means not answered (the field is omitted).
 export function withAnswer(
   answers: Answers,
   name: string,
@@ -20,8 +20,8 @@ export function withAnswer(
   return next;
 }
 
-// 必須のfieldで、空の値（空の文字列・空の配列）が回答として有効なら、その空の値（仕様11.2）。
-// 入力欄が空なのは未入力と区別できないので、空の回答は利用者が明示したときだけ使う。
+// For a required field where an empty value (empty string or empty array) is a valid answer, that empty value (spec 11.2).
+// An empty control cannot be told apart from "not answered", so an empty answer is used only when the user makes it explicit.
 export function emptyAnswerOf(field: QuestionField, required: boolean): '' | [] | undefined {
   if (!required) return undefined;
   if (field.type === 'string' && field.enum === undefined && (field.minLength ?? 0) === 0) {
@@ -31,15 +31,15 @@ export function emptyAnswerOf(field: QuestionField, required: boolean): '' | [] 
   return undefined;
 }
 
-// 選択肢の表示。空の文字列の選択肢も、見える形にする。
-export const optionLabel = (option: string): string => (option === '' ? '（空欄）' : option);
+// Display text for an option. An empty-string option is made visible too.
+export const optionLabel = (option: string): string => (option === '' ? '(empty)' : option);
 
-// 回答の要約で使う、値の表示。値は文字として表示する。
+// Display text for a value in the answer summary. Values are shown as text.
 export function displayValue(field: QuestionField, value: AnswerValue | undefined): string {
-  if (value === undefined) return '未回答';
-  if (field.type === 'boolean') return value === true ? 'はい' : 'いいえ';
-  if (Array.isArray(value)) return value.length === 0 ? '（選択なし）' : value.join('、');
-  if (value === '') return '（空欄）';
+  if (value === undefined) return 'Not answered';
+  if (field.type === 'boolean') return value === true ? 'Yes' : 'No';
+  if (Array.isArray(value)) return value.length === 0 ? '(none selected)' : value.join(', ');
+  if (value === '') return '(empty)';
   return String(value);
 }
 
@@ -67,27 +67,27 @@ export function summarize(questionnaire: Questionnaire, answers: Answers): Summa
 }
 
 const ISSUE_TEXT: Record<AnswerIssue['code'], string> = {
-  'not-object': '回答の形が正しくありません',
-  'too-large': '回答が大きすぎます',
-  'unknown-field': '質問にない項目です',
-  required: '回答が必要です',
-  type: '値の種類が違います',
-  enum: '選択肢にない値です',
-  'too-long': '長すぎます',
-  'too-short': '短すぎます',
-  'out-of-range': '範囲の外です',
-  duplicate: '同じ選択肢が重複しています',
-  'too-many': '選べる数を超えています',
-  'too-few': '選ぶ数が足りません',
+  'not-object': 'The answers are not in the right shape',
+  'too-large': 'The answers are too large',
+  'unknown-field': 'Not a field of this question',
+  required: 'An answer is required',
+  type: 'Wrong value type',
+  enum: 'Not one of the options',
+  'too-long': 'Too long',
+  'too-short': 'Too short',
+  'out-of-range': 'Out of range',
+  duplicate: 'The same option is selected more than once',
+  'too-many': 'Too many selected',
+  'too-few': 'Too few selected',
 };
 
-// 回答の問題を、field名ごとの説明にする。
+// Turn answer issues into per-field descriptions.
 export function describeIssues(
   questionnaire: Questionnaire,
   issues: AnswerIssue[],
 ): Array<{ name: string; text: string }> {
   return issues.map((issue) => {
-    const title = questionnaire.answerSchema.properties[issue.field]?.title ?? '回答全体';
+    const title = questionnaire.answerSchema.properties[issue.field]?.title ?? 'Whole answer';
     return { name: issue.field, text: `${title}: ${ISSUE_TEXT[issue.code]}` };
   });
 }

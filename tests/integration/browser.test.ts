@@ -11,7 +11,7 @@ let opened: string;
 
 beforeEach(() => {
   t = createTestHome();
-  // 本物のbrowserを開かず、渡されたURLをfileへ記録するだけの実行file。
+  // An executable that does not open a real browser and only records the given URL to a file.
   opened = join(t.work, 'opened-urls.txt');
   opener = join(t.work, 'fake-browser.sh');
   writeFileSync(opener, `#!/bin/sh\nprintf '%s\\n' "$1" >> "${opened}"\n`);
@@ -27,18 +27,18 @@ afterEach(async () => {
 const openedUrls = () =>
   existsSync(opened) ? readFileSync(opened, 'utf8').trim().split('\n') : [];
 
-describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 browserの起動', () => {
-  it('--openでbrowserを開き、URLは一回限りのticketを含む', async () => {
+describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 launching the browser', () => {
+  it('opens the browser with --open, and the URL contains a one-time ticket', async () => {
     const first = await t.run(['open', 'a.md', '--open', '--json'], { env: { BROWSER: opener } });
     expect(first.exitCode).toBe(0);
     expect(first.json().warnings).toEqual([]);
     const urls = openedUrls();
     expect(urls).toHaveLength(1);
     expect(urls[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#bootstrap=[A-Za-z0-9_-]+$/);
-    // 秘密を含むURLは、JSONの結果には出さない。
+    // The URL containing a secret is not shown in the JSON result.
     expect(first.stdout).not.toContain('bootstrap=');
 
-    // 2回目のopenは同じdaemonを使う。--openを付けなければ、tabを増やさない。
+    // The second open uses the same daemon. Without --open, no tab is added.
     const daemonId = (await t.run(['daemon', 'status', '--json'])).json<{ daemonId: string }>().data
       .daemonId;
     await t.run(['open', 'b.md', '--json'], { env: { BROWSER: opener } });
@@ -48,11 +48,11 @@ describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 browserの起�
     ).toBe(daemonId);
   });
 
-  it('端末からの実行では、指定がなくても、daemonを新しく起動した初回だけbrowserを開く', async () => {
-    // --open・--no-open・--jsonを付けない。既定の判定だけでbrowserを開く。
+  it('when run from a terminal, opens the browser only the first time a new daemon starts, even without a flag', async () => {
+    // No --open, --no-open, or --json. The browser opens by the default decision alone.
     const first = await t.runAsTerminal(['open', 'a.md'], opener);
     expect(first.exitCode).toBe(0);
-    expect(first.stdout).toContain('1件');
+    expect(first.stdout).toContain('documents: 1 (new 1');
     const urls = openedUrls();
     expect(urls).toHaveLength(1);
     expect(urls[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#bootstrap=[A-Za-z0-9_-]+$/);
@@ -60,7 +60,7 @@ describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 browserの起�
     const daemonId = (await t.run(['daemon', 'status', '--json'])).json<{ daemonId: string }>().data
       .daemonId;
 
-    // 2回目は起動済みのdaemonへの追加。端末からの実行でも、tabを増やさない。
+    // The second run adds to the running daemon. Even from a terminal, no tab is added.
     const second = await t.runAsTerminal(['open', 'b.md'], opener);
     expect(second.exitCode).toBe(0);
     expect(openedUrls()).toHaveLength(1);
@@ -68,7 +68,7 @@ describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 browserの起�
       (await t.run(['daemon', 'status', '--json'])).json<{ daemonId: string }>().data.daemonId,
     ).toBe(daemonId);
 
-    // 端末からでも、--jsonと--no-openは開かない。--openは起動済みでも開く。
+    // Even from a terminal, --json and --no-open do not open. --open opens even when already running.
     await t.runAsTerminal(['open', 'a.md', '--json'], opener);
     await t.runAsTerminal(['open', 'a.md', '--no-open'], opener);
     expect(openedUrls()).toHaveLength(1);
@@ -76,20 +76,20 @@ describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 browserの起�
     expect(openedUrls()).toHaveLength(2);
   });
 
-  it('端末でない実行では、daemonを新しく起動しても、指定がなければbrowserを開かない', async () => {
+  it('when not run from a terminal, does not open the browser without a flag, even if a new daemon starts', async () => {
     const result = await t.run(['open', 'a.md'], { env: { BROWSER: opener } });
     expect(result.exitCode).toBe(0);
     expect(openedUrls()).toEqual([]);
   });
 
-  it('端末からの--jsonでは、daemonを新しく起動してもbrowserを開かない', async () => {
+  it('with --json from a terminal, does not open the browser even if a new daemon starts', async () => {
     const result = await t.runAsTerminal(['open', 'a.md', '--json'], opener);
     expect(result.exitCode).toBe(0);
     expect(openedUrls()).toEqual([]);
   });
 
-  it('--openと--no-openの競合は、optionとして指定されたときだけerrorにする', async () => {
-    // `--`より後は、optionではなくfile名。
+  it('treats the --open and --no-open conflict as an error only when given as options', async () => {
+    // After `--`, arguments are file names, not options.
     t.write('--open', '# openという名前\n');
     t.write('--no-open', '# no-openという名前\n');
     const files = await t.run(
@@ -100,7 +100,7 @@ describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 browserの起�
     expect(files.json<{ documents: unknown[] }>().data.documents).toHaveLength(2);
     expect(openedUrls()).toEqual([]);
 
-    // optionの値として現れる文字列も、flagとして数えない。
+    // A string appearing as an option value is not counted as a flag either.
     const value = await t.run(['open', 'a.md', '--title', '--no-open', '--open', '--json'], {
       env: { BROWSER: opener },
     });
@@ -115,7 +115,7 @@ describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 browserの起�
     expect(both.json().error.code).toBe('E_INVALID_ARGUMENT');
   });
 
-  it('--jsonと--no-openでは、browserを開かない', async () => {
+  it('does not open the browser with --json or --no-open', async () => {
     await t.run(['open', 'a.md', '--json'], { env: { BROWSER: opener } });
     await t.run(['open', 'b.md', '--no-open'], { env: { BROWSER: opener } });
     expect(openedUrls()).toEqual([]);
@@ -123,7 +123,7 @@ describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 browserの起�
     expect(both.exitCode).toBe(2);
   });
 
-  it('browserを開けなくても登録は成功し、失敗はwarningとして別に示す', async () => {
+  it('registration succeeds even if the browser cannot be opened, and the failure is shown separately as a warning', async () => {
     const result = await t.run(['open', 'a.md', '--open', '--json'], {
       env: { BROWSER: join(t.work, 'no-such-browser') },
     });
@@ -132,7 +132,7 @@ describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 browserの起�
     expect(envelope.ok).toBe(true);
     expect(envelope.data.documents).toHaveLength(1);
     expect(envelope.warnings.map((warning) => warning.code)).toEqual(['W_BROWSER_OPEN_FAILED']);
-    // stdoutはJSON 1個だけ。秘密を含むURLは出さない。
+    // stdout is exactly one JSON value. The URL containing a secret is not shown.
     expect(result.stdout).not.toContain('bootstrap=');
 
     const text = await t.run(['open', 'b.md', '--open'], {
@@ -140,16 +140,16 @@ describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 browserの起�
     });
     expect(text.exitCode).toBe(0);
     expect(text.stderr).toContain('W_BROWSER_OPEN_FAILED');
-    expect(text.stdout).toContain('1件');
+    expect(text.stdout).toContain('documents: 1 (');
   });
 
-  it('uiはbrowserを開き、--focusは表示する文書を切り替える', async () => {
+  it('ui opens the browser, and --focus switches the shown document', async () => {
     await t.run(['open', 'a.md', 'b.md', '--json']);
     const ui = await t.run(['ui', '--json'], { env: { BROWSER: opener } });
     expect(ui.json<{ opened: boolean; uiUrl: string }>().data).toMatchObject({ opened: true });
     expect(openedUrls()).toHaveLength(1);
 
-    // 引数なしの実行は、uiと同じ。
+    // Running without arguments is the same as ui.
     await t.run([], { env: { BROWSER: opener } });
     expect(openedUrls()).toHaveLength(2);
 
@@ -162,7 +162,7 @@ describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 browserの起�
     expect(state.payload.activeDocumentId).toBe(focused.data.documents[0]?.documentId);
   });
 
-  it('browserを閉じても（接続がなくても）、daemonは止まらない', async () => {
+  it('the daemon does not stop when the browser is closed (no connections)', async () => {
     await t.run(['open', 'a.md', '--open', '--json'], { env: { BROWSER: opener } });
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect((await t.run(['daemon', 'status', '--json'])).json<{ state: string }>().data.state).toBe(

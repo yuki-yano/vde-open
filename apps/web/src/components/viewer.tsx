@@ -27,87 +27,89 @@ import { useMissingAssets } from '@/lib/use-missing-assets';
 import { useRenderGrant } from '@/lib/use-render-grant';
 
 const PARSE_FAILURE: Record<string, string> = {
-  timeout: '解析が2秒以内に終わらなかったため、原文を表示しています。',
-  'limit-nodes': '文書の要素数が上限（100,000）を超えているため、原文を表示しています。',
-  'limit-depth': '文書の入れ子が上限（64段）を超えているため、原文を表示しています。',
-  'parse-error': '文書を解析できなかったため、原文を表示しています。',
+  timeout: 'Parsing did not finish within 2 seconds, so the source is shown.',
+  'limit-nodes': 'The document has more than 100,000 elements, so the source is shown.',
+  'limit-depth': 'The document is nested deeper than 64 levels, so the source is shown.',
+  'parse-error': 'The document could not be parsed, so the source is shown.',
 };
 
 const SOURCE_STATE: Record<string, string> = {
-  missing: 'fileが見つかりません。表示しているのは、最後に読めた内容です。',
-  unreadable: 'fileを読む権限がありません。表示しているのは、最後に読めた内容です。',
-  error: 'fileを文書として読めません。表示しているのは、最後に読めた内容です。',
+  missing: 'The file was not found. Showing the last content that could be read.',
+  unreadable: 'No permission to read the file. Showing the last content that could be read.',
+  error: 'The file cannot be read as a document. Showing the last content that could be read.',
 };
 
 export interface ViewerProps {
   api: Api;
   document: DocumentSummary;
-  // 回答待ちの質問が固定している版。あれば、新しい版が来てもこの版を表示し続ける（仕様11.4）。
+  // The revision pinned by a question awaiting an answer. If set, keep showing it even when a newer revision arrives (spec 11.4).
   fixedRevision?: string | null;
-  // この文書への質問。interactiveで作った回答待ちの質問なら、HTMLから回答案を受け付ける。
+  // The question for this document. If it is a pending question created in interactive mode, accept draft answers from the HTML.
   request?: FeedbackForUi | null;
-  // 表示の中から登録されていないfileを読み込もうとした、という通知の回数。
+  // How many times the view tried to load an unregistered file.
   renderSignal?: number;
-  // 回答待ちの質問を取得するまで、表示する版を決めない（質問の版と違う版を一度表示しない）。
+  // Until the pending question is fetched, do not decide which revision to show (never show a revision other than the question's, even once).
   waitingForRequest?: boolean;
-  // 検索の結果から移動する先の節。Markdownのプレビューでは、その見出しへ移動する。
+  // The section to jump to from a search result. In the Markdown preview, jump to that heading.
   sectionTarget?: SectionTarget | null;
 }
 
-// 検索の結果から移動する先。結果は検索した時点の版の節なので、版と組で持つ。
-// nonceは、同じ節へもう一度移動するときに変える。
+// The target to jump to from a search result. The result is a section of the revision that was searched, so keep it with the revision.
+// nonce changes when jumping to the same section again.
 export interface SectionTarget {
   sectionId: string;
   revision: string;
   nonce: number;
 }
 
-// HTMLとの通信を終えた理由の説明。
+// Explanations for why communication with the HTML ended.
 const BRIDGE_CLOSED: Record<string, string> = {
-  navigated: '文書の表示が読み直されたため、この文書からの回答案の受け付けを終えました。',
-  'request-closed': '質問が終わったため、この文書からの回答案の受け付けを終えました。',
-  expired: '表示の権限が失効したため、この文書からの回答案の受け付けを終えました。',
-  replaced: 'この文書からの回答案の受け付けを終えました。',
+  navigated:
+    'The document view was reloaded, so draft answers from this document are no longer accepted.',
+  'request-closed':
+    'The question is closed, so draft answers from this document are no longer accepted.',
+  expired: 'The render grant expired, so draft answers from this document are no longer accepted.',
+  replaced: 'Draft answers from this document are no longer accepted.',
 };
 
 function bridgeNotice(status: BridgeStatus): string | null {
   if (status.status === 'connected') {
-    return 'この文書のscriptから、回答案を受け付けています。回答の確定は、右の「Agentへ回答を送信」だけで行います。';
+    return 'Accepting draft answers from the scripts in this document. Answers are submitted only with "Send answers to the agent" on the right.';
   }
   if (status.status !== 'closed') return null;
   return (
     BRIDGE_CLOSED[status.reason] ??
-    '文書のscriptから、決まりに合わない通信（大きすぎる、多すぎる、形が違うなど）があったため、回答案の受け付けを終えました。'
+    'The scripts in this document sent a message that breaks the rules (too large, too many, malformed, or similar), so draft answers are no longer accepted.'
   );
 }
 
-// 表示している内容。本文と見出しの一覧は、それを取得した版と組で持つ。
+// The content being shown. The body and the outline are kept with the revision they were fetched for.
 interface Loaded {
   revision: string;
   text: string;
   outline: OutlineItem[];
-  // 見出しの一覧を取得できなかった理由。本文の表示は続ける。
+  // Why the outline could not be fetched. The body is still shown.
   outlineError: string | null;
 }
 
-// 読み込めなかった版と理由。表示している内容（前の版）とは分けて持つ。
+// The revision that could not be loaded, and why. Kept separate from the content being shown (the previous revision).
 interface LoadFailure {
   revision: string;
   message: string;
 }
 
-// 未登録の文書を開く前の確認。pathは、daemonが解決した絶対path。
-// 確認は、確認を求められたときの版と行き先に結び付く。確定のときも、その版と識別子を送る。
+// Confirmation before opening an unregistered document. path is the absolute path the daemon resolved.
+// The confirmation is tied to the revision and target at the time it was requested. When confirming, send that revision and identifier.
 interface PendingLink {
   linkId: string;
   revision: string;
   path: string;
   confirmation: string;
-  // 前の確認が成立しなかった（行き先が変わった、期限が切れた）。
+  // The previous confirmation did not hold (the target changed or it expired).
   changed: boolean;
 }
 
-// 文書を切り替えたら作り直す（呼び出し側がkeyにdocumentIdを渡す）。
+// Recreated when the document changes (the caller passes documentId as key).
 export function Viewer({
   api,
   document,
@@ -118,11 +120,11 @@ export function Viewer({
   sectionTarget = null,
 }: ViewerProps) {
   const [mode, setMode] = usePreference<ViewMode>('view-mode', 'preview', isViewMode);
-  // 更新を止めた時点の版。止めている間は、新しい版が来ても差し替えない。
+  // The revision at the time updates were paused. While paused, do not replace it with newer revisions.
   const [pinnedRevision, setPinnedRevision] = useState<string | null>(null);
   const paused = pinnedRevision !== null;
-  // 回答待ちの質問があれば、質問の版を表示する（回答を記録する版と、見ている版を一致させる）。
-  // その間は、更新を止める・再開する操作で表示の版を変えない。
+  // If a question is awaiting an answer, show the question's revision (keep the revision the answer is recorded for and the one being viewed the same).
+  // Meanwhile, pausing or resuming updates does not change the revision shown.
   const fixed = fixedRevision !== null;
   const shownRevision = waitingForRequest
     ? null
@@ -137,16 +139,16 @@ export function Viewer({
   useEffect(() => {
     if (shownRevision === null) return undefined;
     let cancelled = false;
-    // 差し替えの前に読んでいた位置を覚えておく。
+    // Remember the reading position before the content is replaced.
     savedScroll.current = scroller.current?.scrollTop ?? 0;
     void Promise.all([
       api.content(document.documentId, shownRevision),
-      // 見出しの一覧を取得できなくても、本文は表示する。取得できなかったことは、一覧の位置に示す。
+      // Show the body even if the outline cannot be fetched. Report the failure where the outline would be.
       api.outline(document.documentId, shownRevision).then(
         (items) => ({ items, error: null }),
         (reason: unknown) => ({
           items: [] as OutlineItem[],
-          error: reason instanceof Error ? reason.message : '取得できませんでした。',
+          error: reason instanceof Error ? reason.message : 'Could not be fetched.',
         }),
       ),
     ]).then(
@@ -162,10 +164,10 @@ export function Viewer({
       },
       (reason: unknown) => {
         if (cancelled) return;
-        // 表示している内容（前の版）は残し、その版のままとして扱う。
+        // Keep the content being shown (the previous revision) and treat it as still that revision.
         setFailure({
           revision: shownRevision,
-          message: reason instanceof Error ? reason.message : '読み込めませんでした。',
+          message: reason instanceof Error ? reason.message : 'Could not be loaded.',
         });
       },
     );
@@ -174,7 +176,7 @@ export function Viewer({
     };
   }, [api, document.documentId, shownRevision]);
 
-  // 次の版を読み込んでいる間と、読み込めなかった間は、直前の内容を表示し続ける。
+  // While the next revision is loading, and while it failed to load, keep showing the previous content.
   const text = loaded?.text ?? null;
   const outline = loaded?.outline ?? [];
   const outlineError = loaded?.outlineError ?? null;
@@ -183,18 +185,18 @@ export function Viewer({
   const isMarkdown = document.format === 'markdown';
   const wantsPreview = mode === 'preview';
   const markdown = useMarkdown(isMarkdown && wantsPreview ? text : null);
-  // 回答待ちの質問を表示している間は、質問が固定した版と表示方法で表示する（仕様11.4）。
-  // 表示方法はdaemonが質問から決める（staticで作った質問は、後からscriptを許可しても動かさない）。
-  // interactiveで作った質問なら、HTMLから回答案を受け付ける。
+  // While showing a question awaiting an answer, use the revision and view mode the question pinned (spec 11.4).
+  // The daemon decides the view mode from the question (a question created in static mode stays static even if scripts are allowed later).
+  // If the question was created in interactive mode, accept draft answers from the HTML.
   const pinnedRequestId =
     fixedRevision !== null && request?.status === 'pending' && request.revision === fixedRevision
       ? request.requestId
       : null;
   const pinnedStatic = pinnedRequestId !== null && request?.renderMode === 'static';
-  // それ以外の表示では、利用者が明示的に許可したHTMLだけ、scriptを動かす（仕様10.2）。
+  // Otherwise, run scripts only for HTML the user explicitly allowed (spec 10.2).
   const interactive =
     !isMarkdown && document.htmlMode === 'interactive' && document.interactiveAllowed;
-  // 表示し直すとき（新しい表示として通信を始め直す）に増やす。
+  // Incremented when the view is recreated (communication restarts as a new view).
   const [frameNonce, setFrameNonce] = useState(0);
   const grantState = useRenderGrant(api, document.documentId, shownRevision, document.updatedAt, {
     mode: interactive ? 'interactive' : 'static',
@@ -211,25 +213,25 @@ export function Viewer({
     void api
       .setHtmlMode(document.documentId, next)
       .catch((reason: unknown) =>
-        setModeError(reason instanceof Error ? reason.message : '表示方法を変えられませんでした。'),
+        setModeError(reason instanceof Error ? reason.message : 'Could not change the view mode.'),
       );
   };
 
   const showMarkdown = isMarkdown && wantsPreview && markdown.status === 'ready';
-  // HTMLは、変換した内容を、別のoriginのsandboxの中で表示する。
+  // HTML shows the converted content inside a sandbox on a different origin.
   const frameUrl = !isMarkdown && wantsPreview ? (grant?.documentUrl ?? null) : null;
-  // HTMLとの通信は、iframeを画面に出している間だけ。外したら通信を終える。
+  // Communication with the HTML lasts only while the iframe is on screen. Removing it ends the communication.
   const frame = useRef<HTMLIFrameElement>(null);
   const bridge = useBridge(api, frame, frameUrl !== null ? grant : null, request);
 
-  // 内容が差し替わるたびに、読んでいた位置へ戻す。
+  // Restore the reading position each time the content is replaced.
   useLayoutEffect(() => {
     if (scroller.current && (text !== null || showMarkdown)) {
       scroller.current.scrollTop = savedScroll.current;
     }
   }, [text, showMarkdown]);
 
-  // Markdownの画像は、登録済みのlocal fileだけを、表示用のURLから読み込む。
+  // Markdown images load only registered local files, from the render URL.
   const resolveImage = useMemo(() => {
     if (!grant) return undefined;
     const images = new Set(
@@ -245,7 +247,7 @@ export function Viewer({
     };
   }, [grant]);
 
-  // localの文書へのlinkを開く。未登録の文書は、pathを示して確認してから開く。
+  // Open a link to a local document. For unregistered documents, show the path and confirm before opening.
   const openLink = useCallback(
     async (linkId: string, revision: string, confirmation?: string) => {
       setLinkError(null);
@@ -264,7 +266,7 @@ export function Viewer({
           return;
         }
         setPendingLink(null);
-        setLinkError(reason instanceof Error ? reason.message : 'linkを開けませんでした。');
+        setLinkError(reason instanceof Error ? reason.message : 'Could not open the link.');
       }
     },
     [api, document.documentId],
@@ -277,17 +279,17 @@ export function Viewer({
     [grant, openLink],
   );
 
-  // 文書のpath・ID・codeのcopy（仕様13.2）。結果は、状態の行に示す。
+  // Copy the document path, ID, and code (spec 13.2). The result is shown in the status row.
   const { result: copied, copy } = useCopy();
   const codeActions = useMemo(
     () => (
       <Button
         variant="outline"
         size="xs"
-        onClick={(event) => void copy('コード', codeOfBlock(event.currentTarget))}
+        onClick={(event) => void copy('code', codeOfBlock(event.currentTarget))}
       >
         <Copy aria-hidden="true" />
-        コードをcopy
+        Copy code
       </Button>
     ),
     [copy],
@@ -297,13 +299,13 @@ export function Viewer({
   const jumpTo = (anchor: string) => {
     window.document.getElementById(anchor)?.scrollIntoView({ block: 'start' });
   };
-  // 検索の結果で選んだ節の見出しへ移動する（表示中の版の見出しの一覧と本文を読み込んだ後）。
-  // 結果の版と表示中の版が違うときは、節番号が別の見出しを指しうるので移動せず、理由を示す。
-  // 質問の版や、更新を止めた版の表示は変えない。
+  // Jump to the heading of the section chosen from search results (after the outline and body of the shown revision are loaded).
+  // If the result's revision differs from the shown revision, the section number may point to a different heading, so do not jump and explain why.
+  // Do not change the view of the question's revision or of the paused revision.
   const targetNonce = sectionTarget?.nonce ?? 0;
   const [dismissedNonce, setDismissedNonce] = useState(0);
-  // 表示する版の内容を読み込み終えるまでは、比べない。読み込めなかった間は、前の版の内容を
-  // 表示しているので、移動しない。
+  // Do not compare until the content of the shown revision has loaded. While it failed to load, the previous
+  // revision's content is shown, so do not jump.
   const targetLoaded =
     sectionTarget !== null && shownRevision !== null && loaded?.revision === shownRevision;
   const targetMatches = targetLoaded && sectionTarget.revision === shownRevision;
@@ -316,17 +318,17 @@ export function Viewer({
       ? null
       : !targetLoaded
         ? error !== null
-          ? '表示する版を読み込めないため、節へ移動しません。'
+          ? 'The revision to show could not be loaded, so the view did not jump to the section.'
           : null
         : !targetMatches
           ? fixed
-            ? '検索の結果は、表示中と別の版の節です。回答待ちの質問の版を表示しているため、移動しません。'
+            ? "The search result is in a different revision than the one shown. The view is showing the question's revision while awaiting an answer, so it did not jump."
             : paused
-              ? '検索の結果は、表示中と別の版の節です。更新を止めているため、移動しません。'
-              : '検索した後に文書が更新されたため、節へ移動しません。もう一度検索してください。'
+              ? 'The search result is in a different revision than the one shown. Updates are paused, so the view did not jump.'
+              : 'The document was updated after the search, so the view did not jump to the section. Search again.'
           : showMarkdown
             ? null
-            : 'この表示では、節の位置へ移動しません（移動するのはMarkdownのプレビューだけです）。';
+            : 'This view does not jump to sections (only the Markdown preview does).';
   useEffect(() => {
     if (targetAnchor === null || targetNonce === 0) return;
     window.document.getElementById(targetAnchor)?.scrollIntoView({ block: 'start' });
@@ -336,19 +338,21 @@ export function Viewer({
     ...missing.map((path) => ({ code: 'asset-requested', target: path, count: 1 })),
   ];
   const notice = bridgeNotice(bridge);
-  // 表示方法は、daemonが発行した表示の権限のとおりに示す。
+  // Show the view mode exactly as the render grant issued by the daemon says.
   const frameMode = grant?.mode ?? 'static';
-  // HTMLのlinkは表示の中では押せないので、一覧から開く。Markdownのlinkは本文から開ける。
+  // HTML links cannot be clicked inside the view, so they are opened from the list. Markdown links can be opened from the body.
   const links = isMarkdown ? [] : (grant?.links ?? []);
 
   return (
-    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col" aria-label="文書の表示">
+    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col" aria-label="Document view">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2">
         <div className="min-w-0 flex-1 basis-56">
           <h1 className="truncate text-base font-semibold">{document.title}</h1>
           <p className="truncate text-xs text-muted-foreground">
-            {document.displayPath ?? '（stdinから開いた文書）'}
-            {shownRevision && <span title={shownRevision}>　版 {shownRevision.slice(4, 12)}</span>}
+            {document.displayPath ?? '(opened from stdin)'}
+            {shownRevision && (
+              <span title={shownRevision}> · Revision {shownRevision.slice(4, 12)}</span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -356,9 +360,9 @@ export function Viewer({
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="文書のpathをcopy"
-              title="文書のpathをcopy"
-              onClick={() => void copy('文書のpath', document.displayPath ?? '')}
+              aria-label="Copy document path"
+              title="Copy document path"
+              onClick={() => void copy('document path', document.displayPath ?? '')}
             >
               <Copy aria-hidden="true" />
             </Button>
@@ -366,9 +370,9 @@ export function Viewer({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="文書のIDをcopy"
-            title={`文書のIDをcopy（${document.documentId}）`}
-            onClick={() => void copy('文書のID', document.documentId)}
+            aria-label="Copy document ID"
+            title={`Copy document ID (${document.documentId})`}
+            onClick={() => void copy('document ID', document.documentId)}
           >
             <Hash aria-hidden="true" />
           </Button>
@@ -376,41 +380,45 @@ export function Viewer({
         <Badge variant="outline">{isMarkdown ? 'Markdown' : 'HTML'}</Badge>
         {!isMarkdown && (
           <Badge variant="outline" data-testid="html-mode">
-            {frameMode === 'interactive' ? 'scriptを動かす表示' : '静的表示'}
+            {frameMode === 'interactive' ? 'Interactive view (scripts run)' : 'Static view'}
           </Badge>
         )}
         {fixed ? (
-          <Badge variant="secondary">質問の版を表示中</Badge>
+          <Badge variant="secondary">Showing the question's revision</Badge>
         ) : (
-          paused && <Badge variant="secondary">更新停止中</Badge>
+          paused && <Badge variant="secondary">Updates paused</Badge>
         )}
         <ToggleGroup
           value={[mode]}
           onValueChange={(value) => {
             const next: unknown = value[0];
             if (!isViewMode(next)) return;
-            // 原文からプレビューへ戻ったHTMLは、新しい表示として通信を始める（portは表示ごとに1回だけ）。
+            // HTML that returns from Source to Preview starts communication as a new view (the port is handed over once per view).
             if (next === 'preview' && mode !== 'preview' && !isMarkdown) {
               setFrameNonce((nonce) => nonce + 1);
             }
             setMode(next);
           }}
           size="sm"
-          aria-label="表示の切り替え"
+          aria-label="View"
         >
-          <ToggleGroupItem value="preview">プレビュー</ToggleGroupItem>
-          <ToggleGroupItem value="source">原文</ToggleGroupItem>
+          <ToggleGroupItem value="preview">Preview</ToggleGroupItem>
+          <ToggleGroupItem value="source">Source</ToggleGroupItem>
         </ToggleGroup>
         <Button
           variant="outline"
           size="sm"
           aria-pressed={paused}
           disabled={fixed}
-          title={fixed ? '回答待ちの質問があるため、質問の版を表示しています' : undefined}
+          title={
+            fixed
+              ? "A question is awaiting an answer, so the question's revision is shown"
+              : undefined
+          }
           onClick={() => setPinnedRevision(paused ? null : document.revision)}
         >
           {paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
-          {paused ? '更新を再開' : '更新を止める'}
+          {paused ? 'Resume updates' : 'Pause updates'}
         </Button>
         <Button
           variant="ghost"
@@ -418,7 +426,7 @@ export function Viewer({
           onClick={() => void api.refresh(document.documentId).catch(() => undefined)}
         >
           <RefreshCw aria-hidden="true" />
-          読み直す
+          Refresh
         </Button>
       </header>
 
@@ -438,13 +446,14 @@ export function Viewer({
           >
             <p className="min-w-0 flex-1">{targetNotice}</p>
             <Button variant="outline" size="sm" onClick={() => setDismissedNonce(targetNonce)}>
-              閉じる
+              Dismiss
             </Button>
           </div>
         )}
         {stale && (
           <p className="border-b bg-muted px-4 py-2 text-sm">
-            新しい版があります。更新を止めているため、表示は止めた時点の版のままです。
+            A newer revision is available. Updates are paused, so the view stays on the revision
+            from when they were paused.
           </p>
         )}
         {document.sourceState !== 'ready' && SOURCE_STATE[document.sourceState] && (
@@ -454,7 +463,8 @@ export function Viewer({
         )}
         {!isMarkdown && wantsPreview && grantState.status === 'failed' && (
           <p className="border-b bg-muted px-4 py-2 text-sm">
-            HTMLを表示用に変換できなかったため、原文を表示しています（{grantState.message}）
+            The HTML could not be converted for display, so the source is shown (
+            {grantState.message})
           </p>
         )}
         {isMarkdown && wantsPreview && markdown.status === 'failed' && (
@@ -464,7 +474,7 @@ export function Viewer({
         )}
         {pinnedStatic && document.interactiveAllowed && (
           <p className="border-b bg-muted px-4 py-2 text-sm">
-            この質問は静的表示で作られたため、回答が終わるまでは、scriptを動かさずに表示します。
+            This question was created in the Static view, so scripts stay off until it is answered.
           </p>
         )}
         {!isMarkdown &&
@@ -473,20 +483,24 @@ export function Viewer({
           !pinnedStatic && (
             <div className="flex flex-wrap items-center gap-2 border-b bg-muted px-4 py-2 text-sm">
               <p className="min-w-0 flex-1">
-                このHTMLは、scriptを動かす表示で開かれました。daemonの再起動などで、scriptを動かす許可が外れたため、いまは静的表示です。
+                This HTML was opened in the Interactive view. The permission to run scripts was
+                cleared (for example, by a daemon restart), so it is now in the Static view.
               </p>
               <Button size="sm" variant="outline" onClick={() => setConfirmingInteractive(true)}>
-                scriptを動かす表示を有効にする
+                Enable Interactive view
               </Button>
             </div>
           )}
         {frameMode === 'interactive' && (
           <div className="flex flex-wrap items-center gap-2 border-b bg-muted px-4 py-2 text-sm">
             <p className="min-w-0 flex-1">
-              この文書のscriptを動かしています。scriptが読み込めるのはこの文書に登録したfileだけで、管理画面・管理API・fileには触れられません。表示の中でのpageの移動などを含め、すべての外部への通信を止めるものではありません。
+              The scripts in this document are running. Scripts can load only the files registered
+              for this document and cannot reach the management UI, the management API, or your
+              files. This does not block every outbound request, including page navigation inside
+              the view.
             </p>
             <Button size="sm" variant="outline" onClick={() => changeMode('static')}>
-              静的表示に切り替える
+              Switch to Static view
             </Button>
           </div>
         )}
@@ -502,7 +516,7 @@ export function Viewer({
                 variant="outline"
                 onClick={() => setFrameNonce((value) => value + 1)}
               >
-                表示し直す
+                Reload view
               </Button>
             )}
           </div>
@@ -517,9 +531,9 @@ export function Viewer({
           {diagnostics.length > 0 && (
             <details className="px-4 py-2" data-testid="render-diagnostics">
               <summary className="cursor-pointer">
-                元の文書と表示が異なる点（{diagnostics.length}種類）
+                Differences from the original document ({diagnostics.length} kinds)
               </summary>
-              {/* 項目が多くても、文書の表示領域を押し出さない。 */}
+              {/* Even with many items, do not push the document view out of the way. */}
               <ul className="mt-2 flex max-h-40 list-disc flex-col gap-1 overflow-y-auto pl-5 text-muted-foreground">
                 {diagnostics.map((diagnostic) => (
                   <li key={`${diagnostic.code}:${diagnostic.target ?? ''}`} className="break-words">
@@ -531,7 +545,7 @@ export function Viewer({
           )}
           {links.length > 0 && (
             <details className="border-t px-4 py-2 first:border-t-0" data-testid="render-links">
-              <summary className="cursor-pointer">文書中のlink（{links.length}件）</summary>
+              <summary className="cursor-pointer">Links in this document ({links.length})</summary>
               <ul className="mt-2 flex max-h-40 flex-col gap-1 overflow-y-auto">
                 {links.map((link) => (
                   <li key={link.linkId} className="flex flex-wrap items-baseline gap-x-2">
@@ -559,7 +573,7 @@ export function Viewer({
                     {link.kind === 'other' && <span>{link.text || link.href}</span>}
                     <span className="text-xs break-all text-muted-foreground">
                       {link.href}
-                      {link.kind === 'other' && '（この種類のlinkは開けません）'}
+                      {link.kind === 'other' && ' (this kind of link cannot be opened)'}
                     </span>
                   </li>
                 ))}
@@ -572,20 +586,20 @@ export function Viewer({
       <div className="flex min-h-0 flex-1">
         {frameUrl ? (
           <div className="flex min-w-0 flex-1 flex-col">
-            {/* 枠の中は、開いた文書の内容。この製品の画面ではないことを、常に示す。 */}
+            {/* Inside the frame is the content of the opened document. Always make clear that it is not this product's UI. */}
             <p className="border-b bg-muted px-4 py-1 text-xs text-muted-foreground">
               {frameMode === 'interactive'
-                ? 'ここから下は、開いた文書の内容です（scriptを動かす表示。この画面の操作や送信の部品ではありません。linkとformの送信は無効です）。'
-                : 'ここから下は、開いた文書の内容です（静的表示。scriptは動かず、linkと送信は無効です）。'}
+                ? 'Below this line is the content of the opened document (Interactive view: these are not controls of this UI, and links and form submission are disabled).'
+                : 'Below this line is the content of the opened document (Static view: scripts do not run, and links and form submission are disabled).'}
             </p>
             <iframe
-              // 表示ごとに作り直す。前の表示は残さない。
+              // Recreated for every view. The previous view is not kept.
               key={frameUrl}
               ref={frame}
-              title={`${document.title} の表示`}
+              title={`View of ${document.title}`}
               src={frameUrl}
-              // 同じoriginとしての扱い・送信・popup・別pageへの移動・downloadは、どちらでも許可しない。
-              // interactiveだけ、scriptの実行を許可する（仕様10.2）。
+              // Same-origin treatment, form submission, popups, top navigation, and downloads are never allowed.
+              // Only interactive allows scripts to run (spec 10.2).
               sandbox={frameMode === 'interactive' ? 'allow-scripts' : ''}
               referrerPolicy="no-referrer"
               className="min-h-0 w-full flex-1 border-0 bg-white"
@@ -599,7 +613,7 @@ export function Viewer({
             data-testid="document-body"
           >
             {text === null ? (
-              <p className="text-sm text-muted-foreground">読み込んでいます…</p>
+              <p className="text-sm text-muted-foreground">Loading…</p>
             ) : showMarkdown ? (
               <article className="markdown-body mx-auto max-w-3xl">
                 <MarkdownView
@@ -610,7 +624,7 @@ export function Viewer({
                 />
               </article>
             ) : !isMarkdown && wantsPreview && grantState.status === 'loading' ? (
-              <p className="text-sm text-muted-foreground">表示を準備しています…</p>
+              <p className="text-sm text-muted-foreground">Preparing the view…</p>
             ) : (
               <pre className="font-mono text-sm leading-relaxed break-words whitespace-pre-wrap">
                 {text}
@@ -621,12 +635,12 @@ export function Viewer({
         {(outline.length > 0 || outlineError !== null) && (
           <aside
             className="hidden w-60 shrink-0 overflow-y-auto border-l px-3 py-4 lg:block"
-            aria-label="見出し"
+            aria-label="Outline"
           >
-            <h2 className="mb-2 text-xs font-medium text-muted-foreground">見出し</h2>
+            <h2 className="mb-2 text-xs font-medium text-muted-foreground">Outline</h2>
             {outlineError !== null && (
               <p className="text-xs text-destructive" role="alert">
-                見出しの一覧を取得できませんでした（{outlineError}）。
+                Could not fetch the outline ({outlineError}).
               </p>
             )}
             <ul className="flex flex-col gap-0.5 text-sm">
@@ -639,9 +653,7 @@ export function Viewer({
                     type="button"
                     className="w-full truncate rounded px-2 py-1 text-left hover:bg-muted disabled:opacity-50"
                     disabled={!showMarkdown}
-                    title={
-                      showMarkdown ? item.title : 'Markdownのプレビュー表示のときに移動できます'
-                    }
+                    title={showMarkdown ? item.title : 'Available in the Markdown preview'}
                     onClick={() => jumpTo(item.anchor)}
                   >
                     {item.title}
@@ -656,15 +668,19 @@ export function Viewer({
       <AlertDialog open={confirmingInteractive} onOpenChange={setConfirmingInteractive}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>この文書のscriptを動かしますか</AlertDialogTitle>
+            <AlertDialogTitle>Run the scripts in this document?</AlertDialogTitle>
             <AlertDialogDescription>
-              このHTMLのscriptを、ブラウザの中で動かします。scriptが読み込めるのはこの文書に登録したfileだけで、管理画面・管理API・fileには触れられません。ただし、表示の中でのpageの移動などを含め、すべての外部への通信を止めるものではなく、任意のscriptを安全に動かす仕組みでもありません。自分やAgentが用意した、信頼できるHTMLだけで有効にしてください。
+              This runs the scripts in this HTML inside your browser. Scripts can load only the
+              files registered for this document and cannot reach the management UI, the management
+              API, or your files. However, this does not block every outbound request, including
+              page navigation inside the view, and it is not a mechanism for running arbitrary
+              scripts safely. Enable it only for trusted HTML that you or your agent prepared.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>戻る</AlertDialogCancel>
+            <AlertDialogCancel>Back</AlertDialogCancel>
             <AlertDialogAction onClick={() => changeMode('interactive')}>
-              scriptを動かす
+              Run scripts
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -678,21 +694,23 @@ export function Viewer({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>この文書を一覧に追加して開きますか</AlertDialogTitle>
+            <AlertDialogTitle>Add this document to the list and open it?</AlertDialogTitle>
             <AlertDialogDescription className="break-all">
               {pendingLink?.path}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {pendingLink?.changed && (
             <p className="text-sm font-medium">
-              確認している間に、linkの行き先が変わったか、確認の期限が切れました。上のpathをもう一度確かめてください。
+              While you were confirming, the link target changed or the confirmation expired. Check
+              the path above again.
             </p>
           )}
           <p className="text-sm text-muted-foreground">
-            文書中のlinkが指しているfileです。まだ開かれていません。開くと、一覧と検索の対象に加わります。
+            This is the file that a link in the document points to. It is not open yet. Opening it
+            adds it to the document list and to search.
           </p>
           <AlertDialogFooter>
-            <AlertDialogCancel>開かない</AlertDialogCancel>
+            <AlertDialogCancel>Don't open</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (pendingLink) {
@@ -700,7 +718,7 @@ export function Viewer({
                 }
               }}
             >
-              一覧に追加して開く
+              Add to list and open
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

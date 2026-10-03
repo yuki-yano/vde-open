@@ -1,10 +1,10 @@
-// JSONを、重複したkeyを拒否しながら読む（仕様11.2）。JSON.parseは重複を黙って後勝ちにするので使わない。
-// 値の型はJSON.parseと同じ。`__proto__`というkeyは拒否する（検証の途中で黙って捨てられたり、
-// prototypeを書き換えたりする経路を作らない）。
+// Parse JSON while rejecting duplicate keys (spec 11.2). JSON.parse silently lets the last duplicate win, so it is not used.
+// Value types are the same as JSON.parse. The key `__proto__` is rejected (no path where validation silently drops it
+// or the prototype gets rewritten).
 
 export class StrictJsonError extends Error {
   readonly reason: 'syntax' | 'duplicate-key' | 'forbidden-key' | 'depth';
-  // 問題の位置（JSON Pointer）。値は含めない。
+  // Location of the problem (JSON Pointer). Never includes the value.
   readonly pointer: string;
 
   constructor(reason: StrictJsonError['reason'], pointer: string, message: string) {
@@ -37,7 +37,7 @@ export function parseStrictJson(text: string): unknown {
   };
 
   const parseString = (pointer: string): string => {
-    // 開始の`"`は呼び出し側で確かめてある。文字列の規則はJSON.parseに任せる。
+    // The caller has already checked the opening `"`. String rules are left to JSON.parse.
     const start = index;
     index += 1;
     while (index < text.length) {
@@ -51,16 +51,16 @@ export function parseStrictJson(text: string): unknown {
         try {
           return JSON.parse(text.slice(start, index)) as string;
         } catch {
-          return fail('syntax', pointer, '文字列が正しくありません。');
+          return fail('syntax', pointer, 'The string is not valid.');
         }
       }
       index += 1;
     }
-    return fail('syntax', pointer, '文字列が閉じていません。');
+    return fail('syntax', pointer, 'The string is not closed.');
   };
 
   const parseValue = (pointer: string, depth: number): unknown => {
-    if (depth > MAX_DEPTH) fail('depth', pointer, '入れ子が深すぎます。');
+    if (depth > MAX_DEPTH) fail('depth', pointer, 'The nesting is too deep.');
     skipWhitespace();
     const char = text[index];
     if (char === '{') {
@@ -74,14 +74,15 @@ export function parseStrictJson(text: string): unknown {
       }
       for (;;) {
         skipWhitespace();
-        if (text[index] !== '"') fail('syntax', pointer, 'objectのkeyがありません。');
+        if (text[index] !== '"') fail('syntax', pointer, 'An object key is missing.');
         const key = parseString(pointer);
         const child = `${pointer}/${escapePointer(key)}`;
-        if (seen.has(key)) fail('duplicate-key', child, '同じkeyが2回あります。');
-        if (key === '__proto__') fail('forbidden-key', child, '`__proto__`はkeyに使えません。');
+        if (seen.has(key)) fail('duplicate-key', child, 'The same key appears twice.');
+        if (key === '__proto__')
+          fail('forbidden-key', child, '`__proto__` cannot be used as a key.');
         seen.add(key);
         skipWhitespace();
-        if (text[index] !== ':') fail('syntax', child, '`:`がありません。');
+        if (text[index] !== ':') fail('syntax', child, 'A `:` is missing.');
         index += 1;
         const value = parseValue(child, depth + 1);
         Object.defineProperty(object, key, {
@@ -99,7 +100,7 @@ export function parseStrictJson(text: string): unknown {
           index += 1;
           return object;
         }
-        fail('syntax', pointer, '`,`か`}`がありません。');
+        fail('syntax', pointer, 'A `,` or `}` is missing.');
       }
     }
     if (char === '[') {
@@ -121,21 +122,21 @@ export function parseStrictJson(text: string): unknown {
           index += 1;
           return array;
         }
-        fail('syntax', pointer, '`,`か`]`がありません。');
+        fail('syntax', pointer, 'A `,` or `]` is missing.');
       }
     }
     if (char === '"') return parseString(pointer);
-    // 数値・true・false・null。字句の範囲を切り出し、規則の確認はJSON.parseに任せる。
+    // Number, true, false or null. Cut out the token and leave the rule check to JSON.parse.
     const match = /^(?:-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/.exec(
       text.slice(index, index + 512),
     );
-    if (!match) return fail('syntax', pointer, '値が正しくありません。');
+    if (!match) return fail('syntax', pointer, 'The value is not valid.');
     index += match[0].length;
     return JSON.parse(match[0]) as unknown;
   };
 
   const value = parseValue('', 0);
   skipWhitespace();
-  if (index !== text.length) fail('syntax', '', 'JSONの後に余分な内容があります。');
+  if (index !== text.length) fail('syntax', '', 'There is extra content after the JSON.');
   return value;
 }

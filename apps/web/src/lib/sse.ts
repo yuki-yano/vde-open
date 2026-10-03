@@ -1,5 +1,5 @@
-// fetchで読むSSEの解析（仕様6.5）。複数行のdata、chunkの途中で切れたUTF-8、CRLF、
-// commentのheartbeatを扱う。
+// SSE parsing for streams read with fetch (spec 6.5). Handles multi-line data, UTF-8 split across chunks, CRLF,
+// and comment heartbeats.
 
 export interface SseMessage {
   event: string;
@@ -30,7 +30,7 @@ export function createSseParser(onMessage: (message: SseMessage) => void): SsePa
       dispatch();
       return;
     }
-    // `:`で始まる行はcomment（heartbeat）。
+    // Lines starting with `:` are comments (heartbeats).
     if (line.startsWith(':')) return;
     const colon = line.indexOf(':');
     const field = colon === -1 ? line : line.slice(0, colon);
@@ -43,12 +43,12 @@ export function createSseParser(onMessage: (message: SseMessage) => void): SsePa
 
   return {
     push(chunk) {
-      // stream: trueで、chunkの境界で切れた文字を次のchunkへ持ち越す。
+      // With stream: true, a character split at a chunk boundary carries over to the next chunk.
       buffer += decoder.decode(chunk, { stream: true });
       for (;;) {
         const match = /\r\n|\n|\r/.exec(buffer);
         if (!match) break;
-        // 末尾のCRは、次のchunkがLFで始まるかもしれないので確定させない。
+        // A trailing CR is not finalized, since the next chunk may start with LF.
         if (match[0] === '\r' && match.index === buffer.length - 1) break;
         handleLine(buffer.slice(0, match.index));
         buffer = buffer.slice(match.index + match[0].length);

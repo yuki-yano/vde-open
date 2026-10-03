@@ -1,8 +1,8 @@
-// SYS-009の試験で、子processとして実行する。指定した操作のcommitで、指定した番目のfile操作の直前に、
-// 後始末をせずにprocessをkillする。0なら止めずに最後まで実行し、行ったfile操作の一覧を出力する。
-// 引数: <state root> <止める番目> <submit|create> <操作のparamsのJSON>
-//   submit: {requestId, params}（保存済みの回答案を送信する。新しいblobは作らない）
-//   create: {cwd, questionnaire}（質問だけの質問を作る。質問の文書のblobを、質問と同じcommitで作る）
+// Run as a child process by the SYS-009 test. During the commit of the given operation, kills the process
+// without cleanup right before the Nth file operation. With 0, runs to the end and prints the list of file operations performed.
+// Arguments: <state root> <kill at> <submit|create> <operation params as JSON>
+//   submit: {requestId, params} (submits the saved draft answers; creates no new blob)
+//   create: {cwd, questionnaire} (creates a question with no document; the question document's blob is created in the same commit)
 import { randomBytes } from 'node:crypto';
 import { sep } from 'node:path';
 
@@ -15,7 +15,7 @@ import { FeedbackService } from './service.ts';
 const [root = '', crashAtText = '0', operation = '', paramsText = '{}'] = process.argv.slice(2);
 const crashAt = Number(crashAtText);
 
-// file操作の対象。blobのdirectoryそのもの（sync）、blobのfile、それ以外（state）を区別する。
+// Target of a file operation: the blob directory itself (sync), a blob file, or anything else (state).
 function kindOf(args: unknown[]): 'blob-dir' | 'blob' | 'state' {
   const paths = args.filter((arg): arg is string => typeof arg === 'string');
   if (paths.some((path) => path.endsWith(`${sep}blobs`))) return 'blob-dir';
@@ -48,6 +48,6 @@ if (operation === 'submit') {
 } else if (operation === 'create') {
   await feedback.create(params);
 } else {
-  throw new Error(`未知の操作: ${operation}`);
+  throw new Error(`Unknown operation: ${operation}`);
 }
 process.stdout.write(JSON.stringify(performed), () => process.exit(0));

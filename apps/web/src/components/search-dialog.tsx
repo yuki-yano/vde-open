@@ -11,7 +11,7 @@ import {
 import { Input } from '@/components/ui/input';
 import type { Api } from '@/lib/api';
 
-// 入力が止まってから検索するまでの時間。
+// Delay after typing stops before searching.
 const SEARCH_DELAY_MS = 200;
 const SEARCH_LIMIT = 20;
 
@@ -19,7 +19,7 @@ interface SearchDialogProps {
   api: Api;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  // 選んだ結果の文書と節へ移動する。
+  // Jump to the document and section of the chosen result.
   onSelect: (hit: SearchHit) => void;
 }
 
@@ -29,8 +29,8 @@ interface Loaded {
   error: string | null;
 }
 
-// 開いている文書を検索するdialog（仕様13.2）。対象が「開いている文書」だけであることを示す。
-// ↑↓で結果を選び、Enterで移動する。Escapeで閉じる（focusは開く前の位置へ戻る）。
+// The dialog for searching open documents (spec 13.2). Makes clear that only open documents are searched.
+// ↑↓ selects a result, Enter jumps to it. Escape closes (focus returns to where it was before opening).
 export function SearchDialog({ api, open, onOpenChange, onSelect }: SearchDialogProps) {
   const [query, setQuery] = useState('');
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -51,7 +51,7 @@ export function SearchDialog({ api, open, onOpenChange, onSelect }: SearchDialog
           setLoaded({
             query: trimmed,
             result: null,
-            error: reason instanceof Error ? reason.message : '検索できませんでした。',
+            error: reason instanceof Error ? reason.message : 'Search failed.',
           });
         },
       );
@@ -67,7 +67,7 @@ export function SearchDialog({ api, open, onOpenChange, onSelect }: SearchDialog
   const clamp = (index: number) => Math.max(0, Math.min(index, hits.length - 1));
   const active = clamp(selected);
 
-  // 選んだ行が見えるように、結果の一覧をscrollする。
+  // Scroll the result list so the selected row is visible.
   useEffect(() => {
     if (hits.length === 0) return;
     window.document
@@ -81,11 +81,11 @@ export function SearchDialog({ api, open, onOpenChange, onSelect }: SearchDialog
     onSelect(hit);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    // 変換中のkey（候補の選択や確定）は、入力欄へそのまま渡す。
+    // Keys during IME composition (choosing or committing a candidate) go to the input as they are.
     if (event.nativeEvent.isComposing) return;
-    // 結果がまだ無い間は、選択を変えない（結果が届いたときに先頭を選んだ状態にする）。
+    // While there are no results yet, do not change the selection (the first result is selected when results arrive).
     if (hits.length === 0) return;
-    // 画面の更新より速くkeyを繰り返しても進むよう、直前の選択から数える。
+    // Count from the previous selection so repeated keys advance even faster than the screen updates.
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setSelected((value) => clamp(clamp(value) + 1));
@@ -111,16 +111,17 @@ export function SearchDialog({ api, open, onOpenChange, onSelect }: SearchDialog
     >
       <DialogContent className="top-[15%] translate-y-0 sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>開いている文書を検索する</DialogTitle>
+          <DialogTitle>Search open documents</DialogTitle>
           <DialogDescription>
-            検索の対象は、いま開いている文書だけです。閉じた文書やfileは探しません。
+            Only documents that are currently open are searched. Closed documents and other files
+            are not.
           </DialogDescription>
         </DialogHeader>
         <Input
-          aria-label="検索する語句"
+          aria-label="Search query"
           aria-controls={listId}
           aria-activedescendant={hits.length > 0 ? `${listId}-${String(active)}` : undefined}
-          placeholder="語句やfile名"
+          placeholder="Words or a file name"
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -130,21 +131,21 @@ export function SearchDialog({ api, open, onOpenChange, onSelect }: SearchDialog
         />
         <div role="status" aria-live="polite" className="text-xs text-muted-foreground">
           {trimmed === ''
-            ? '語句を入力すると、開いている文書から探します。↑↓で選び、Enterで移動します。'
+            ? 'Type to search the open documents. Use ↑↓ to select and Enter to jump.'
             : shown === null
-              ? '検索しています…'
+              ? 'Searching…'
               : shown.error !== null
-                ? `検索できませんでした（${shown.error}）。`
-                : `${String(hits.length)}件${
+                ? `Search failed (${shown.error}).`
+                : `${String(hits.length)} ${hits.length === 1 ? 'result' : 'results'}${
                     shown.result?.incomplete === true
-                      ? '（検索の準備が終わっていない文書があるため、すべての文書を探した結果ではありません）'
+                      ? ' (some documents are not indexed yet, so not all documents were searched)'
                       : ''
                   }`}
         </div>
         <div
           id={listId}
           role="listbox"
-          aria-label="検索の結果"
+          aria-label="Search results"
           className="flex max-h-80 flex-col gap-1 overflow-y-auto"
         >
           {hits.map((hit, index) => (

@@ -16,12 +16,12 @@ export interface IpcConnectOptions {
   socketPath: string;
   key: Buffer;
   timeoutMs?: number;
-  // 中断されたら、接続の確認を待たずに失敗させ、socketとtimerを片付ける。
+  // When aborted, fail without waiting for the handshake and clean up the socket and timer.
   signal?: AbortSignal;
 }
 
 export interface IpcRequestOptions {
-  // 応答を待つ上限。既定はDEFAULT_REQUEST_TIMEOUT_MS。
+  // Maximum time to wait for a response. Defaults to DEFAULT_REQUEST_TIMEOUT_MS.
   timeoutMs?: number;
 }
 
@@ -41,7 +41,7 @@ export function connectIpc(options: IpcConnectOptions): Promise<IpcConnection> {
   return new Promise<IpcConnection>((resolve, reject) => {
     const socket: Socket = connect(options.socketPath);
     const clientNonce = createNonce();
-    // 相手を確認するまでは、serverと同じく小さいframeしか受け取らない。
+    // Until the peer is verified, accept only small frames, as the server does.
     const decoder = new FrameDecoder(() =>
       phase === 'ready' ? LIMITS.ipcFrameBytes : LIMITS.ipcPreAuthFrameBytes,
     );
@@ -68,18 +68,18 @@ export function connectIpc(options: IpcConnectOptions): Promise<IpcConnection> {
       if (phase !== 'ready') reject(error);
       phase = 'closed';
       clearTimeout(timer);
-      // 同じsignalで接続し直すことがあるので、失敗した接続のlistenerを残さない。
+      // The same signal may be used to reconnect, so do not leave listeners from a failed connection.
       options.signal?.removeEventListener('abort', onAbort);
       rejectPending(error);
       socket.destroy();
     };
 
     const timer = setTimeout(() => {
-      failAll(unavailable('daemonとの接続確認が時間内に終わりませんでした。'));
+      failAll(unavailable('The handshake with the daemon did not finish in time.'));
     }, options.timeoutMs ?? HANDSHAKE_TIMEOUT_MS);
-    // 中断は、接続を確認し終えるまでだけ受け付ける。確認した後は、呼び出し側がcloseする。
+    // Abort is honored only until the handshake finishes. After that, the caller closes.
     const onAbort = () => {
-      if (phase !== 'ready') failAll(unavailable('daemonへの接続を中断しました。'));
+      if (phase !== 'ready') failAll(unavailable('The connection to the daemon was aborted.'));
     };
     if (options.signal?.aborted) onAbort();
     else options.signal?.addEventListener('abort', onAbort, { once: true });
@@ -95,13 +95,13 @@ export function connectIpc(options: IpcConnectOptions): Promise<IpcConnection> {
       ): Promise<Envelope<T>> {
         return new Promise<Envelope<T>>((resolveRequest, rejectRequest) => {
           if (phase !== 'ready') {
-            rejectRequest(unavailable('daemonとの接続が閉じています。'));
+            rejectRequest(unavailable('The connection to the daemon is closed.'));
             return;
           }
           const id = randomUUID();
           const requestTimer = setTimeout(() => {
             pending.delete(id);
-            rejectRequest(unavailable('daemonが時間内に応答しませんでした。'));
+            rejectRequest(unavailable('The daemon did not respond in time.'));
           }, requestOptions.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
           pending.set(id, {
             resolve: (envelope) => resolveRequest(envelope as Envelope<T>),
@@ -112,11 +112,11 @@ export function connectIpc(options: IpcConnectOptions): Promise<IpcConnection> {
         });
       },
       close() {
-        // 応答を待っているrequestを残さない。相手が応答不能でも接続を手放せるよう、
-        // 相手からの切断を待たずに破棄する。
+        // Do not leave requests waiting for a response. Destroy without waiting for the peer
+        // to disconnect, so the connection can be released even if the peer is unresponsive.
         phase = 'closed';
         clearTimeout(timer);
-        rejectPending(unavailable('daemonとの接続を閉じました。'));
+        rejectPending(unavailable('The connection to the daemon was closed.'));
         socket.destroy();
       },
     };
@@ -126,29 +126,33 @@ export function connectIpc(options: IpcConnectOptions): Promise<IpcConnection> {
         const code =
           frame['code'] === 'E_PROTOCOL_MISMATCH' ? 'E_PROTOCOL_MISMATCH' : 'E_UNAUTHORIZED';
         failAll(
-          new VdeError(code, 'daemonが接続を拒否しました。', { code: String(frame['code']) }),
+          new VdeError(code, 'The daemon refused the connection.', { code: String(frame['code']) }),
         );
         return;
       }
       if (phase === 'await-hello') {
         if (frame['type'] !== 'hello' || frame['protocolVersion'] !== IPC_PROTOCOL_VERSION) {
           failAll(
-            new VdeError('E_PROTOCOL_MISMATCH', 'daemonのprotocolVersionが一致しません。', {
-              expected: IPC_PROTOCOL_VERSION,
-            }),
+            new VdeError(
+              'E_PROTOCOL_MISMATCH',
+              'The protocolVersion of the daemon does not match.',
+              {
+                expected: IPC_PROTOCOL_VERSION,
+              },
+            ),
           );
           return;
         }
         const { daemonId: id, serverNonce, proof } = frame;
         if (typeof id !== 'string' || typeof serverNonce !== 'string') {
-          failAll(new VdeError('E_UNAUTHORIZED', '接続相手を確認できません。'));
+          failAll(new VdeError('E_UNAUTHORIZED', 'The peer could not be verified.'));
           return;
         }
-        // 相手がkeyを持つことを確かめてから、こちらのproofを送る。
+        // Verify that the peer holds the key before sending our proof.
         if (
           !proofMatches(computeProof(options.key, 'server', id, clientNonce, serverNonce), proof)
         ) {
-          failAll(new VdeError('E_UNAUTHORIZED', '接続相手を確認できません。'));
+          failAll(new VdeError('E_UNAUTHORIZED', 'The peer could not be verified.'));
           return;
         }
         daemonId = id;
@@ -163,7 +167,7 @@ export function connectIpc(options: IpcConnectOptions): Promise<IpcConnection> {
       }
       if (phase === 'await-auth-ok') {
         if (frame['type'] !== 'auth-ok') {
-          failAll(new VdeError('E_UNAUTHORIZED', '認証に失敗しました。'));
+          failAll(new VdeError('E_UNAUTHORIZED', 'Authentication failed.'));
           return;
         }
         phase = 'ready';
@@ -181,7 +185,10 @@ export function connectIpc(options: IpcConnectOptions): Promise<IpcConnection> {
       const { id: _id, ...body } = frame;
       const parsed = envelopeSchema.safeParse(body);
       if (parsed.success) waiter.resolve(parsed.data);
-      else waiter.reject(new VdeError('E_PROTOCOL_MISMATCH', 'daemonの応答を解釈できません。'));
+      else
+        waiter.reject(
+          new VdeError('E_PROTOCOL_MISMATCH', 'The response from the daemon could not be parsed.'),
+        );
     };
 
     socket.on('connect', () => {
@@ -196,16 +203,16 @@ export function connectIpc(options: IpcConnectOptions): Promise<IpcConnection> {
           handleFrame(frame);
         }
       } catch (error) {
-        failAll(unavailable('daemonの応答が不正です。', error));
+        failAll(unavailable('The response from the daemon is invalid.', error));
       }
     });
     socket.on('error', (error) => {
       clearTimeout(timer);
-      failAll(unavailable('daemonへ接続できません。', error));
+      failAll(unavailable('Could not connect to the daemon.', error));
     });
     socket.on('close', () => {
       clearTimeout(timer);
-      if (phase !== 'closed') failAll(unavailable('daemonとの接続が切れました。'));
+      if (phase !== 'closed') failAll(unavailable('The connection to the daemon was lost.'));
     });
   });
 }

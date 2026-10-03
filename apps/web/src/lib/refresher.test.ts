@@ -7,7 +7,7 @@ interface Deferred {
   reject: (error: Error) => void;
 }
 
-// 取得の完了を1件ずつ制御する。応答の内容は、取得を始めた時点のserverの状態で決まる。
+// Control the completion of each fetch. The response content is decided by the server state at the time the fetch started.
 function controlledFetch() {
   let serverState = 1;
   const applied: number[] = [];
@@ -36,34 +36,34 @@ function controlledFetch() {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-describe('一覧の再取得', () => {
-  it('遅い取得の結果が、後から始めた取得の結果を上書きしない', async () => {
+describe('refetching the list', () => {
+  it('the result of a slow fetch does not overwrite the result of a fetch started later', async () => {
     const fetcher = controlledFetch();
     const refresh = createRefresher(fetcher.run);
 
-    // 1回目の取得（状態1を読む）が終わる前に、serverが状態2・3へ進み、通知が2回届く。
+    // Before the first fetch (reading state 1) finishes, the server moves to states 2 and 3 and two notifications arrive.
     void refresh();
     fetcher.update(2);
     void refresh();
     fetcher.update(3);
     const last = refresh();
-    // 並行して取得しない。実行中は1件だけ。
+    // No parallel fetches. Only one is running.
     expect(fetcher.pending).toHaveLength(1);
 
     fetcher.pending[0]?.resolve();
     await settle();
-    // 待っていた依頼は、まとめて1回の取得になる。取得は依頼の後に始まるので、状態3を読む。
+    // The waiting requests are coalesced into one fetch. It starts after the requests, so it reads state 3.
     expect(fetcher.pending).toHaveLength(2);
     fetcher.pending[1]?.resolve();
     await last;
 
-    // 最後に反映されるのは、最新の状態。古い状態で終わらない。
+    // The last applied state is the latest. It does not end on an old state.
     expect(fetcher.applied).toEqual([1, 3]);
   });
 
-  it('取得が終わった直後に依頼が重なっても、並行して取得しない', async () => {
+  it('does not fetch in parallel even when requests pile up right after a fetch finishes', async () => {
     const applied: number[] = [];
-    // 終わっていない取得。呼ぶと、その取得が完了する。
+    // Unfinished fetches. Calling one completes that fetch.
     const waiting: Array<() => void> = [];
     let serverState = 1;
     let maxActive = 0;
@@ -77,14 +77,14 @@ describe('一覧の再取得', () => {
         });
       });
       maxActive = Math.max(maxActive, waiting.length);
-      // 取得の完了に続く処理から、次の依頼が出る（通知の処理など）。
+      // Processing that follows a fetch's completion issues the next request (such as handling a notification).
       void fetched.then(() => onSettled());
       return fetched;
     };
     const refresh = createRefresher(run);
 
     const first = refresh();
-    // 完了を待っていた呼び出し元も、完了の直後に依頼を出す。
+    // A caller that waited for completion also issues a request right after completion.
     void first.then(() => {
       serverState = 4;
       return refresh();
@@ -97,7 +97,7 @@ describe('一覧の再取得', () => {
       void refresh();
     };
 
-    // 取得が並行していれば、新しく始まったものから先に終わらせる（完了順を逆にする）。
+    // If fetches were running in parallel, finish the newest one first (reverse completion order).
     for (let round = 0; round < 10; round += 1) {
       waiting.pop()?.();
       await settle();
@@ -105,12 +105,12 @@ describe('一覧の再取得', () => {
 
     expect(maxActive).toBe(1);
     expect(waiting).toEqual([]);
-    // 反映は取得を始めた順。最後に反映されるのは、最新の状態。
+    // Results are applied in the order the fetches started. The last applied state is the latest.
     expect(applied).toEqual(applied.toSorted((a, b) => a - b));
     expect(applied.at(-1)).toBe(serverState);
   });
 
-  it('取得が失敗しても、次の依頼で取得できる', async () => {
+  it('can fetch on the next request even after a fetch fails', async () => {
     const fetcher = controlledFetch();
     const refresh = createRefresher(fetcher.run);
     const first = refresh();
@@ -123,7 +123,7 @@ describe('一覧の再取得', () => {
     expect(fetcher.applied).toEqual([2]);
   });
 
-  it('実行中でなければ、依頼のたびに取得する', async () => {
+  it('fetches on every request when nothing is running', async () => {
     const fetcher = controlledFetch();
     const refresh = createRefresher(fetcher.run);
     const first = refresh();

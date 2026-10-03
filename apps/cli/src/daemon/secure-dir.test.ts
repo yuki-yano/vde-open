@@ -18,14 +18,14 @@ afterEach(async () => {
   await rm(base, { recursive: true, force: true });
 });
 
-describe.skipIf(process.platform === 'win32')('SYS-008 所有者専用directoryの検査', () => {
-  it('無ければ0700で作る', async () => {
+describe.skipIf(process.platform === 'win32')('SYS-008 owner-only directory checks', () => {
+  it('creates it with 0700 when missing', async () => {
     const target = join(base, 'a', 'b');
     await ensurePrivateDirectory(target, { uid, platform: process.platform });
     expect((await stat(target)).mode & 0o777).toBe(0o700);
   });
 
-  it('symlinkを拒否する', async () => {
+  it('rejects a symlink', async () => {
     const target = join(base, 'link');
     await symlink(base, target);
     await expect(
@@ -33,10 +33,10 @@ describe.skipIf(process.platform === 'win32')('SYS-008 所有者専用directory�
     ).rejects.toMatchObject({ code: 'E_INSECURE_PATH', details: { reason: 'symlink' } });
   });
 
-  it('所有者が別のユーザーなら拒否する', async () => {
+  it('rejects a directory owned by another user', async () => {
     const target = join(base, 'owned');
     await ensurePrivateDirectory(target, { uid, platform: process.platform });
-    // 実際に他ユーザーのdirectoryを作るにはroot権限が要るので、statの結果を差し替える。
+    // Creating a directory owned by another user requires root, so the stat result is replaced instead.
     const asOtherUser = async (path: string): Promise<Stats> => {
       const stats = await lstat(path);
       return Object.assign(Object.create(Object.getPrototypeOf(stats) as object), stats, {

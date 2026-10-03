@@ -46,20 +46,20 @@ export interface DaemonOptions {
   version: string;
   fs?: StoreFs;
   probe?: ProcessProbe;
-  // 管理UIのport。指定がなければOSに割り当ててもらう。
+  // Port of the management UI. Assigned by the OS if not given.
   managementPort?: number;
-  // 文書を表示するlistenerのport。指定がなければOSに割り当ててもらう。
+  // Port of the listener that serves documents. Assigned by the OS if not given.
   previewPort?: number;
-  // 文書の解析を差し替える（testで、遅い解析を再現するために使う）。
+  // Replaces document parsing (used in tests to reproduce slow parsing).
   parse?: ParseService;
 }
 
 export interface DaemonHandle {
   readonly daemonId: string;
   readonly stateRoot: string;
-  // 管理UIのURL。認証の秘密は含まない。
+  // URL of the management UI. Contains no authentication secret.
   readonly uiUrl: string;
-  // daemonが停止し終えたら解決する。
+  // Resolves once the daemon has finished stopping.
   readonly stopped: Promise<void>;
   stop(reason: string): Promise<void>;
 }
@@ -79,7 +79,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const stateRoot = resolveStateRoot(environment);
   await ensurePrivateDirectory(stateRoot, secure);
 
-  // 単一writerのlock。所有者が生きているlockは引き継がない（仕様6.2）。
+  // Single-writer lock. A lock whose owner is alive is not taken over (spec 6.2).
   const daemonId = `daemon_${randomUUID()}`;
   const acquired = await acquireLock(
     stateRoot,
@@ -89,10 +89,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   );
   if (!acquired.acquired) {
     throw acquired.reason === 'invalid'
-      ? new VdeError('E_DAEMON_LOCKED', 'daemonのlockを読めません。doctorで確認してください。', {
+      ? new VdeError('E_DAEMON_LOCKED', 'The daemon lock cannot be read. Check it with doctor.', {
           reason: 'invalid-lock',
         })
-      : new VdeError('E_DAEMON_LOCKED', '別のdaemonがstateを使用中です。', {
+      : new VdeError('E_DAEMON_LOCKED', 'Another daemon is using the state.', {
           reason: 'owner-alive',
           pid: acquired.holder?.pid ?? null,
         });
@@ -111,9 +111,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   let announceStopping: () => void = () => undefined;
   let lockTimer: NodeJS.Timeout | null = null;
   let stopping: Promise<void> | null = null;
-  // 停止を始めたら中断する。
+  // Aborted once stopping begins.
   const stopRequested = new AbortController();
-  // 自分が検査・作成したものだけを後始末する。
+  // Clean up only what we inspected or created.
   const owned = { runtimeDir: false, key: false, socket: false };
   let resolveStopped: () => void = () => undefined;
   const stopped = new Promise<void>((resolve) => {
@@ -121,13 +121,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   });
 
   const shutdown = async () => {
-    // 受付済みの処理のうち、終わりを待たなくてよい待ち（診断の索引の同期など）を先に終わらせる。
+    // Among accepted work, first end the waits that need not finish (such as diagnostics waiting for index sync).
     stopRequested.abort();
     if (lockTimer) clearInterval(lockTimer);
-    // 受付済みの処理とcommitが終わるまで、lockを持ち続ける。
-    // 途中で解放すると、次のdaemonの書込みと重なる。
+    // Keep holding the lock until accepted work and commits finish.
+    // Releasing early would overlap with the next daemon's writes.
     await watcher?.close();
-    // 回答を待っている要求は、終わらずにdrainを止めるので、先に終わらせる（質問の状態は変えない）。
+    // Requests waiting for an answer never finish and would block the drain, so end them first (the question state is unchanged).
     feedback?.close();
     await ipc?.drain();
     announceStopping();
@@ -137,7 +137,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     await parse?.close();
     await search?.close();
     await ipc?.close();
-    // lockを失っているときは、後継のdaemonのものかもしれないruntime fileに触れない。
+    // When the lock is lost, do not touch runtime files that may belong to a successor daemon.
     if (await holdsLock(stateRoot, DAEMON_LOCK_NAME, daemonId)) {
       if (owned.socket && !isWindows) await rm(location.socketPath, { force: true });
       if (owned.key) await rm(location.keyPath, { force: true });
@@ -160,7 +160,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   try {
     store = await StateStore.open({ root: stateRoot, fs: options.fs ?? nodeStoreFs });
     const openedStore = store;
-    // 結果を保証できない保存失敗の後は、書込みを続けずに終了する（仕様7.2）。
+    // After a save failure whose outcome cannot be guaranteed, exit instead of continuing to write (spec 7.2).
     openedStore.onFatal((error) => {
       logger.log('store.fatal', { code: error.code });
       setImmediate(() => void stop('commit-indeterminate'));
@@ -169,7 +169,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     if (!isWindows) await ensurePrivateDirectory(dirname(location.runtimeDir), secure);
     await ensurePrivateDirectory(location.runtimeDir, secure);
     owned.runtimeDir = true;
-    // lockを取得済みで、directoryも検査済み。残っているsocketは停止済みdaemonのもの。
+    // The lock is acquired and the directory is inspected. Any remaining socket belongs to a stopped daemon.
     if (!isWindows) await rm(location.socketPath, { force: true });
     const key = await createIpcKey(location.keyPath);
     owned.key = true;
@@ -180,11 +180,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     announceStopping = () => {
       events.publish({ type: 'daemon-stopping' });
     };
-    // 文書を閉じたら、その文書の表示の権限をすぐに失効させる。
+    // When a document is closed, revoke its render grants immediately.
     let pruneGrants: () => void = () => undefined;
     const cursors = createCursorCodec(randomBytes(32));
-    // 検索のindexは、別のthreadに置く。保存はせず、起動のたびに作り直す。
-    // 文書の解析は、解析用のworkerで行う（検索のworkerを、重い解析で塞がない）。
+    // The search index lives on a separate thread. It is not persisted and is rebuilt on every start.
+    // Document parsing runs in the parse worker (so heavy parsing does not block the search worker).
     search = createSearchService({
       store: openedStore,
       cursors,
@@ -192,7 +192,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     });
     const searching = search;
     const emit = (event: DocumentEvent) => {
-      // 開いている文書、公開している版、読めるかどうかが変わったら、indexを合わせる。
+      // When the open documents, the published revisions, or readability change, sync the index.
       if (
         event.type !== 'focus-requested' &&
         event.type !== 'feedback-changed' &&
@@ -201,12 +201,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         searching.sync();
       }
       events.publish(event);
-      // 開いている文書が変わったら、監視するdirectoryと、表示の権限も合わせる。
+      // When the open documents change, also sync the watched directories and the render grants.
       if (event.type === 'catalog-changed') {
         watcher?.sync();
         pruneGrants();
       }
-      // 文書を閉じて質問が中止になったら、回答を待っている要求へ伝える。
+      // When closing a document cancels a question, notify the requests waiting for an answer.
       if (event.type === 'feedback-changed' && event.requestId !== undefined) {
         feedback?.wake(event.requestId);
       }
@@ -223,10 +223,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     const answering = feedback;
     const sessions = createSessionService();
     const startedAt = new Date().toISOString();
-    // 開発用のoriginは、sourceから実行しているときだけ受け付ける。配布物では常に無効。
+    // The development origin is accepted only when running from source. Always disabled in the distributed build.
     const devOrigin = isSourceRun ? (environment.env['VDE_OPEN_DEV_UI_ORIGIN'] ?? null) : null;
 
-    // 文書の表示は、管理UIとは別のportで行う。管理の権限とoriginを共有しない（仕様10.1）。
+    // Documents are served on a port separate from the management UI. Management privileges and origin are not shared (spec 10.1).
     let managementOrigin: string | null = null;
     let previewOrigin = '';
     const render = createRenderService({
@@ -235,14 +235,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       sessions,
       parse: parser,
       previewOrigin: () => previewOrigin,
-      // 表示の中から登録されていないfileを読み込もうとしたら、UIへ知らせる（pathは通知に含めない）。
+      // When a view tries to load an unregistered file, notify the UI (the path is not included in the notification).
       onMissing: (documentId) => emit({ type: 'render-diagnostics', documentId }),
     });
     pruneGrants = () => render.pruneClosed();
     preview = await startPreviewServer(
       {
         render,
-        // 表示を埋め込めるのは管理UIだけ。
+        // Only the management UI may embed the view.
         frameAncestors: () =>
           [managementOrigin, devOrigin].filter((origin): origin is string => origin !== null),
         onEvent: (event, fields) => logger.log(event, fields),
@@ -277,7 +277,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     });
     const watching = watcher;
     watching.sync();
-    // 保存済みの文書を、indexへ入れ始める。
+    // Start adding the persisted documents to the index.
     searching.sync();
 
     const methods: Record<string, (params: unknown) => Promise<MethodResult> | MethodResult> = {
@@ -296,10 +296,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         };
         return { data: status, catalogVersion: openedStore.payload.catalogVersion };
       },
-      // 資源の数と使用量（性能と資源の漏れの確認に使う。PERF-003〜005）。文書の内容や秘密は含めない。
+      // Resource counts and usage (used to check performance and resource leaks; PERF-003 to 005). Contains no document contents or secrets.
       'daemon.diagnostics': async (params): Promise<MethodResult> => {
-        // 求められたときだけ、回収してからheapを測る（回収後のheapを反復の区間ごとに比べるため）。
-        // workerは、それぞれのthreadで回収して測る。検索のworkerは、indexを今の文書に合わせ終えてから測る。
+        // Only when requested, collect garbage before measuring the heap (to compare the post-collection heap across iteration intervals).
+        // Workers collect and measure on their own threads. The search worker measures after syncing the index to the current documents.
         const { collectGarbage } = diagnosticsParamsSchema.parse(params ?? {});
         const workers = {
           search: (await search?.diagnostics(collectGarbage, stopRequested.signal)) ?? null,
@@ -317,7 +317,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             eventSubscribers: events.subscriberCount,
             eventStreams: management?.eventStreams() ?? { streams: 0, maxPending: 0 },
             renderGrants: render.grantCount,
-            // 保持している項目の数。反復の後に増え続けていれば、解放の漏れ。
+            // Number of retained items. If it keeps growing after iterations, something is not being released.
             retained: {
               documents: documents.retainedCounts(),
               search: search?.retainedCounts() ?? {},
@@ -334,7 +334,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         };
       },
       'daemon.stop': (): MethodResult => {
-        // 応答を返してから停止する。
+        // Stop after returning the response.
         setImmediate(() => void stop('requested'));
         return { data: { stopping: true } };
       },
@@ -370,7 +370,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         watching.sync();
         return result;
       },
-      // browserを開くための一回限りのURLを作る。URLは秘密を含むので、logには残さない。
+      // Create a one-time URL for opening the browser. The URL contains a secret, so it is not logged.
       'ui.bootstrap': (): MethodResult => ({
         data: { bootstrapUrl: `${uiUrl}#bootstrap=${sessions.createBootstrapTicket()}`, uiUrl },
       }),
@@ -382,14 +382,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       daemonId,
       onEvent: (event, fields) => logger.log(event, fields),
       handle: async (method, params) => {
-        if (stopping) throw new VdeError('E_DAEMON_STOPPING', 'daemonは停止処理中です。');
+        if (stopping) throw new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.');
         const handler = Object.hasOwn(methods, method) ? methods[method] : undefined;
-        if (!handler) throw new VdeError('E_UNKNOWN_METHOD', '未知のmethodです。', { method });
+        if (!handler) throw new VdeError('E_UNKNOWN_METHOD', 'Unknown method.', { method });
         try {
           return await handler(params);
         } catch (error) {
           if (error instanceof ZodError) {
-            throw new VdeError('E_INVALID_ARGUMENT', '引数が正しくありません。', {
+            throw new VdeError('E_INVALID_ARGUMENT', 'Invalid arguments.', {
               issues: error.issues.map((issue) => ({
                 path: issue.path.join('.'),
                 message: issue.message,
@@ -411,7 +411,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       ...location,
     });
 
-    // lockを失ったら、書込みを止めて終了する。
+    // If the lock is lost, stop writing and exit.
     const checkLock = async () => {
       if (!(await holdsLock(stateRoot, DAEMON_LOCK_NAME, daemonId))) await stop('lock-lost');
     };

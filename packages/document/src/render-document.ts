@@ -1,4 +1,4 @@
-// 1つの版を表示するための変換をまとめて行う。daemonの解析workerから呼ぶ。
+// Run all transforms needed to show one revision. Called from the daemon's analysis worker.
 import { scanCssReferences, transformCss } from './css-transform.ts';
 import {
   DiagnosticLog,
@@ -17,16 +17,16 @@ export interface RenderInput {
   source: string;
   documentLogicalPath: string;
   assets: Array<{ logicalPath: string; role: AssetRole }>;
-  // 登録済みのCSS fileの内容。参照を調べ直してから配信する。
+  // Contents of registered CSS files. Their references are re-checked before serving.
   stylesheets: Array<{ logicalPath: string; text: string }>;
-  // HTMLの表示方法。interactiveでは、登録済みのscriptとevent handlerを残す。
+  // HTML mode. interactive keeps registered scripts and event handlers.
   mode: 'static' | 'interactive';
-  // interactiveのHTMLへ最初のscriptとして入れるSDK。入れないならnull。
+  // SDK inserted as the first script into interactive HTML. null to insert none.
   sdkScript: string | null;
 }
 
 export interface RenderOutput {
-  // 変換後のHTML。Markdownは本体で描画するのでnull。
+  // Transformed HTML. null for Markdown, which the host renders.
   html: string | null;
   stylesheets: Array<{ logicalPath: string; css: string }>;
   links: StaticLink[];
@@ -68,7 +68,7 @@ export function renderDocument(input: RenderInput): RenderOutput {
 
 export type ScanKind = 'markdown' | 'html' | 'css';
 
-// 文書またはCSSが参照するlocal fileの候補を集める。
+// Collect candidate local files the document or CSS references.
 export function scanReferences(kind: ScanKind, source: string): ScannedReference[] {
   if (kind === 'markdown') return scanMarkdownReferences(source);
   if (kind === 'html') return scanHtmlReferences(source);

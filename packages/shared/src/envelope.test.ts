@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { envelopeSchema, errorEnvelope, successEnvelope } from './envelope.ts';
 
 describe('CLI JSON envelope', () => {
-  it('成功envelopeは仕様5.6の形で、schemaで検証できる', () => {
+  it('a success envelope has the shape of spec 5.6 and validates against the schema', () => {
     const envelope = successEnvelope({ documents: [] }, { command: 'list', catalogVersion: 12 });
     expect(envelope).toEqual({
       schemaVersion: 1,
@@ -15,10 +15,10 @@ describe('CLI JSON envelope', () => {
     expect(envelopeSchema.parse(envelope)).toEqual(envelope);
   });
 
-  it('失敗envelopeはerrorを持ち、dataとmetaを持たない', () => {
+  it('an error envelope has error and has neither data nor meta', () => {
     const envelope = errorEnvelope({
       code: 'E_REVISION_UNAVAILABLE',
-      message: '指定した版は保持されていません。',
+      message: 'The requested revision is no longer retained.',
       retryable: false,
       details: {},
     });
@@ -26,7 +26,7 @@ describe('CLI JSON envelope', () => {
     expect(Object.keys(envelope).toSorted()).toEqual(['error', 'ok', 'schemaVersion', 'warnings']);
   });
 
-  it('未知のkeyや別のschemaVersionを受け付けない', () => {
+  it('rejects unknown keys and a different schemaVersion', () => {
     const base = successEnvelope(null, { command: 'list' });
     expect(envelopeSchema.safeParse({ ...base, extra: 1 }).success).toBe(false);
     expect(envelopeSchema.safeParse({ ...base, schemaVersion: 2 }).success).toBe(false);

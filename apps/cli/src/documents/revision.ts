@@ -20,7 +20,7 @@ export function sha256Hex(bytes: Uint8Array | string): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-// 仕様4.1。同じ内容を同じprofileで解析すれば、必ず同じrevisionになる。
+// Spec 4.1. The same content analyzed with the same profile always yields the same revision.
 export function computeRevision(input: RevisionInput): string {
   const assets = input.assets.toSorted((a, b) =>
     a.logicalPath < b.logicalPath ? -1 : a.logicalPath > b.logicalPath ? 1 : 0,

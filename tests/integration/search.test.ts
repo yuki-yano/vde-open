@@ -51,7 +51,7 @@ beforeEach(async () => {
   t = createTestHome();
   cpSync(fixtures, t.work, { recursive: true });
   ids.clear();
-  // unopened.mdは開かない。
+  // unopened.md is not opened.
   const opened = await t.run([
     'open',
     'auth.md',
@@ -76,24 +76,24 @@ const search = async (...args: string[]) =>
 const read = async (...args: string[]) => (await t.run(['read', ...args, '--json'])).json<Read>();
 const paths = (result: Search) => result.hits.map((hit) => hit.displayPath);
 
-describe('SRCH-001 / SRCH-002 検索の対象', () => {
-  it('開いている文書だけを検索し、閉じた文書は直後から出ない', async () => {
+describe('SRCH-001 / SRCH-002 search scope', () => {
+  it('searches only open documents, and a closed document disappears immediately', async () => {
     const found = (await search('認証', '--limit', '10')).data;
     expect(found.registeredDocuments).toBe(4);
     expect(found.searchedDocuments).toBe(4);
     expect(found.incomplete).toBe(false);
     expect(new Set(paths(found))).toEqual(new Set(['auth.md', 'design-notes.md']));
-    // 同じdirectoryにあっても、開いていない文書は検索しない。
+    // A document that is not open is not searched even if it is in the same directory.
     expect(JSON.stringify(found)).not.toContain('開いていない文書');
     expect((await t.run(['list', '--json'])).stdout).not.toContain('unopened');
 
-    // 閉じた直後の検索に、閉じた文書は出ない。
+    // A search right after closing does not return the closed document.
     await t.run(['close', ids.get('auth.md') as string, '--json']);
     const after = (await search('認証', '--limit', '10')).data;
     expect(paths(after)).toEqual(['design-notes.md']);
     expect(after.registeredDocuments).toBe(3);
     expect((await search('refresh_token')).data.hits).toEqual([]);
-    // 閉じた文書を名指ししても、検索できない。
+    // Naming a closed document explicitly does not make it searchable.
     const closed = await t.run([
       'search',
       '認証',
@@ -105,13 +105,13 @@ describe('SRCH-001 / SRCH-002 検索の対象', () => {
     expect(closed.json().error.code).toBe('E_DOCUMENT_NOT_OPEN');
   });
 
-  it('日本語、identifier、検索の種類、対象の絞り込みが、CLIから使える', async () => {
+  it('Japanese, identifiers, search modes, and scope narrowing are usable from the CLI', async () => {
     expect((await search('有効期限')).data.hits[0]).toMatchObject({
       displayPath: 'auth.md',
       sectionId: 'sec_0002',
       headingPath: ['認証仕様', 'セッションの有効期限'],
       extraction: 'markdown',
-      // 解析結果に原文の位置がないので、推測した行番号は返さない（SRCH-012）。
+      // The parse result has no source positions, so no guessed line numbers are returned (SRCH-012).
       sourceRange: null,
     });
     expect(paths((await search('セッション 有効期限', '--mode', 'exact')).data)).toEqual([]);
@@ -119,21 +119,21 @@ describe('SRCH-001 / SRCH-002 検索の対象', () => {
     const scoped = await search('有効期限', '--document', ids.get('ops/runbook.md') as string);
     expect(paths(scoped.data)).toEqual(['ops/runbook.md']);
     expect(scoped.data.registeredDocuments).toBe(1);
-    // 抜粋は、抽出した本文の実際の一部（SRCH-016）。
+    // The excerpt is an actual part of the extracted body (SRCH-016).
     const hit = (await search('refresh_token')).data.hits[0] as Hit;
     const section = (await read(hit.documentId, '--section', hit.sectionId)).data.content ?? '';
     expect(section.replace(/\s+/g, ' ')).toContain(hit.excerpt);
-    // 通常の表示。
+    // Normal output.
     const text = await t.run(['search', '認証']);
     expect(text.stdout).toContain('認証仕様');
-    expect(text.stdout).toContain('検索した文書 4件');
+    expect(text.stdout).toContain('searched documents: 4');
     const bad = await t.run(['search', '認証', '--mode', 'regex', '--json']);
     expect(bad.exitCode).toBe(2);
   });
 });
 
-describe('SRCH-007 検索した版の取得', () => {
-  it('検索の後で原本が変わっても、検索結果の版を指定すれば、検索時の内容を返す', async () => {
+describe('SRCH-007 reading the searched revision', () => {
+  it('returns the content at search time when the revision from the hit is given, even if the source changed afterwards', async () => {
     const hit = (await search('refresh_token')).data.hits[0] as Hit;
     writeFileSync(join(t.work, 'auth.md'), '# 認証仕様\n\n書き換えた後の内容。\n');
     await t.run(['refresh', '--json']);
@@ -143,11 +143,11 @@ describe('SRCH-007 検索した版の取得', () => {
     ).data;
     expect(pinned.revision).toBe(hit.revision);
     expect(pinned.content).toContain('refresh_token');
-    // 版を指定しなければ、現在の版。検索時の節は、現在の版にはない。
+    // Without a revision, the current one. The section from the search does not exist in the current revision.
     const current = await t.run(['read', hit.documentId, '--section', hit.sectionId, '--json']);
     expect(current.exitCode).toBe(3);
     expect(current.json().error.code).toBe('E_SECTION_NOT_FOUND');
-    // 保持していない版は、現在の版で代用しない。
+    // An unretained revision is not substituted with the current one.
     const unknown = await t.run([
       'read',
       hit.documentId,
@@ -157,20 +157,20 @@ describe('SRCH-007 検索した版の取得', () => {
     ]);
     expect(unknown.exitCode).toBe(4);
     expect(unknown.json().error.code).toBe('E_REVISION_UNAVAILABLE');
-    // 更新後の内容は、新しい版として検索できる。前の内容では見つからない。
+    // The updated content is searchable as a new revision. The old content is no longer found.
     expect((await search('refresh_token')).data.hits).toEqual([]);
     expect((await search('書き換えた')).data.hits[0]?.revision).not.toBe(hit.revision);
   });
 });
 
-describe('SRCH-008 / SRCH-009 検索のcursor', () => {
-  it('一覧が変わったら、続きを取れない。改ざんや流用も拒否する', async () => {
+describe('SRCH-008 / SRCH-009 search cursor', () => {
+  it('cannot continue once the list changes; tampering and reuse are rejected too', async () => {
     const first = (await search('認証', '--limit', '1')).data;
     expect(first.hits).toHaveLength(1);
     expect(first.truncated).toBe(true);
     const cursor = first.nextCursor as string;
 
-    // 続きは、前のpageと重ならず、抜けもない。
+    // The continuation neither overlaps the previous page nor skips anything.
     const second = (await search('認証', '--limit', '1', '--cursor', cursor)).data;
     expect(second.hits).toHaveLength(1);
     const all = (await search('認証', '--limit', '10')).data.hits;
@@ -178,7 +178,7 @@ describe('SRCH-008 / SRCH-009 検索のcursor', () => {
       all.slice(0, 2).map((hit) => hit.sectionId),
     );
 
-    // 別のquery、別の条件、別の操作のcursorは使えない。
+    // A cursor cannot be used with a different query, different conditions, or a different operation.
     const otherQuery = await t.run([
       'search',
       '設計',
@@ -217,7 +217,7 @@ describe('SRCH-008 / SRCH-009 検索のcursor', () => {
     expect(crossed.json().error.code).toBe('E_INVALID_CURSOR');
     const asList = await t.run(['list', '--cursor', cursor, '--json']);
     expect(asList.json().error.code).toBe('E_INVALID_CURSOR');
-    // 中身を書き換えたcursor。
+    // A cursor with modified contents.
     const [body, signature] = cursor.split('.') as [string, string];
     const forged = Buffer.from(
       JSON.stringify({ ...JSON.parse(Buffer.from(body, 'base64url').toString()), offset: 0 }),
@@ -233,7 +233,7 @@ describe('SRCH-008 / SRCH-009 検索のcursor', () => {
     ]);
     expect(tampered.json().error.code).toBe('E_INVALID_CURSOR');
 
-    // 一覧が変わったら、続きは取れない。抜けや重なりを、黙って返さない。
+    // Once the list changes, no continuation. Gaps or overlaps are not returned silently.
     t.write('extra.md', '# 追加\n\n認証の話。\n');
     await t.run(['open', 'extra.md', '--json']);
     const stale = await t.run(['search', '認証', '--limit', '1', '--cursor', cursor, '--json']);
@@ -243,7 +243,7 @@ describe('SRCH-008 / SRCH-009 検索のcursor', () => {
 });
 
 describe('SRCH-010 --max-bytes', () => {
-  it('長い1行を、文字の途中で切らずに分けて返し、つなぐと元の内容になる', async () => {
+  it('splits a long single line without cutting a character, and joined, it reproduces the original', async () => {
     const line = `${'認証の有効期限を延ばす😀'.repeat(200)}`;
     t.write('long.md', `# ${'長い見出し'.repeat(80)}\n\n${line}\n`);
     const documentId = (await t.run(['open', 'long.md', '--json'])).json<{
@@ -263,7 +263,7 @@ describe('SRCH-010 --max-bytes', () => {
             ...(cursor === null ? mode : ['--cursor', cursor]),
           )
         ).data;
-        // 位置は毎回進む。文字の途中で切れていない。
+        // The position advances every time. No character is cut in the middle.
         expect((page.content ?? '').length).toBeGreaterThan(0);
         expect(Buffer.byteLength(page.content ?? '')).toBeLessThanOrEqual(256);
         expect(page.content).not.toContain('�');
@@ -276,7 +276,7 @@ describe('SRCH-010 --max-bytes', () => {
       expect(content.startsWith(mode.length === 0 ? '# 長い見出し' : '長い見出し')).toBe(true);
     }
 
-    // 256未満は指定できない。
+    // Less than 256 cannot be given.
     for (const command of [
       ['read', documentId, '--max-bytes', '255'],
       ['search', '認証', '--max-bytes', '255'],
@@ -286,7 +286,7 @@ describe('SRCH-010 --max-bytes', () => {
       expect(result.json().error.code).toBe('E_INVALID_ARGUMENT');
     }
 
-    // 1つの要素が予算に収まらないときは、空の結果ではなく、必要な大きさを返す。
+    // When one element does not fit the budget, the required size is returned instead of an empty result.
     const outline = await t.run(['read', documentId, '--outline', '--max-bytes', '256', '--json']);
     expect(outline.exitCode).toBe(7);
     expect(outline.json().error.code).toBe('E_MAX_BYTES_TOO_SMALL');
@@ -303,7 +303,7 @@ describe('SRCH-010 --max-bytes', () => {
     expect((await search('延ばす', '--max-bytes', String(needed))).data.hits).toHaveLength(1);
   });
 
-  it('見出しの一覧と検索結果は、要素を分割せずに、続きをcursorで返す', async () => {
+  it('the outline and search results continue with a cursor without splitting elements', async () => {
     const headings = Array.from(
       { length: 40 },
       (_, n) => `## 節${String(n)}\n\n本文${String(n)}。\n`,
@@ -330,9 +330,9 @@ describe('SRCH-010 --max-bytes', () => {
       cursor = page.nextCursor;
     } while (cursor !== null);
     expect(collected).toHaveLength(41);
-    // 節のIDは、版の中で重ならない（SRCH-014）。
+    // Section IDs are unique within a revision (SRCH-014).
     expect(new Set(collected).size).toBe(41);
-    // cursorは、取得の種類に固定される。別の種類の指定とは併用できない。
+    // A cursor is bound to the kind of read. It cannot be combined with a different kind.
     const first = (await read(documentId, '--outline', '--max-bytes', '512')).data;
     const mixed = await t.run([
       'read',
@@ -349,8 +349,8 @@ describe('SRCH-010 --max-bytes', () => {
   });
 });
 
-describe('SRCH-011 原文の行と範囲', () => {
-  it('CRLF、末尾の改行、空の文書、行の範囲の境界を、物理行とbyte位置で返す', async () => {
+describe('SRCH-011 source lines and ranges', () => {
+  it('returns CRLF, trailing newline, empty document, and line range boundaries as physical lines and byte positions', async () => {
     t.write('crlf.md', '一行目\r\n二行目\r\n三行目');
     t.write('empty.md', '');
     const opened = (await t.run(['open', 'crlf.md', 'empty.md', '--json'])).json<{
@@ -367,7 +367,7 @@ describe('SRCH-011 原文の行と範囲', () => {
       lineStart: 1,
       lineEnd: 3,
     });
-    // 行は物理行。CRLFは1つの改行として数え、原文のまま返す。
+    // Lines are physical lines. CRLF counts as one newline and is returned as in the source.
     const second = (await read(crlf, '--lines', '2:2')).data;
     expect(second.content).toBe('二行目\r\n');
     expect(second.sourceRange).toEqual({
@@ -380,11 +380,11 @@ describe('SRCH-011 原文の行と範囲', () => {
     const beyond = await t.run(['read', crlf, '--lines', '4:4', '--json']);
     expect(beyond.exitCode).toBe(2);
 
-    // 空の文書は、1つの空行として扱う。
+    // An empty document is treated as one empty line.
     const blank = (await read(empty, '--lines', '1:1')).data;
     expect(blank.content).toBe('');
     expect((await t.run(['read', empty, '--lines', '2:2', '--json'])).exitCode).toBe(2);
-    // 末尾の改行の後に、行を足して数えない。
+    // No extra line is counted after the trailing newline.
     t.write('trailing.md', 'a\nb\n');
     const trailing = (await t.run(['open', 'trailing.md', '--json'])).json<{
       documents: Array<{ documentId: string }>;
@@ -394,8 +394,8 @@ describe('SRCH-011 原文の行と範囲', () => {
   });
 });
 
-describe('SRCH-013 HTMLの抽出', () => {
-  it('scriptの内容、入力欄の値、scriptが作る本文は、検索にも節の取得にも出ない', async () => {
+describe('SRCH-013 HTML extraction', () => {
+  it('script contents, input values, and script-generated text appear neither in search nor in section reads', async () => {
     t.write(
       'page.html',
       `<!doctype html><title>画面の案</title><script>const key = "SCRIPT-SECRET-VALUE";
@@ -407,7 +407,7 @@ describe('SRCH-013 HTMLの抽出', () => {
       documents: Array<{ documentId: string }>;
     }>().data.documents[0]?.documentId as string;
     const found = (await search('静的に書かれた')).data.hits[0] as Hit;
-    // 静的に抽出した結果であることを示す。
+    // Indicates the result was extracted statically.
     expect(found).toMatchObject({
       displayPath: 'page.html',
       extraction: 'static-html',
@@ -428,13 +428,13 @@ describe('SRCH-013 HTMLの抽出', () => {
       extraction: 'static-html',
     });
     expect(section.content).toBe('ログイン\n\n静的に書かれた本文。');
-    // 原文は、別に取得できる。
+    // The source is available separately.
     expect((await read(documentId)).data.content).toContain('SCRIPT-SECRET-VALUE');
   });
 });
 
-describe('SRCH-015 / DOC-012 検索できない文書', () => {
-  it('解析できない文書があれば、全件を検索したとは答えない', async () => {
+describe('SRCH-015 / DOC-012 unsearchable documents', () => {
+  it('does not claim all documents were searched when one cannot be parsed', async () => {
     t.write('deep.md', `${'> '.repeat(70)}深すぎる引用。認証。\n`);
     const deep = (await t.run(['open', 'deep.md', '--json'])).json<{
       documents: Array<{ documentId: string; searchState: string }>;
@@ -444,7 +444,7 @@ describe('SRCH-015 / DOC-012 検索できない文書', () => {
     expect(found.failedDocuments).toEqual([{ documentId: deep, code: 'E_PARSE_FAILED' }]);
     expect(found.registeredDocuments).toBe(5);
     expect(found.searchedDocuments).toBe(4);
-    // 検索できた文書の結果は返す。
+    // Results from searchable documents are still returned.
     expect(new Set(paths(found))).toEqual(new Set(['auth.md', 'design-notes.md']));
     const listed = (await t.run(['list', '--json'])).json<{
       documents: Array<{ documentId: string; searchState: string }>;
@@ -453,7 +453,7 @@ describe('SRCH-015 / DOC-012 検索できない文書', () => {
     expect(listed.filter((entry) => entry.searchState === 'ready')).toHaveLength(4);
   });
 
-  it('読めなくなった文書の前の内容を、いまの検索結果として返さない', async () => {
+  it('does not return the old content of a document that became unreadable as a current search result', async () => {
     const auth = ids.get('auth.md') as string;
     rmSync(join(t.work, 'auth.md'));
     await t.run(['refresh', '--json']);
@@ -469,7 +469,7 @@ describe('SRCH-015 / DOC-012 検索できない文書', () => {
       searchState: 'excluded',
     });
 
-    // 読む権限がなくなった文書も同じ。
+    // The same for a document that lost read permission.
     chmodSync(join(t.work, 'design-notes.md'), 0o000);
     await t.run(['refresh', '--json']);
     const unreadable = (await search('Bearer')).data;
@@ -480,7 +480,7 @@ describe('SRCH-015 / DOC-012 検索できない文書', () => {
     ]);
     chmodSync(join(t.work, 'design-notes.md'), 0o644);
 
-    // 戻れば、また検索できる。
+    // Once restored, it is searchable again.
     cpSync(join(fixtures, 'auth.md'), join(t.work, 'auth.md'));
     await t.run(['refresh', '--json']);
     const back = (await search('refresh_token')).data;

@@ -4,7 +4,7 @@ import { parse, type DefaultTreeAdapterMap } from 'parse5';
 
 type Node = DefaultTreeAdapterMap['node'];
 
-// titleの推定に使うsource先頭の長さ。巨大な文書の全体を、登録のたびに解析しないため。
+// Length of the source head used to infer the title, so a huge document is not parsed in full on every registration.
 const TITLE_SCAN_CHARS = 64 * 1024;
 const MAX_TITLE_LENGTH = 160;
 
@@ -70,7 +70,7 @@ function htmlTitle(source: string): string | null {
   return normalize(text);
 }
 
-// 最初の見出し、またはHTMLのtitle。見つからなければnull（呼び出し側がfilename等を使う）。
+// The first heading, or the HTML title. null when none is found (the caller uses the filename or similar).
 export function extractTitle(source: string, format: 'markdown' | 'html'): string | null {
   const head = source.slice(0, TITLE_SCAN_CHARS);
   return format === 'markdown' ? markdownTitle(head) : htmlTitle(head);

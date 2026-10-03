@@ -21,13 +21,13 @@ afterEach(() => {
   rmSync(base, { recursive: true, force: true });
 });
 
-describe('DOC-010 遅れて届いた古い版の解析結果', () => {
-  it('新しい版の結果として採用しない', async () => {
+describe('DOC-010 late analysis result of an old revision', () => {
+  it('is not used as the result of the new revision', async () => {
     const path = join(base, 'a.md');
-    writeFileSync(path, '# 古い見出し\n');
+    writeFileSync(path, '# Old heading\n');
     const store = await StateStore.open({ root: join(base, 'home'), fs: nodeStoreFs });
 
-    // 古い版の解析だけを、合図があるまで止める。
+    // Hold only the old revision's analysis until signalled.
     let releaseOld: () => void = () => undefined;
     const analyzed: string[] = [];
     const service = new DocumentService({
@@ -35,7 +35,7 @@ describe('DOC-010 遅れて届いた古い版の解析結果', () => {
       cursors: createCursorCodec(randomBytes(32)),
       analyze: async (format, text): Promise<DocumentAnalysis> => {
         analyzed.push(text);
-        if (text.includes('古い見出し')) {
+        if (text.includes('Old heading')) {
           await new Promise<void>((resolve) => {
             releaseOld = resolve;
           });
@@ -49,25 +49,28 @@ describe('DOC-010 遅れて届いた古い版の解析結果', () => {
     const oldRevision = opened.data.documents[0]?.revision as string;
     const oldOutline = service.read({ documentId, outline: true });
 
-    // 古い版の解析が終わる前に、文書が新しい版になる。
-    writeFileSync(path, '# 新しい見出し\n\n## 追加の節\n');
+    // The document moves to a new revision before the old revision's analysis finishes.
+    writeFileSync(path, '# New heading\n\n## Added section\n');
     expect((await service.refreshFromDisk(documentId)).changed).toBe(true);
     const current = await service.read({ documentId, outline: true });
     expect(current.data.revision).not.toBe(oldRevision);
-    expect(current.data.outline?.map((item) => item.title)).toEqual(['新しい見出し', '追加の節']);
+    expect(current.data.outline?.map((item) => item.title)).toEqual([
+      'New heading',
+      'Added section',
+    ]);
 
-    // 遅れて古い版の解析が終わる。結果は古い版にだけ結び付く。
+    // The old revision's analysis finishes late. The result is bound only to the old revision.
     releaseOld();
     const old = await oldOutline;
     expect(old.data.revision).toBe(oldRevision);
-    expect(old.data.outline?.map((item) => item.title)).toEqual(['古い見出し']);
+    expect(old.data.outline?.map((item) => item.title)).toEqual(['Old heading']);
 
-    // 現在の版の結果は変わらない。古い版を指定したときだけ、古い結果が返る。
+    // The current revision's result is unchanged. The old result is returned only when the old revision is requested.
     const after = await service.read({ documentId, outline: true });
-    expect(after.data.outline?.map((item) => item.title)).toEqual(['新しい見出し', '追加の節']);
+    expect(after.data.outline?.map((item) => item.title)).toEqual(['New heading', 'Added section']);
     const pinned = await service.read({ documentId, outline: true, revision: oldRevision });
-    expect(pinned.data.outline?.map((item) => item.title)).toEqual(['古い見出し']);
-    // 同じ版を解析し直してはいない。
+    expect(pinned.data.outline?.map((item) => item.title)).toEqual(['Old heading']);
+    // The same revision was not analyzed again.
     expect(analyzed).toHaveLength(2);
   });
 });
