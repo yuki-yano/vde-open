@@ -3,5 +3,7 @@ export * from './documents.ts';
 export * from './envelope.ts';
 export * from './errors.ts';
 export * from './exit-codes.ts';
+export * from './feedback.ts';
 export * from './limits.ts';
+export * from './strict-json.ts';
 export * from './versions.ts';

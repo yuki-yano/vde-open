@@ -5,7 +5,12 @@ export type EventListener = (event: ServerEvent) => void;
 export interface EventHub {
   // 現在の連番。接続時のhelloに使う。
   readonly sequence: number;
-  publish(event: Pick<ServerEvent, 'type' | 'documentId' | 'revision'>): ServerEvent;
+  publish(
+    event: Pick<
+      ServerEvent,
+      'type' | 'documentId' | 'revision' | 'requestId' | 'status' | 'draftVersion' | 'acknowledged'
+    >,
+  ): ServerEvent;
   subscribe(listener: EventListener): () => void;
   readonly subscriberCount: number;
 }
@@ -31,6 +36,10 @@ export function createEventHub(daemonId: string, catalogVersion: () => number): 
         catalogVersion: catalogVersion(),
         ...(event.documentId === undefined ? {} : { documentId: event.documentId }),
         ...(event.revision === undefined ? {} : { revision: event.revision }),
+        ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+        ...(event.status === undefined ? {} : { status: event.status }),
+        ...(event.draftVersion === undefined ? {} : { draftVersion: event.draftVersion }),
+        ...(event.acknowledged === undefined ? {} : { acknowledged: event.acknowledged }),
       };
       for (const listener of listeners) listener(full);
       return full;

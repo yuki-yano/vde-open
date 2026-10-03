@@ -28,6 +28,8 @@ export interface Transaction {
 export interface StateStoreOptions {
   root: string;
   fs: StoreFs;
+  // 保存できる内容の合計の上限。指定がなければ仕様7.4の値。
+  blobStoreBytes?: number;
 }
 
 function sha256(bytes: Uint8Array | string): string {
@@ -99,6 +101,7 @@ export function decodeStateFile(bytes: Buffer, fileName: string): DecodedState {
 export class StateStore {
   readonly root: string;
   readonly #fs: StoreFs;
+  readonly #blobStoreBytes: number;
   #payload: StatePayload;
   #storeVersion: number;
   #persisted: boolean;
@@ -115,6 +118,7 @@ export class StateStore {
   ) {
     this.root = options.root;
     this.#fs = options.fs;
+    this.#blobStoreBytes = options.blobStoreBytes ?? LIMITS.blobStoreBytes;
     this.#payload = decoded?.payload ?? emptyStatePayload();
     this.#storeVersion = decoded?.storeVersion ?? 0;
     this.#persisted = decoded !== null;
@@ -278,10 +282,10 @@ export class StateStore {
         throw new VdeError('E_INTERNAL', '次のstateが未保存のblobを参照しています。', { blob });
       }
     }
-    if (blobBytes > LIMITS.blobStoreBytes) {
+    if (blobBytes > this.#blobStoreBytes) {
       throw new VdeError('E_LIMIT_EXCEEDED', '保存できる内容の合計上限を超えます。', {
         limit: 'blobStoreBytes',
-        max: LIMITS.blobStoreBytes,
+        max: this.#blobStoreBytes,
         actual: blobBytes,
       });
     }

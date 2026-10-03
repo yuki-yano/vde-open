@@ -39,6 +39,8 @@ const SOURCE_STATE: Record<string, string> = {
 export interface ViewerProps {
   api: Api;
   document: DocumentSummary;
+  // 回答待ちの質問が固定している版。あれば、新しい版が来てもこの版を表示し続ける（仕様11.4）。
+  fixedRevision?: string | null;
 }
 
 interface Loaded {
@@ -62,12 +64,15 @@ interface PendingLink {
 }
 
 // 文書を切り替えたら作り直す（呼び出し側がkeyにdocumentIdを渡す）。
-export function Viewer({ api, document }: ViewerProps) {
+export function Viewer({ api, document, fixedRevision = null }: ViewerProps) {
   const [mode, setMode] = usePreference<ViewMode>('view-mode', 'preview', isViewMode);
   // 更新を止めた時点の版。止めている間は、新しい版が来ても差し替えない。
   const [pinnedRevision, setPinnedRevision] = useState<string | null>(null);
   const paused = pinnedRevision !== null;
-  const shownRevision = pinnedRevision ?? document.revision;
+  // 回答待ちの質問があれば、質問の版を表示する（回答を記録する版と、見ている版を一致させる）。
+  // その間は、更新を止める・再開する操作で表示の版を変えない。
+  const fixed = fixedRevision !== null;
+  const shownRevision = fixedRevision ?? pinnedRevision ?? document.revision;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [pendingLink, setPendingLink] = useState<PendingLink | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -187,7 +192,7 @@ export function Viewer({ api, document }: ViewerProps) {
     [grant, openLink],
   );
 
-  const stale = paused && document.revision !== shownRevision;
+  const stale = paused && !fixed && document.revision !== shownRevision;
   const jumpTo = (anchor: string) => {
     window.document.getElementById(anchor)?.scrollIntoView({ block: 'start' });
   };
@@ -207,7 +212,11 @@ export function Viewer({ api, document }: ViewerProps) {
         </div>
         <Badge variant="outline">{isMarkdown ? 'Markdown' : 'HTML'}</Badge>
         {!isMarkdown && <Badge variant="outline">静的表示</Badge>}
-        {paused && <Badge variant="secondary">更新停止中</Badge>}
+        {fixed ? (
+          <Badge variant="secondary">質問の版を表示中</Badge>
+        ) : (
+          paused && <Badge variant="secondary">更新停止中</Badge>
+        )}
         <ToggleGroup
           value={[mode]}
           onValueChange={(value) => {
@@ -224,6 +233,8 @@ export function Viewer({ api, document }: ViewerProps) {
           variant="outline"
           size="sm"
           aria-pressed={paused}
+          disabled={fixed}
+          title={fixed ? '回答待ちの質問があるため、質問の版を表示しています' : undefined}
           onClick={() => setPinnedRevision(paused ? null : document.revision)}
         >
           {paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}

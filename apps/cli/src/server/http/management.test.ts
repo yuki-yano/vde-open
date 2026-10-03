@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createCursorCodec } from '../../documents/cursor.ts';
 import { DocumentService } from '../../documents/service.ts';
+import { FeedbackService } from '../../feedback/service.ts';
 import { StateStore } from '../../persistence/state-store.ts';
 import { nodeStoreFs } from '../../persistence/store-fs.ts';
 import { createRenderService } from '../../render/render-service.ts';
@@ -61,6 +62,7 @@ async function connect(heartbeatMs: number): Promise<Fixture> {
       previewOrigin: () => 'http://127.0.0.1:1',
     }),
     search: createSearchService({ store, cursors }),
+    feedback: new FeedbackService({ store, documents }),
     previewOrigin: 'http://127.0.0.1:1',
     webRoot: null,
     devOrigin: null,

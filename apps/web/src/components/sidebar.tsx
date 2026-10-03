@@ -74,6 +74,11 @@ function DocumentRow({
             {STATE_LABEL[document.sourceState] ?? document.sourceState}
           </Badge>
         )}
+        {document.pendingRequestIds.length > 0 && (
+          <Badge className="shrink-0" data-testid="pending-question">
+            回答待ち
+          </Badge>
+        )}
       </button>
       {children}
       <Button

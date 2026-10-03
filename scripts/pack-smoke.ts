@@ -142,6 +142,33 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
       fail('同梱の検索workerで、開いた文書を検索できません');
     }
 
+    // 手順6の続き: 導入先だけで、質問の作成と、Agent向けの取得（回答案を返さない）が動く。
+    writeFileSync(
+      join(installDir, 'q.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        title: 'pack検証の質問',
+        fieldOrder: ['ok'],
+        answerSchema: {
+          type: 'object',
+          properties: { ok: { type: 'boolean', title: '確認' } },
+          required: ['ok'],
+          additionalProperties: false,
+        },
+      }),
+    );
+    const asked = runJson<{ request: { requestId: string; status: string } }>('vo', [
+      'ask',
+      'q.json',
+      '--document',
+      openedId,
+    ]).request;
+    const got = runJson<Record<string, unknown>>('vo', ['feedback', 'get', asked.requestId]);
+    if (asked.status !== 'pending' || got['status'] !== 'pending' || 'draftAnswers' in got) {
+      fail('導入先で、質問を作成・取得できません');
+    }
+    runJson('vo', ['feedback', 'cancel', asked.requestId]);
+
     // 手順6の続き: 導入先だけで、HTMLの静的変換（同梱のparse5とcss-tree）と表示用のlistenerが動く。
     mkdirSync(join(installDir, 'site'));
     writeFileSync(

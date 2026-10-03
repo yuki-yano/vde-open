@@ -42,4 +42,13 @@ export const LIMITS = {
   searchHitsPerDocument: 2,
   // 検索が、indexへの反映を待つ上限。
   searchIndexWaitMs: 2000,
+  // 質問定義と回答（JSONのUTF-8の大きさ）。
+  questionnaireBytes: 64 * KiB,
+  answerBytes: 64 * KiB,
+  // 1つの質問のfield数と、文字列の回答の長さ（Unicode code points）。
+  questionFields: 32,
+  answerStringLength: 4000,
+  // 回答を待つ時間（秒）。
+  feedbackWaitDefaultSeconds: 120,
+  feedbackWaitMaxSeconds: 3600,
 } as const;

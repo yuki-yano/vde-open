@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { getEventListeners } from 'node:events';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { connect, createServer, type Server, type Socket } from 'node:net';
@@ -181,6 +182,34 @@ describe('requestの期限と後始末', () => {
     } finally {
       connection.close();
     }
+  });
+});
+
+describe('接続の中断', () => {
+  const abortListeners = (signal: AbortSignal) => getEventListeners(signal, 'abort').length;
+
+  it('同じsignalで接続に何度失敗しても、失敗した接続のlistenerを残さない', async () => {
+    const controller = new AbortController();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await expect(
+        connectIpc({ socketPath: join(dir, 'missing.sock'), key, signal: controller.signal }),
+      ).rejects.toMatchObject({ code: 'E_DAEMON_UNAVAILABLE' });
+    }
+    expect(abortListeners(controller.signal)).toBe(0);
+    // 接続を確認し終えた後も残さない。
+    const connection = await connectIpc({ socketPath, key, signal: controller.signal });
+    connection.close();
+    expect(abortListeners(controller.signal)).toBe(0);
+  });
+
+  it('中断済みのsignalでは、接続せずに失敗し、listenerも残さない', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(connectIpc({ socketPath, key, signal: controller.signal })).rejects.toMatchObject({
+      code: 'E_DAEMON_UNAVAILABLE',
+    });
+    expect(abortListeners(controller.signal)).toBe(0);
+    expect(calls).toEqual([]);
   });
 });
 

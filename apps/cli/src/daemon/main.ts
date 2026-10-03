@@ -6,7 +6,8 @@ import { IPC_PROTOCOL_VERSION, VdeError, type DaemonStatus, type Warning } from 
 import { ZodError } from 'zod';
 
 import { createCursorCodec } from '../documents/cursor.ts';
-import { DocumentService } from '../documents/service.ts';
+import { DocumentService, type DocumentEvent } from '../documents/service.ts';
+import { FeedbackService } from '../feedback/service.ts';
 import { isSourceRun, webRootPath } from '../entry-paths.ts';
 import {
   resolveRuntimeLocation,
@@ -103,6 +104,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   let watcher: WatchService | null = null;
   let parse: ParseService | null = null;
   let search: SearchService | null = null;
+  let feedback: FeedbackService | null = null;
   let announceStopping: () => void = () => undefined;
   let lockTimer: NodeJS.Timeout | null = null;
   let stopping: Promise<void> | null = null;
@@ -118,6 +120,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 受付済みの処理とcommitが終わるまで、lockを持ち続ける。
     // 途中で解放すると、次のdaemonの書込みと重なる。
     await watcher?.close();
+    // 回答を待っている要求は、終わらずにdrainを止めるので、先に終わらせる（質問の状態は変えない）。
+    feedback?.close();
     await ipc?.drain();
     announceStopping();
     await management?.close();
@@ -180,23 +184,30 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       analyze: (format, text) => parser.analyze(format, text),
     });
     const searching = search;
+    const emit = (event: DocumentEvent) => {
+      // 開いている文書、公開している版、読めるかどうかが変わったら、indexを合わせる。
+      if (event.type !== 'focus-requested' && event.type !== 'feedback-changed') searching.sync();
+      events.publish(event);
+      // 開いている文書が変わったら、監視するdirectoryと、表示の権限も合わせる。
+      if (event.type === 'catalog-changed') {
+        watcher?.sync();
+        pruneGrants();
+      }
+      // 文書を閉じて質問が中止になったら、回答を待っている要求へ伝える。
+      if (event.type === 'feedback-changed' && event.requestId !== undefined) {
+        feedback?.wake(event.requestId);
+      }
+    };
     const documents = new DocumentService({
       store: openedStore,
       cursors,
       searchStateOf: (documentId) => searching.stateOf(documentId),
       analyze: (format, text) => parser.analyze(format, text),
       scan: (kind, text) => parser.scan(kind, text),
-      emit: (event) => {
-        // 開いている文書、公開している版、読めるかどうかが変わったら、indexを合わせる。
-        if (event.type !== 'focus-requested') searching.sync();
-        events.publish(event);
-        // 開いている文書が変わったら、監視するdirectoryと、表示の権限も合わせる。
-        if (event.type === 'catalog-changed') {
-          watcher?.sync();
-          pruneGrants();
-        }
-      },
+      emit,
     });
+    feedback = new FeedbackService({ store: openedStore, documents, emit });
+    const answering = feedback;
     const sessions = createSessionService();
     const startedAt = new Date().toISOString();
     // 開発用のoriginは、sourceから実行しているときだけ受け付ける。配布物では常に無効。
@@ -234,6 +245,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         events,
         render,
         search: searching,
+        feedback: answering,
         previewOrigin,
         webRoot: webRootPath(),
         devOrigin,
@@ -289,6 +301,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       },
       'documents.focus': (params) => documents.focus(params),
       'documents.refresh': (params) => documents.refresh(params),
+      'feedback.create': async (params) => {
+        const result = await answering.create(params);
+        watching.sync();
+        return result;
+      },
+      'feedback.list': (params) => answering.list(params),
+      'feedback.get': (params) => answering.get(params),
+      'feedback.wait': (params) => answering.wait(params),
+      'feedback.ack': (params) => answering.ack(params),
+      'feedback.cancel': (params) => answering.cancel(params, 'agent'),
+      'feedback.forget': (params) => answering.forget(params),
       'watch.list': () => documents.listWatchRules(),
       'watch.remove': async (params) => {
         const result = await documents.removeWatchRule(params);

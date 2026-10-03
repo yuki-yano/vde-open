@@ -1,5 +1,8 @@
 import type {
+  Answers,
   DocumentSummary,
+  FeedbackForUi,
+  FeedbackSubmitParams,
   LinkOpenResult,
   ListResult,
   OutlineItem,
@@ -102,6 +105,18 @@ export interface Api {
     linkId: string,
     confirmation?: string,
   ): Promise<LinkOpenResult>;
+  // 質問（質問定義・回答案・文書の現在の版を含む）。
+  feedback(requestId: string): Promise<FeedbackForUi>;
+  // 回答案を置き換える。もとにした回答案の版を渡す。
+  saveDraft(
+    requestId: string,
+    expectedDraftVersion: number,
+    answers: Answers,
+  ): Promise<{ draftVersion: number }>;
+  // 保存済みの回答案を、回答として確定する。
+  submitFeedback(requestId: string, params: FeedbackSubmitParams): Promise<FeedbackForUi>;
+  // 質問を中止する（確認した後に呼ぶ）。
+  cancelFeedback(requestId: string): Promise<void>;
   // 更新通知を購読する。切断時は間隔を伸ばしながら再接続し、接続のたびにonConnectを呼ぶ。
   events(handlers: { onEvent: (event: ServerEvent) => void; onConnect: () => void }): EventStream;
 }
@@ -202,6 +217,31 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
         { method: 'POST', body: JSON.stringify({ revision, confirmation }) },
       );
       return data;
+    },
+    async feedback(requestId) {
+      return (await request<FeedbackForUi>(`/feedback/${requestId}`)).data;
+    },
+    async saveDraft(requestId, expectedDraftVersion, answers) {
+      return (
+        await request<{ draftVersion: number }>(`/feedback/${requestId}/draft`, {
+          method: 'PUT',
+          body: JSON.stringify({ expectedDraftVersion, answers }),
+        })
+      ).data;
+    },
+    async submitFeedback(requestId, params) {
+      return (
+        await request<FeedbackForUi>(`/feedback/${requestId}/submit`, {
+          method: 'POST',
+          body: JSON.stringify(params),
+        })
+      ).data;
+    },
+    async cancelFeedback(requestId) {
+      await request(`/feedback/${requestId}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ confirmed: true }),
+      });
     },
     events({ onEvent, onConnect }) {
       const controller = new AbortController();

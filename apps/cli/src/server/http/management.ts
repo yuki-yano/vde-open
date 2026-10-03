@@ -8,9 +8,13 @@ import {
   errorEnvelope,
   ExitCode,
   exitCodeForError,
+  feedbackCancelParamsSchema,
   isVdeError,
   LIMITS,
   linkOpenParamsSchema,
+  parseStrictJson,
+  requestIdSchema,
+  StrictJsonError,
   successEnvelope,
   VdeError,
   type ErrorBody,
@@ -23,6 +27,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z, ZodError } from 'zod';
 
 import type { DocumentService, ServiceResult } from '../../documents/service.ts';
+import type { FeedbackService } from '../../feedback/service.ts';
 import type { RenderService } from '../../render/render-service.ts';
 import type { SearchService } from '../../search/search-service.ts';
 import type { EventHub } from '../event-hub.ts';
@@ -70,6 +75,7 @@ export interface ManagementDeps {
   events: EventHub;
   render: RenderService;
   search: SearchService;
+  feedback: FeedbackService;
   // 文書を表示するlistenerのorigin。
   previewOrigin: string;
   // ビルド済みUIのdirectory。無ければUIは配信しない。
@@ -390,6 +396,52 @@ export async function startManagementServer(
         ...(maxBytes === undefined ? {} : { maxBytes: integerQuery.parse(maxBytes) }),
         ...(cursor === undefined ? {} : { cursor }),
       }),
+    );
+  });
+
+  // 質問の一覧。回答案は含めない。
+  api.get('/feedback', (c) => {
+    const status = c.req.query('status');
+    return ok(c, 'feedback.list', deps.feedback.list(status === undefined ? {} : { status }));
+  });
+
+  // 管理UI向けの質問。質問定義と回答案、文書の現在の版を含む。
+  api.get('/feedback/:id', (c) =>
+    ok(c, 'feedback.get', deps.feedback.getForUi(requestIdSchema.parse(c.req.param('id')))),
+  );
+
+  // 回答案を置き換える。重複したkeyを見つけるため、bodyは原文から読む（仕様11.2）。
+  api.put('/feedback/:id/draft', async (c) => {
+    const requestId = requestIdSchema.parse(c.req.param('id'));
+    let body: unknown;
+    try {
+      body = parseStrictJson(await c.req.text());
+    } catch (error) {
+      if (!(error instanceof StrictJsonError)) throw error;
+      throw new VdeError('E_INVALID_ARGUMENT', '回答案をJSONとして読めません。', {
+        reason: error.reason,
+        pointer: error.pointer,
+      });
+    }
+    return ok(c, 'feedback.draft', await deps.feedback.updateDraft(requestId, body));
+  });
+
+  // 保存済みの回答案を、回答として確定する。回答そのものは受け取らない（仕様11.8）。
+  api.post('/feedback/:id/submit', async (c) =>
+    ok(
+      c,
+      'feedback.submit',
+      await deps.feedback.submit(requestIdSchema.parse(c.req.param('id')), await c.req.json()),
+    ),
+  );
+
+  // 管理UIで確認したうえで、質問を中止する。
+  api.post('/feedback/:id/cancel', async (c) => {
+    feedbackCancelParamsSchema.parse(await c.req.json());
+    return ok(
+      c,
+      'feedback.cancel',
+      await deps.feedback.cancel({ requestId: c.req.param('id') }, 'user'),
     );
   });
 

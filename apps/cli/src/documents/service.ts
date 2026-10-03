@@ -41,7 +41,13 @@ import {
 } from '@vde-open/shared';
 
 import { buildManifest, type LoadedAsset } from '../assets/manifest.ts';
-import type { DocumentRecord, RevisionRecord, StatePayload } from '../persistence/state-schema.ts';
+import {
+  pendingRequestIdsOf,
+  pinnedRevisions,
+  type DocumentRecord,
+  type RevisionRecord,
+  type StatePayload,
+} from '../persistence/state-schema.ts';
 import type { StateStore, Transaction } from '../persistence/state-store.ts';
 import type { CursorCodec } from './cursor.ts';
 import {
@@ -66,11 +72,20 @@ export interface ServiceResult<T> {
   warnings: Warning[];
 }
 
-// 変更の通知。IDと版だけを運ぶ（仕様6.5）。
+// 変更の通知。IDと版・状態だけを運ぶ（仕様6.5）。回答の内容は含めない。
 export interface DocumentEvent {
-  type: 'catalog-changed' | 'document-changed' | 'document-status' | 'focus-requested';
+  type:
+    | 'catalog-changed'
+    | 'document-changed'
+    | 'document-status'
+    | 'focus-requested'
+    | 'feedback-changed';
   documentId?: string;
   revision?: string | null;
+  requestId?: string;
+  status?: 'pending' | 'submitted' | 'cancelled';
+  draftVersion?: number;
+  acknowledged?: boolean;
 }
 
 export interface DocumentServiceOptions {
@@ -96,7 +111,7 @@ export interface RefreshOutcome {
 }
 
 interface Incoming {
-  sourceKind: 'file' | 'stdin';
+  sourceKind: 'file' | 'stdin' | 'generated';
   canonicalPath: string | null;
   displayPath: string | null;
   pathSegments: string[];
@@ -192,6 +207,7 @@ export function toSummary(
   record: DocumentRecord,
   order: number,
   searchState: DocumentSummary['searchState'] = 'excluded',
+  pendingRequestIds: string[] = [],
 ): DocumentSummary {
   return {
     documentId: record.documentId,
@@ -207,15 +223,23 @@ export function toSummary(
     openedAt: record.openedAt,
     updatedAt: record.updatedAt,
     order,
-    pendingRequestIds: [],
+    pendingRequestIds,
   };
 }
 
-// 直近2版と、5分以内に作られた版を残す（仕様4.4）。
-function pruneRevisions(revisions: RevisionRecord[], now: number): RevisionRecord[] {
+// 直近2版と、5分以内に作られた版と、質問が固定している版を残す（仕様4.4、11.4）。
+export function pruneRevisions(
+  revisions: RevisionRecord[],
+  now: number,
+  pinned: ReadonlySet<string>,
+): RevisionRecord[] {
   return revisions.filter((entry, index) => {
     const isRecent = index >= revisions.length - LIMITS.retainedRevisions;
-    return isRecent || now - Date.parse(entry.createdAt) < LIMITS.revisionGraceMs;
+    return (
+      isRecent ||
+      pinned.has(entry.revision) ||
+      now - Date.parse(entry.createdAt) < LIMITS.revisionGraceMs
+    );
   });
 }
 
@@ -668,13 +692,7 @@ export class DocumentService {
 
       return {
         data: {
-          documents: touched.map((documentId) =>
-            toSummary(
-              state.documents[documentId] as DocumentRecord,
-              state.openOrder.indexOf(documentId),
-              this.#searchStateOf(documentId),
-            ),
-          ),
+          documents: touched.map((documentId) => this.#summary(state, documentId)),
           watchRules: structuredClone(rules),
           created,
           updated,
@@ -911,7 +929,11 @@ export class DocumentService {
     if (existing.currentRevision !== revision) {
       const kept = existing.revisions.filter((entry) => entry.revision !== revision);
       kept.push(revisionRecord);
-      existing.revisions = pruneRevisions(kept, now.getTime());
+      existing.revisions = pruneRevisions(
+        kept,
+        now.getTime(),
+        pinnedRevisions(state, existing.documentId),
+      );
       existing.currentRevision = revision;
       existing.format = item.format;
       changed = true;
@@ -961,6 +983,16 @@ export class DocumentService {
     };
   }
 
+  // 一覧に出す文書の情報。順番、検索の状態、回答待ちの質問を含める。
+  #summary(state: StatePayload, documentId: string): DocumentSummary {
+    return toSummary(
+      state.documents[documentId] as DocumentRecord,
+      state.openOrder.indexOf(documentId),
+      this.#searchStateOf(documentId),
+      pendingRequestIdsOf(state, documentId),
+    );
+  }
+
   #findExisting(
     state: StatePayload,
     item: Incoming,
@@ -995,13 +1027,7 @@ export class DocumentService {
     const next = offset + page.length;
     return {
       data: {
-        documents: page.map((documentId, index) =>
-          toSummary(
-            state.documents[documentId] as DocumentRecord,
-            offset + index,
-            this.#searchStateOf(documentId),
-          ),
-        ),
+        documents: page.map((documentId) => this.#summary(state, documentId)),
         totalDocuments: state.openOrder.length,
         nextCursor:
           next < state.openOrder.length
@@ -1377,8 +1403,10 @@ export class DocumentService {
       canonicalTargets.set(target, await canonicalizePath(resolve(params.cwd, target)));
     }
     let changed = false;
+    const cancelled: DocumentEvent[] = [];
     const result = await this.#store.transaction((tx) => {
       const state = tx.state;
+      const timestamp = this.#now().toISOString();
       const records = params.all
         ? state.openOrder.map((documentId) => state.documents[documentId] as DocumentRecord)
         : params.targets.map((target) => this.#resolveTarget(state, target, canonicalTargets));
@@ -1407,6 +1435,19 @@ export class DocumentService {
           }
         }
       }
+      // 閉じた文書の回答待ちの質問は、同じcommitで中止にする（仕様7.3）。送信済みの回答は残す。
+      for (const request of Object.values(state.feedbackRequests)) {
+        if (request.status !== 'pending' || !closed.includes(request.documentId)) continue;
+        request.status = 'cancelled';
+        request.cancellation = { cancelledAt: timestamp, reason: 'document_closed' };
+        request.updatedAt = timestamp;
+        cancelled.push({
+          type: 'feedback-changed',
+          requestId: request.requestId,
+          documentId: request.documentId,
+          status: 'cancelled',
+        });
+      }
       if (closed.length > 0) {
         state.openOrder = state.openOrder.filter((documentId) => !closed.includes(documentId));
         if (state.activeDocumentId !== null && closed.includes(state.activeDocumentId)) {
@@ -1428,6 +1469,7 @@ export class DocumentService {
       this.#openEpochs.set(documentId, this.openEpoch(documentId) + 1);
     }
     if (changed) this.#emit({ type: 'catalog-changed' });
+    for (const event of cancelled) this.#emit(event);
     return result;
   }
 
@@ -1481,6 +1523,36 @@ export class DocumentService {
     return this.list({ limit: LIMITS.listLimitMax });
   }
 
+  // 質問だけを渡されたときに、質問のtitleと説明を内容とする文書を作る（仕様11.1）。
+  // 呼び出し側のtransactionの中で作り、同じcommitで質問を作る。文書の通知は呼び出し側が出す。
+  createGenerated(tx: Transaction, input: { title: string; text: string }): string {
+    const outcome = this.#upsert(
+      tx,
+      {
+        sourceKind: 'generated',
+        canonicalPath: null,
+        displayPath: null,
+        pathSegments: [],
+        format: 'markdown',
+        bytes: Buffer.from(input.text, 'utf8'),
+        text: input.text,
+        fallbackTitle: input.title,
+        signature: null,
+        assetsRoot: null,
+        extraAssets: [],
+        documentLogicalPath: 'index.md',
+        assets: [],
+        trackedFiles: [],
+        assetScanFailed: false,
+      },
+      { title: input.title, reopen: true },
+    );
+    assertOpenLimits(tx.state);
+    tx.state.catalogVersion += 1;
+    tx.state.activeDocumentId ??= outcome.documentId;
+    return outcome.documentId;
+  }
+
   // 明示的なUI選択の通知。文書は再登録しない（仕様5.5）。
   async focus(rawParams: unknown): Promise<ServiceResult<{ documentId: string }>> {
     const documentId = documentIdSchema.parse((rawParams as { documentId?: unknown }).documentId);
@@ -1509,15 +1581,7 @@ export class DocumentService {
       data: {
         documents: targets.flatMap((documentId) => {
           const record = state.documents[documentId];
-          return record?.isOpen
-            ? [
-                toSummary(
-                  record,
-                  state.openOrder.indexOf(documentId),
-                  this.#searchStateOf(documentId),
-                ),
-              ]
-            : [];
+          return record?.isOpen ? [this.#summary(state, documentId)] : [];
         }),
         changed,
       },

@@ -16,6 +16,8 @@ export interface IpcConnectOptions {
   socketPath: string;
   key: Buffer;
   timeoutMs?: number;
+  // 中断されたら、接続の確認を待たずに失敗させ、socketとtimerを片付ける。
+  signal?: AbortSignal;
 }
 
 export interface IpcRequestOptions {
@@ -66,6 +68,8 @@ export function connectIpc(options: IpcConnectOptions): Promise<IpcConnection> {
       if (phase !== 'ready') reject(error);
       phase = 'closed';
       clearTimeout(timer);
+      // 同じsignalで接続し直すことがあるので、失敗した接続のlistenerを残さない。
+      options.signal?.removeEventListener('abort', onAbort);
       rejectPending(error);
       socket.destroy();
     };
@@ -73,6 +77,12 @@ export function connectIpc(options: IpcConnectOptions): Promise<IpcConnection> {
     const timer = setTimeout(() => {
       failAll(unavailable('daemonとの接続確認が時間内に終わりませんでした。'));
     }, options.timeoutMs ?? HANDSHAKE_TIMEOUT_MS);
+    // 中断は、接続を確認し終えるまでだけ受け付ける。確認した後は、呼び出し側がcloseする。
+    const onAbort = () => {
+      if (phase !== 'ready') failAll(unavailable('daemonへの接続を中断しました。'));
+    };
+    if (options.signal?.aborted) onAbort();
+    else options.signal?.addEventListener('abort', onAbort, { once: true });
 
     const connection: IpcConnection = {
       get daemonId() {
@@ -158,6 +168,7 @@ export function connectIpc(options: IpcConnectOptions): Promise<IpcConnection> {
         }
         phase = 'ready';
         clearTimeout(timer);
+        options.signal?.removeEventListener('abort', onAbort);
         resolve(connection);
         return;
       }

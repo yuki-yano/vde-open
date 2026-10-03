@@ -27,14 +27,22 @@ const STOP_TIMEOUT_MS = 10_000;
 const POLL_INTERVAL_MS = 50;
 const LOCKED_RETRY_MS = 3000;
 
+// 接続の処理を途中でやめるための合図。中断されたら、起動の待ちと接続の確認をやめ、timerも片付ける
+// （起動を始めたdaemonは、そのまま起動を続ける）。
+export interface ConnectOptions {
+  signal?: AbortSignal;
+}
+
 export interface DaemonControl {
   readonly stateRoot: string;
   // 起動中のdaemonへ接続する。起動していなければnull。新しくは起動しない。
-  connectExisting(): Promise<IpcConnection | null>;
+  connectExisting(options?: ConnectOptions): Promise<IpcConnection | null>;
   // 接続し、なければ起動してから接続する。
-  ensure(): Promise<IpcConnection>;
+  ensure(options?: ConnectOptions): Promise<IpcConnection>;
   // ensureと同じ。この呼び出しでdaemonを新しく起動したかも返す。
-  ensureDetailed(): Promise<{ connection: IpcConnection; started: boolean }>;
+  ensureDetailed(
+    options?: ConnectOptions,
+  ): Promise<{ connection: IpcConnection; started: boolean }>;
   stop(): Promise<{ wasRunning: boolean }>;
   stoppedStatus(): DaemonStatus;
 }
@@ -43,7 +51,10 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
   const stateRoot = resolveStateRoot(environment);
   const secure = { uid: environment.uid, platform: environment.platform };
 
-  const connectExisting = async (): Promise<IpcConnection | null> => {
+  const connectExisting = async ({
+    signal,
+  }: ConnectOptions = {}): Promise<IpcConnection | null> => {
+    signal?.throwIfAborted();
     // 安全でないstate rootは、既存のdaemonへ接続するときも拒否する。
     if (!(await requirePrivateDirectoryIfExists(stateRoot, secure))) return null;
     const pointer = await readPointer(stateRoot);
@@ -53,15 +64,20 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
     const key = await readIpcKey(pointer.keyPath);
     if (!key) return null;
     try {
-      return await connectIpc({ socketPath: pointer.socketPath, key });
+      return await connectIpc({
+        socketPath: pointer.socketPath,
+        key,
+        ...(signal === undefined ? {} : { signal }),
+      });
     } catch (error) {
+      signal?.throwIfAborted();
       // 接続できないだけなら「起動していない」。相手を確認できない場合はerrorにする。
       if (error instanceof VdeError && error.code === 'E_DAEMON_UNAVAILABLE') return null;
       throw error;
     }
   };
 
-  const spawnDaemon = (): Promise<void> =>
+  const spawnDaemon = (signal: AbortSignal | undefined): Promise<void> =>
     new Promise<void>((resolve, reject) => {
       const child = spawn(process.execPath, [daemonEntryPath()], {
         detached: true,
@@ -70,15 +86,20 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
         windowsHide: true,
       });
       let settled = false;
-      const settle = (error?: VdeError) => {
+      const settle = (error?: Error) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
         if (child.connected) child.disconnect();
         child.unref();
         if (error) reject(error);
         else resolve();
       };
+      // 中断されたら、起動の完了を待たない。daemonは起動を続け、次の接続で使われる。
+      const onAbort = () =>
+        settle(signal?.reason instanceof Error ? signal.reason : new Error('aborted'));
+      signal?.addEventListener('abort', onAbort, { once: true });
       const logPath = join(stateRoot, 'logs', 'daemon.jsonl');
       const timer = setTimeout(() => {
         settle(
@@ -119,10 +140,14 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
           }),
         );
       });
+      if (signal?.aborted) onAbort();
     });
 
-  const ensureDetailed = async (): Promise<{ connection: IpcConnection; started: boolean }> => {
-    const existing = await connectExisting();
+  const ensureDetailed = async (
+    options: ConnectOptions = {},
+  ): Promise<{ connection: IpcConnection; started: boolean }> => {
+    const { signal } = options;
+    const existing = await connectExisting(options);
     if (existing) return { connection: existing, started: false };
 
     await ensurePrivateDirectory(stateRoot, secure);
@@ -131,6 +156,7 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
 
     // 起動lockを取る。取れない間は、先に起動したprocessのdaemonへ接続できるか確かめる。
     for (;;) {
+      signal?.throwIfAborted();
       const outcome = await acquireLock(
         stateRoot,
         START_LOCK_NAME,
@@ -138,7 +164,7 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
         systemProcessProbe,
       );
       if (outcome.acquired) break;
-      const connection = await connectExisting();
+      const connection = await connectExisting(options);
       if (connection) return { connection, started: false };
       if (Date.now() > deadline) {
         throw new VdeError(
@@ -147,27 +173,27 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
           { reason: 'start-lock-timeout' },
         );
       }
-      await delay(POLL_INTERVAL_MS);
+      await delay(POLL_INTERVAL_MS, undefined, { signal });
     }
 
     try {
       // lockを取るまでの間に、別のprocessが起動を終えているかもしれない。
-      const already = await connectExisting();
+      const already = await connectExisting(options);
       if (already) return { connection: already, started: false };
       try {
-        await spawnDaemon();
+        await spawnDaemon(signal);
       } catch (error) {
         // 別のdaemonが先にlockを取っていた場合は、そのdaemonの準備が終わるのを待つ。
         if (!(error instanceof VdeError) || error.code !== 'E_DAEMON_LOCKED') throw error;
         const waitUntil = Date.now() + LOCKED_RETRY_MS;
         for (;;) {
-          const other = await connectExisting();
+          const other = await connectExisting(options);
           if (other) return { connection: other, started: false };
           if (Date.now() > waitUntil) throw error;
-          await delay(POLL_INTERVAL_MS);
+          await delay(POLL_INTERVAL_MS, undefined, { signal });
         }
       }
-      const connection = await connectExisting();
+      const connection = await connectExisting(options);
       if (!connection) {
         throw new VdeError('E_DAEMON_START_FAILED', '起動したdaemonへ接続できませんでした。', {
           log: join(stateRoot, 'logs', 'daemon.jsonl'),
@@ -179,7 +205,8 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
     }
   };
 
-  const ensure = async (): Promise<IpcConnection> => (await ensureDetailed()).connection;
+  const ensure = async (options: ConnectOptions = {}): Promise<IpcConnection> =>
+    (await ensureDetailed(options)).connection;
 
   const stop = async (): Promise<{ wasRunning: boolean }> => {
     const connection = await connectExisting();

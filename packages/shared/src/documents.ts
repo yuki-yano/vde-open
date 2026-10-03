@@ -221,12 +221,18 @@ export const serverEventSchema = z.strictObject({
     'focus-requested',
     'daemon-stopping',
     'resync-required',
+    'feedback-changed',
   ]),
   daemonId: z.string(),
   sequence: z.number().int().nonnegative(),
   catalogVersion: z.number().int().nonnegative(),
   documentId: documentIdSchema.optional(),
   revision: revisionSchema.nullable().optional(),
+  // 質問の変更の通知は、質問のIDと状態だけを運ぶ（回答の内容は含めない）。
+  requestId: z.string().optional(),
+  status: z.enum(['pending', 'submitted', 'cancelled']).optional(),
+  draftVersion: z.number().int().nonnegative().optional(),
+  acknowledged: z.boolean().optional(),
 });
 export type ServerEvent = z.infer<typeof serverEventSchema>;
 

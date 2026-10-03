@@ -2,9 +2,9 @@ import type { DocumentSummary, ServerEvent } from '@vde-open/shared';
 import { Monitor, Moon, Sun } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 
+import { DocumentWorkspace } from '@/components/document-workspace';
 import { Sidebar } from '@/components/sidebar';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { Viewer } from '@/components/viewer';
 import { createApi, establishSession, forgetSession, type Api } from '@/lib/api';
 import {
   isSidebarView,
@@ -36,7 +36,7 @@ function useTheme(): [Theme, (theme: Theme) => void] {
   return [theme, setTheme];
 }
 
-function Workspace({ api }: { api: Api }) {
+export function Workspace({ api }: { api: Api }) {
   // 一覧と、その一覧を取得した時点のcatalogVersion。並べ替えの保存で前提として渡す。
   const [catalog, setCatalog] = useState<{ documents: DocumentSummary[]; version: number }>({
     documents: [],
@@ -57,6 +57,8 @@ function Workspace({ api }: { api: Api }) {
   const [width, setWidth] = usePreference<number>('sidebar-width', SIDEBAR_DEFAULT, isWidth);
   const [theme, setTheme] = useTheme();
   const lastEvent = useRef<{ daemonId: string; sequence: number } | null>(null);
+  // 質問の変更の通知を受け取った回数。回答panelは、これが変わるたびに質問を取り直す。
+  const [feedbackSignal, setFeedbackSignal] = useState(0);
 
   // 一覧をdaemonから取り直す。表示中の文書は、閉じられた場合だけ切り替える。
   const fetchList = useCallback(async () => {
@@ -93,12 +95,18 @@ function Workspace({ api }: { api: Api }) {
       const gap =
         previous !== null &&
         (previous.daemonId !== event.daemonId || event.sequence > previous.sequence + 1);
+      // 質問は、変更の通知のほか、通知が欠けたかもしれないときにも取り直す。
+      if (event.type === 'feedback-changed' || event.type === 'resync-required' || gap) {
+        setFeedbackSignal((value) => value + 1);
+      }
       if (event.type !== 'hello' || gap) void load();
     };
     const stream = api.events({
       onEvent,
+      // 接続し直した後は、切れていた間の変更を取り込むため、一覧と質問を取り直す。
       onConnect: () => {
         setNotice(null);
+        setFeedbackSignal((value) => value + 1);
         void load();
       },
     });
@@ -183,7 +191,12 @@ function Workspace({ api }: { api: Api }) {
           onPointerDown={startResize}
         />
         {active ? (
-          <Viewer key={active.documentId} api={api} document={active} />
+          <DocumentWorkspace
+            key={active.documentId}
+            api={api}
+            document={active}
+            feedbackSignal={feedbackSignal}
+          />
         ) : (
           <main className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
             左の一覧から文書を選ぶと、ここに表示します。

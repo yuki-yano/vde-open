@@ -17,7 +17,7 @@
 | P2 | 完了報告済み | 文書追加とatomic saveが実UIへ反映。raw HTMLが動かない。未認証では管理APIを読めない |
 | P3 | 完了報告済み | security fixture、path traversal、他文書/API遮断 |
 | P4 | 完了報告済み | Agent検索benchmark fixtureと閉じた文書除外 |
-| P5 | 未着手 | 保存前成功なし、タイムアウト・restart・二重送信テスト |
+| P5 | 完了報告済み | 保存前成功なし、タイムアウト・restart・二重送信テスト |
 | P6 | 未着手 | HTML回答案→本体確認→CLI取得、偽submit拒否 |
 | P7 | 未着手 | 全必須受け入れ項目、最終実行結果、制約の説明 |
 
@@ -267,6 +267,50 @@ P4時点の制約:
 - 100文書・1,000文書での所要時間とmemoryは、P7で測る。
 - Windowsは未検証。
 
+## P5の記録
+
+実行環境: macOS（Darwin 25.6.0、arm64）、Node.js 24.21.0、pnpm 12.8.1、Chromium（Playwright 1.63.0同梱のChrome Headless Shell 153）。
+
+| command | 結果 |
+|---|---|
+| `pnpm format:check` | exit 0 |
+| `pnpm lint` | exit 0 |
+| `pnpm typecheck` | exit 0 |
+| `pnpm test` | exit 0（51 files、455 tests） |
+| `pnpm build` | exit 0 |
+| `pnpm test:pack` | exit 0（手順6に、導入先だけで質問の作成と取得が動くことの確認を追加） |
+| `pnpm test:e2e` | exit 0（Chromiumで21件） |
+
+実装したもの:
+
+- 質問定義と回答の契約（`packages/shared/src/feedback.ts`）。重複したkeyと`__proto__`を拒否するJSONの読み込み（`packages/shared/src/strict-json.ts`）。同梱のmeta-schema（`packages/shared/schemas/questionnaire.schema.json`）とのcontract test。
+- 質問と回答（`apps/cli/src/feedback/service.ts`、ADR-0011）。作成（文書へ・文書を開いて・質問だけ）、Agent向けの取得（回答案を返さない）、待機、取得済みの印、中止、終わった質問の削除。管理UI向けの取得・回答案の保存・送信。
+- stateに質問と回答を保存する。質問が固定した版は、文書の版の整理から外す。文書を閉じると、同じcommitで回答待ちの質問を中止する。
+- CLI。`ask`、`feedback list|get|wait|ack|cancel|forget`。`wait`は、daemonの停止・再起動の間も最初の期限まで接続し直す。
+- 管理API。`GET /feedback`、`GET /feedback/:id`、`PUT /feedback/:id/draft`、`POST /feedback/:id/submit`、`POST /feedback/:id/cancel`。通知`feedback-changed`。
+- 管理UI。回答panel（native form、回答案の自動保存、回答の要約、送信、中止、旧版への回答の確認）。回答待ちの間は質問の版を表示する。一覧に「回答待ち」を表示する。
+- `docs/agent-usage.md`に、質問と回答の使い方と、秘密の入力に使わないことを追記。
+
+レビュー: 1往復目でmust-fix 4件とshould-fix 3件、2往復目でmust-fix 2件とshould-fix 1件、3往復目でshould-fix 1件（判定はマージ可）。すべて修正した。3往復目の指摘への対応は、P6のレビューで確認を受ける。以下は1往復目から順に、各往復の内容。
+
+- 回答案の自動保存が成功した直後、まだ再取得していない古い質問の状態を「別の画面の更新」と扱い、入力と版を保存前へ戻していた → 保存した回答と版を組で覚え、それより古い取得結果は使わないようにした（版は増えるだけ）。保存の途中の入力は、未保存のまま残して続けて保存する。
+- 回答待ちの間でも「更新を止める」が質問の版より優先され、押すと表示が現在の版へ変わった → 質問の版を最優先にし、回答待ちの間は「更新を止める」を操作できないようにした。
+- 旧版への回答の確認をbooleanで持ち、確認した後に版がさらに変わっても、新しい版を確認済みとして送っていた → 確認したときの文書の版を覚え、現在の版と一致するときだけ確認済みとし、送信にもその版を使うようにした。
+- `feedback wait`の期限が接続（daemonの起動）にかかる時間を含まず、接続の待ちも期限で打ち切っていなかった → 待機を`apps/cli/src/cli/wait-for-answer.ts`へ分け、接続・再接続・応答の待ちを、開始時に決めた期限で打ち切るようにした。daemonへは接続後の残り時間を渡す。期限の後に成立した接続は閉じる。
+- （should-fix）通知の再接続・連番の欠け・`resync-required`で、一覧だけを取り直し、表示中の質問を取り直していなかった → どの場合も質問も取り直すようにした。
+- （should-fix）空の文字列と空の配列を一律に未入力として扱い、schemaが許す空の回答（必須で`minLength`がない文字列、`minItems`が0の配列）を送れなかった。選択肢の空の文字列も、未選択と取り違えていた → 空の回答が有効な必須のfieldには「空欄のまま回答する」「どれも選ばずに回答する」の欄を出し、未入力と区別するようにした。選択肢は位置で指す。
+- （should-fix）SYS-009は例外で止めて後始末を通っていた。FB-013は通信の切断を起こしていなかった。SYS-014は質問の文書ではない文書を閉じていた → 子processを、送信のcommitのfile操作ごとにkillする試験、commitの途中で管理APIの接続を切って同じ送信IDで再送する試験、質問の文書のcloseと送信を同時に行う試験を追加した。
+- （2往復目）`feedback wait`の待機は期限で打ち切っていたが、打ち切った後もdaemonの起動の待ち（起動lockの待ち、起動完了の待ち）が動き続け、CLIのprocessが約10秒残った → 中断の合図（`AbortSignal`）を、daemonへの接続処理（`ensure`、`connectIpc`、起動の待ち、再接続の間隔）まで渡し、待機を終えたら止めるようにした。起動lockを別のprocessが持つ状態で、CLIのprocessが期限の直後に終わることを、実際の子processで確かめる。
+- （2往復目）別の画面で回答が確定したとき、この画面の未保存の入力を、送信済みの回答のように表示していた → 確定・中止した質問は、serverの内容（確定した回答、なければ保存済みの回答案）を表示するようにした。
+- （2往復目、should-fix）SYS-009の試験は送信だけで、送信は新しいblobを作らないため、blobの作成の直後でのkillを試していなかった → 質問だけの質問の作成（質問の文書のblobを同じcommitで作る）でも、file操作ごとにkillする試験を追加した。blobのrenameの直後（directoryのsyncの前）でkillした場合を明示的に確かめる。
+- （3往復目、should-fix）IPCの接続に失敗したとき（接続の拒否、確認の期限切れ、認証の失敗）に、中断の合図のlistenerが残り、同じ合図で接続し直すたびに増えていた。中断済みの合図で呼んだときも、失敗の後にlistenerを登録していた → 接続の失敗でもlistenerを外し、中断済みなら登録しないようにした。
+
+P5時点の制約:
+
+- HTMLの中からの回答（interactiveの表示とSDK）は未実装。P6で実装する。`POST /feedback/:id/render-grants`もP6。
+- `--view`は、文書を開くcommitと質問を作るcommitが別（ADR-0011）。
+- Windowsは未検証。
+
 ## 受け入れテストの対応
 
 状態は「未着手／PASS／FAIL／NOT RUN」。担当は、そのIDが最後に必要とする機能がそろうフェーズ。IDをPASSにするのは担当フェーズで全条件を検証したときだけで、先行フェーズで一部だけ検証したものは備考に部分検証として書く。
@@ -291,19 +335,19 @@ P4時点の制約:
 | CLI-016 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | SYS-001 | P1 | PASS | `tests/integration/daemon.test.ts` |  |
 | SYS-002 | P2 | PASS | `tests/integration/browser.test.ts` | 既定のbrowser起動は、stdoutが端末である条件をCLIへ直接渡して検証（子processでは端末を再現できないため） |
-| SYS-003 | P5 | 未着手 |  | P1・P2で部分検証済み（再起動後に文書ID・順序、監視ruleと「閉じた文書を復帰させない」扱いを復元）。質問・回答はP5で追加 |
+| SYS-003 | P5 | PASS | `tests/integration/feedback.test.ts`（再起動後も質問と回答が残る）、`tests/integration/daemon.test.ts` | 再起動の前のtokenが使えないことも確認 |
 | SYS-004 | P1 | PASS | `apps/cli/src/server/ipc.test.ts` |  |
 | SYS-005 | P1 | PASS | `apps/cli/src/server/ipc.test.ts` |  |
 | SYS-006 | P1 | PASS | `tests/integration/daemon.test.ts`、`apps/cli/src/daemon/lock.test.ts` |  |
 | SYS-007 | P1 | PASS | `tests/integration/daemon.test.ts`、`apps/cli/src/daemon/lock.test.ts` |  |
 | SYS-008 | P1 | PASS | `tests/integration/daemon.test.ts`、`apps/cli/src/daemon/secure-dir.test.ts` | Unixで検証。WindowsはDACLを検証しておらず、種別の確認だけ（実機では未検証） |
-| SYS-009 | P5 | 未着手 |  | P1で部分検証済み（`apps/cli/src/persistence/state-store.test.ts`: commit途中のどのfile操作で止まっても、復元後は旧か新の整合したstate）。P5で回答のsubmitを含むcaseを足して完了 |
+| SYS-009 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`（commitの途中でのprocessの停止）、`apps/cli/src/persistence/state-store.test.ts` | 子processで、送信と、質問だけの質問の作成を行い、commitのfile操作ごとに、その直前で後始末をせずにkillする。送信はmetadataのrenameとdirectoryのsyncの前後、作成はblobの作成の直後（blobのrenameの後、directoryのsyncの前）も含む。復元後は旧か新の整合したstateで、半分だけ確定した回答や、blobのない質問はない |
 | SYS-010 | P1 | PASS | `apps/cli/src/persistence/state-store.test.ts`、`apps/cli/src/daemon/main.test.ts` |  |
 | SYS-011 | P1 | PASS | `tests/integration/daemon.test.ts`、`apps/cli/src/persistence/state-store.test.ts` |  |
 | SYS-012 | P1 | PASS | `tests/integration/daemon.test.ts` |  |
-| SYS-013 | P5 | 未着手 |  | P2で部分検証済み（`tests/integration/http.test.ts`: SSEのhello・変更通知・停止通知、本文を含まない）。waitはP5 |
-| SYS-014 | P5 | 未着手 |  |  |
-| SYS-015 | P5 | 未着手 |  |  |
+| SYS-013 | P5 | PASS | `tests/integration/feedback.test.ts`（daemonの停止・再起動と待機）、`apps/cli/src/cli/wait-for-answer.test.ts`、`tests/integration/http.test.ts`（SSE）、`apps/web/src/components/workspace.dom.test.tsx` | 待機は最初の期限の範囲で接続し直す。接続にかかる時間も期限に含め、期限は延ばさない。期限の後に起動の待ちが残らず、CLIのprocessが期限の直後に終わる（起動lockを別のprocessが持つ状態で計測）。管理UIは再接続・連番の欠けで一覧と質問を取り直す |
+| SYS-014 | P5 | PASS | `tests/integration/feedback.test.ts`（同時の操作） | 回答案の保存・2つの送信・並べ替え・closeを同時に実行し、送信は1回だけ、再起動後も整合。質問の文書のcloseと送信を、順番を入れ替えて同時に実行し、確定か中止（`document_closed`）のどちらか一方だけになる |
+| SYS-015 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`（保存容量の上限と固定した版） | 上限は試験用に小さくした（`StateStore`の`blobStoreBytes`） |
 | SYS-016 | P1 | PASS | `tests/integration/daemon.test.ts` |  |
 | DOC-001 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | DOC-002 | P1 | PASS | `tests/integration/documents.test.ts` |  |
@@ -320,7 +364,7 @@ P4時点の制約:
 | DOC-013 | P2 | PASS | `tests/e2e/workspace.spec.ts` |  |
 | DOC-014 | P2 | PASS | `tests/e2e/workspace.spec.ts`、`tests/e2e/viewer.spec.ts` |  |
 | DOC-015 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| DOC-016 | P5 | 未着手 |  | P1・P2で部分検証済み（close --allで文書と監視ruleをすべて外す）。回答履歴はP5 |
+| DOC-016 | P5 | PASS | `tests/integration/feedback.test.ts`（close --all）、`tests/integration/watch.test.ts` | 回答の履歴と原本は残り、回答待ちは中止になる |
 | SRCH-001 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-index.test.ts` |  |
 | SRCH-002 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-index.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
 | SRCH-003 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`、`apps/cli/src/search/tokenize.test.ts`、`tests/integration/search.test.ts` |  |
@@ -360,30 +404,30 @@ P4時点の制約:
 | SEC-015 | P3 | PASS | `tests/integration/preview.test.ts`、`apps/cli/src/render/render-service.test.ts`、`apps/web/src/lib/use-render-grant.dom.test.tsx`、`tests/e2e/html.spec.ts` | UIが権限を返す順序についての最後の修正は、commit後の再レビューで指摘なし |
 | SEC-016 | P3 | PASS | `tests/integration/preview.test.ts` |  |
 | SEC-017 | P3 | PASS | `tests/integration/preview.test.ts` |  |
-| SEC-018 | P5 | 未着手 |  | P1〜P3で部分検証済み（`tests/integration/daemon.test.ts`: logに本文・title・path・keyがない。`tests/integration/preview.test.ts`: 表示の権限と表示用URLのpathがない）。回答とdraftを含む操作はP5 |
+| SEC-018 | P5 | PASS | `tests/integration/feedback.test.ts`（log）、`tests/integration/daemon.test.ts`、`tests/integration/preview.test.ts`、`tests/integration/http.test.ts` | 回答・回答案・質問のtitle・tokenがlogにない |
 | SEC-019 | P3 | PASS | `tests/integration/preview.test.ts`、`tests/e2e/html.spec.ts` |  |
 | SEC-020 | P3 | PASS | `tests/e2e/release.spec.ts` | 配布物（`apps/cli/dist`）を対象に確認 |
-| FB-001 | P5 | 未着手 |  |  |
-| FB-002 | P5 | 未着手 |  |  |
-| FB-003 | P6 | 未着手 |  | draft検証はP5、SDKの最大サイズはP6 |
-| FB-004 | P5 | 未着手 |  |  |
-| FB-005 | P5 | 未着手 |  |  |
-| FB-006 | P5 | 未着手 |  |  |
+| FB-001 | P5 | PASS | `tests/e2e/feedback.spec.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx` | 回答案の保存の応答と再取得の順番、空の回答の明示 |
+| FB-002 | P5 | PASS | `packages/shared/src/feedback.test.ts`、`apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` | Zodのrecordが`__proto__`を黙って捨てるので、JSONの読み込みで拒否する（ADR-0011） |
+| FB-003 | P6 | 未着手 |  | P5で部分検証済み（`packages/shared/src/feedback.test.ts`: 回答案は未完成を許し、型・値・大きさを検証、64KiB）。SDKの最大サイズはP6 |
+| FB-004 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
+| FB-005 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
+| FB-006 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
 | FB-007 | P6 | 未着手 |  |  |
 | FB-008 | P6 | 未着手 |  |  |
 | FB-009 | P6 | 未着手 |  |  |
 | FB-010 | P6 | 未着手 |  |  |
-| FB-011 | P6 | 未着手 |  | 2つのUIの競合はP5、SDKのbaseDraftVersionはP6 |
-| FB-012 | P5 | 未着手 |  |  |
-| FB-013 | P5 | 未着手 |  |  |
-| FB-014 | P5 | 未着手 |  |  |
-| FB-015 | P6 | 未着手 |  |  |
-| FB-016 | P6 | 未着手 |  |  |
-| FB-017 | P5 | 未着手 |  |  |
-| FB-018 | P5 | 未着手 |  |  |
-| FB-019 | P5 | 未着手 |  |  |
-| FB-020 | P5 | 未着手 |  |  |
-| FB-021 | P5 | 未着手 |  |  |
+| FB-011 | P6 | 未着手 |  | P5で部分検証済み（`apps/cli/src/feedback/service.test.ts`: もとにした回答案の版が違えば`E_DRAFT_CONFLICT`、上書きしない）。SDKのbaseDraftVersionはP6 |
+| FB-012 | P5 | PASS | `apps/cli/src/feedback/service.test.ts` |  |
+| FB-013 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`apps/cli/src/server/http/feedback-http.test.ts` | commitの途中で管理APIの接続を切り、同じ送信IDで再送しても1回だけ確定する。保存できなかった送信には成功を返さず、回答待ちのまま |
+| FB-014 | P5 | PASS | `apps/cli/src/feedback/service.test.ts` |  |
+| FB-015 | P6 | 未着手 |  | P5で部分検証済み（`tests/e2e/feedback.spec.ts`、`apps/web/src/components/workspace.dom.test.tsx`: 回答待ちの間は質問の版を表示し続け、更新の停止より優先する。新しい版の警告を出す）。HTMLとSDKはP6 |
+| FB-016 | P6 | 未着手 |  | P5で部分検証済み（`apps/cli/src/feedback/service.test.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx`: 旧版の確認がなければ送信しない、確認後にさらに版が変われば確認し直し、確認した版を送る）。SDKから確認できないことはP6 |
+| FB-017 | P5 | PASS | `tests/integration/feedback.test.ts`、`apps/cli/src/feedback/service.test.ts` | browserを閉じる操作は、管理UIのsessionの終了で確認 |
+| FB-018 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts`、`tests/e2e/feedback.spec.ts` |  |
+| FB-019 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts`、`tests/e2e/feedback.spec.ts` |  |
+| FB-020 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
+| FB-021 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
 | FB-022 | P6 | 未着手 |  |  |
 | UX-001 | P7 | 未着手 |  |  |
 | UX-002 | P7 | 未着手 |  |  |
@@ -401,7 +445,8 @@ P4時点の制約:
 
 ## 引継ぎ事項
 
-- 次はP5（質問schema、draft、submit／wait／ack、pin）。文書の操作は`apps/cli/src/documents/service.ts`、検索は`apps/cli/src/search/`、解析と検索のworkerは`apps/cli/src/workers/`。
+- 次はP6（interactive iframe、限定SDK、MessagePort、旧版確認）。質問と回答は`apps/cli/src/feedback/service.ts`、契約は`packages/shared/src/feedback.ts`、回答panelは`apps/web/src/components/feedback-panel.tsx`。文書の操作は`apps/cli/src/documents/service.ts`、検索は`apps/cli/src/search/`、解析と検索のworkerは`apps/cli/src/workers/`。
+- stateの形式に質問と回答（`feedbackRequests`）を足した。P4までの開発用state（`.dev-home`）は読めないので、消して作り直す。
 - 管理HTTPは`apps/cli/src/server/http/management.ts`、表示用のlistenerは`apps/cli/src/server/http/preview.ts`、UIは`apps/web/src/`、Markdownの描画は`packages/document/src/react.tsx`、HTMLの静的変換は`packages/document/src/html-static.ts`。
 - stateの形式に項目を足した（版ごとのassetと文書の位置、文書ごとのassets-root）。P2までの開発用state（`.dev-home`）は読めないので、消して作り直す。
 - 画面部品のhookは、happy-domの上で実際のReact DOMを動かしてテストできる（file先頭に`// @vitest-environment happy-dom`）。

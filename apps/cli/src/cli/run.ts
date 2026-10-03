@@ -1,3 +1,6 @@
+import { readFile, stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
 import {
   errorEnvelope,
   ExitCode,
@@ -13,6 +16,9 @@ import {
   type DocumentSummary,
   type Envelope,
   type ErrorBody,
+  type FeedbackCreateResult,
+  type FeedbackForAgent,
+  type FeedbackListResult,
   type ListResult,
   type OpenResult,
   type ReadResult,
@@ -32,6 +38,7 @@ import { normalizeArgv } from './argv.ts';
 import { createBrowserLauncher } from './browser.ts';
 import { createDaemonControl, type DaemonControl } from './daemon-control.ts';
 import { escapeContentForTerminal, escapeForTerminal, safeJson } from './output.ts';
+import { waitForAnswer } from './wait-for-answer.ts';
 
 export interface CliIo {
   stdout: (text: string) => void;
@@ -184,6 +191,74 @@ interface SearchOptions {
   maxBytes?: number;
   cursor?: string;
   json: boolean;
+}
+
+interface AskOptions {
+  document?: string;
+  revision?: string;
+  view?: string;
+  htmlMode?: 'static';
+  assetsRoot?: string;
+  asset: string[];
+  operationId?: string;
+  open?: boolean;
+  focus: boolean;
+  json: boolean;
+}
+
+function parseFeedbackStatus(value: string): 'pending' | 'submitted' | 'cancelled' {
+  if (value === 'pending' || value === 'submitted' || value === 'cancelled') return value;
+  throw new InvalidArgumentError('--statusはpending、submitted、cancelledのいずれかです。');
+}
+
+function describeRequest(request: FeedbackForAgent): string {
+  return `${request.requestId}  ${request.status}  ${escapeForTerminal(request.title)}  ${request.documentId}`;
+}
+
+// 回答を表示する。値は利用者が入力した内容なので、端末の制御文字を無害にする。
+function describeAnswers(request: FeedbackForAgent): string {
+  const lines = [describeRequest(request)];
+  if (request.submission) {
+    lines.push(`回答 ${request.submission.submissionId}（${request.submission.submittedAt}）`);
+    for (const [name, value] of Object.entries(request.submission.answers)) {
+      lines.push(
+        `  ${escapeForTerminal(name)}: ${escapeContentForTerminal(JSON.stringify(value))}`,
+      );
+    }
+    if (request.submission.confirmedAgainstOlderRevision) {
+      lines.push('  （新しい版があることを確認したうえで、質問の版に対して回答されました）');
+    }
+  }
+  if (request.cancellation) lines.push(`中止: ${request.cancellation.reason}`);
+  if (request.acknowledgedAt) lines.push(`取得済み: ${request.acknowledgedAt}`);
+  return lines.join('\n');
+}
+
+// 質問定義のfileを読む。大きさは読む前に確かめる。内容の検証はdaemonが行う。
+async function readQuestionnaire(cwd: string, path: string): Promise<string> {
+  const absolute = resolve(cwd, path);
+  let size: number;
+  try {
+    const info = await stat(absolute);
+    if (!info.isFile()) throw new Error('not-file');
+    size = info.size;
+  } catch {
+    throw new VdeError('E_PATH_NOT_FOUND', '質問定義のfileを読めません。', { path });
+  }
+  if (size > LIMITS.questionnaireBytes) {
+    throw new VdeError('E_LIMIT_EXCEEDED', '質問定義が大きすぎます。', {
+      limit: 'questionnaireBytes',
+      max: LIMITS.questionnaireBytes,
+      actual: size,
+    });
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(
+      await readFile(absolute),
+    );
+  } catch {
+    throw new VdeError('E_QUESTIONNAIRE_INVALID', '質問定義をUTF-8として読めません。', { path });
+  }
 }
 
 function parseSearchMode(value: string): 'text' | 'exact' | 'path' {
@@ -634,6 +709,181 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
               `${rule.watchId}  ${rule.kind}  ${escapeForTerminal(rule.pattern ?? rule.root)}${rule.recursive ? '  (再帰)' : ''}`,
           )
           .join('\n');
+
+  const askCommand = program.command('ask');
+  const seenAskFlags = new Set<'open' | 'no-open'>();
+  askCommand.on('option:open', () => seenAskFlags.add('open'));
+  askCommand.on('option:no-open', () => seenAskFlags.add('no-open'));
+  askCommand
+    .description(
+      '人に質問する。回答は管理UIで入力・送信され、`feedback wait`で受け取る。秘密（password・API key）の入力には使わない',
+    )
+    .argument('<questionnaire>', '質問定義のJSON file')
+    .option('--document <documentId>', '開いている文書へ質問する')
+    .option('--revision <revision>', '--documentの、質問する版。指定がなければ現在の版')
+    .option('--view <path>', '文書を開いてから、その版へ質問する')
+    .option('--html-mode <mode>', '--viewで開くHTMLの表示方法。static', parseHtmlMode)
+    .option('--assets-root <dir>', '--viewで開く文書の、local fileを読める範囲')
+    .option(
+      '--asset <path>',
+      '--viewで開く文書の、個別に登録するlocal file（複数回指定できる）',
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .option('--operation-id <uuid>', '再試行で同じ質問を重ねて作らないための識別子')
+    .option('--open', 'browserで管理UIを開く')
+    .option('--no-open', 'browserを開かない')
+    .option('--focus', '質問した文書を表示中の文書にする', false)
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (questionnaire: string, options: AskOptions) => {
+      await execute<FeedbackCreateResult>(
+        'ask',
+        options.json,
+        async () => {
+          if (seenAskFlags.size === 2) {
+            throw new VdeError('E_INVALID_ARGUMENT', '--openと--no-openは同時に指定できません。');
+          }
+          const params = {
+            cwd: context.cwd,
+            questionnaire: await readQuestionnaire(context.cwd, questionnaire),
+            ...(options.document === undefined ? {} : { documentId: options.document }),
+            ...(options.revision === undefined ? {} : { revision: options.revision }),
+            ...(options.view === undefined ? {} : { view: options.view }),
+            ...(options.htmlMode === undefined ? {} : { htmlMode: options.htmlMode }),
+            ...(options.assetsRoot === undefined ? {} : { assetsRoot: options.assetsRoot }),
+            assets: options.asset,
+            ...(options.operationId === undefined ? {} : { operationId: options.operationId }),
+          };
+          const { connection, started } = await control.ensureDetailed();
+          try {
+            const outcome = unwrap(
+              await connection.request<FeedbackCreateResult>('feedback.create', params),
+            );
+            const warnings = [...(outcome.warnings ?? [])];
+            if (options.focus) {
+              await connection.request('documents.focus', {
+                documentId: outcome.data.request.documentId,
+              });
+            }
+            const shouldOpen = options.open ?? (!options.json && context.stdoutIsTty && started);
+            if (shouldOpen) warnings.push(...(await openBrowser(connection)));
+            return { ...outcome, warnings };
+          } finally {
+            connection.close();
+          }
+        },
+        (data) =>
+          `${describeRequest(data.request)}${data.replayed ? '\n（同じoperation IDの質問を返しました）' : ''}`,
+      );
+    });
+
+  // 回答を待つ。daemonが止まったり再起動したりしても、最初に決めた期限まで接続し直して待つ。
+  // 期限を過ぎても、中断しても、質問は回答待ちのまま（仕様11.3）。
+  const feedbackCommand = program
+    .command('feedback')
+    .description('質問の状態と回答を確認する。回答案（送信前の入力）は返さない');
+  feedbackCommand
+    .command('list')
+    .description('質問を一覧する')
+    .option('--status <status>', 'pending、submitted、cancelled', parseFeedbackStatus)
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (options: { status?: string; json: boolean }) => {
+      await execute<FeedbackListResult>(
+        'feedback.list',
+        options.json,
+        () =>
+          viaDaemon(
+            'feedback.list',
+            options.status === undefined ? {} : { status: options.status },
+          ),
+        (data) =>
+          [...data.requests.map(describeRequest), `${String(data.requests.length)}件`].join('\n'),
+      );
+    });
+  feedbackCommand
+    .command('get')
+    .description('質問の状態と、確定した回答を取得する。取得済みの印は付けない')
+    .argument('<requestId>', '質問のID')
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (requestId: string, options: { json: boolean }) => {
+      await execute<FeedbackForAgent>(
+        'feedback.get',
+        options.json,
+        () => viaDaemon('feedback.get', { requestId }),
+        describeAnswers,
+      );
+    });
+  feedbackCommand
+    .command('wait')
+    .description('回答が確定するか、中止されるまで待つ。期限を過ぎても、質問は回答待ちのまま')
+    .argument('<requestId>', '質問のID')
+    .option(
+      '--timeout <seconds>',
+      `待つ秒数（既定${String(LIMITS.feedbackWaitDefaultSeconds)}、最大${String(LIMITS.feedbackWaitMaxSeconds)}）`,
+      parseInteger('--timeout', 1, LIMITS.feedbackWaitMaxSeconds),
+      LIMITS.feedbackWaitDefaultSeconds,
+    )
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (requestId: string, options: { timeout: number; json: boolean }) => {
+      await execute<FeedbackForAgent>(
+        'feedback.wait',
+        options.json,
+        async () =>
+          unwrap(
+            await waitForAnswer({
+              requestId,
+              timeoutMs: options.timeout * 1000,
+              connect: (signal) => control.ensure({ signal }),
+              subscribeInterrupt: (listener) => {
+                process.on('SIGINT', listener);
+                return () => process.off('SIGINT', listener);
+              },
+            }),
+          ),
+        describeAnswers,
+      );
+    });
+  feedbackCommand
+    .command('ack')
+    .description('確定した回答を取得・処理したことを記録する。何度実行しても同じ結果')
+    .argument('<requestId>', '質問のID')
+    .requiredOption('--submission-id <submissionId>', '回答のID（getやwaitの結果）')
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (requestId: string, options: { submissionId: string; json: boolean }) => {
+      await execute<FeedbackForAgent>(
+        'feedback.ack',
+        options.json,
+        () => viaDaemon('feedback.ack', { requestId, submissionId: options.submissionId }),
+        describeAnswers,
+      );
+    });
+  feedbackCommand
+    .command('cancel')
+    .description('回答待ちの質問を中止する')
+    .argument('<requestId>', '質問のID')
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (requestId: string, options: { json: boolean }) => {
+      await execute<FeedbackForAgent>(
+        'feedback.cancel',
+        options.json,
+        () => viaDaemon('feedback.cancel', { requestId }),
+        describeAnswers,
+      );
+    });
+  feedbackCommand
+    .command('forget')
+    .description('終わった質問の記録を消す。回答待ちの質問は消せない。原本と文書は消さない')
+    .argument('<requestId>', '質問のID')
+    .option('--yes', '消すことを確認する', false)
+    .option('--json', '結果をJSONで出力する', false)
+    .action(async (requestId: string, options: { yes: boolean; json: boolean }) => {
+      await execute<{ requestId: string; forgotten: boolean }>(
+        'feedback.forget',
+        options.json,
+        () => viaDaemon('feedback.forget', { requestId, confirmed: options.yes }),
+        (data) => `${data.requestId}  消しました`,
+      );
+    });
 
   const watchCommand = program.command('watch').description('監視ruleを確認・解除する');
   watchCommand
