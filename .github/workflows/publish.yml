@@ -22,9 +22,9 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: jdx/mise-action@v5
       - run: pnpm install --frozen-lockfile
       - name: Check that the tag matches the package version
         run: |
