@@ -16,6 +16,14 @@ const cli = `${repoRoot}apps/cli/src/cli.ts`;
 // Leftovers of removed features (work groups, tags, and target selection).
 const REMOVED = /--target|--tag|--group|\btags?\b|\bgroups?\b/i;
 
+// The release steps for maintainers mention git tags, which are unrelated to the removed tag feature.
+function withoutSection(text: string, heading: string): string {
+  const start = text.indexOf(heading);
+  if (start === -1) return text;
+  const next = text.indexOf('\n## ', start + heading.length);
+  return text.slice(0, start) + (next === -1 ? '' : text.slice(next));
+}
+
 function help(args: string[]): string {
   return execFileSync(process.execPath, [cli, ...args, '--help'], {
     encoding: 'utf8',
@@ -53,7 +61,13 @@ describe('UX-007 README and help', () => {
   });
 
   it('the README, agent documents, skill, and help have no leftovers of removed features', () => {
-    for (const text of [readme, readmeJa, agentUsage, agentUsageJa, skill]) {
+    for (const text of [
+      withoutSection(readme, '## Releasing'),
+      withoutSection(readmeJa, '## 公開の手順'),
+      agentUsage,
+      agentUsageJa,
+      skill,
+    ]) {
       expect(text).not.toMatch(REMOVED);
     }
     for (const args of [[], ['open'], ['search'], ['read'], ['ask'], ['feedback'], ['daemon']]) {

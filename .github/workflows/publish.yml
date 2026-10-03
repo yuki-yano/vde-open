@@ -1,0 +1,44 @@
+# Publish to npm with trusted publishing (GitHub Actions OIDC) when a version tag is pushed.
+# The trusted publisher on npmjs.com is configured for this file name (publish.yml).
+name: publish
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: jdx/mise-action@v2
+      - run: pnpm install --frozen-lockfile
+      - name: Check that the tag matches the package version
+        run: |
+          version="$(node -p "require('./apps/cli/package.json').version")"
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match apps/cli/package.json version ${version}" >&2
+            exit 1
+          fi
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm test:pack
+      # npm 11.5.1 or later publishes with the OIDC token and adds provenance automatically.
+      - name: Publish
+        run: npm publish "./artifacts/vde-open-${GITHUB_REF_NAME#v}.tgz" --access public

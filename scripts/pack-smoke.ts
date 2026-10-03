@@ -94,9 +94,23 @@ function packTarball(): string {
     cwd: repoRoot,
   });
   const packed = JSON.parse(manifest.stdout) as {
+    private?: boolean;
+    license?: string;
+    repository?: { url?: string };
+    bin?: Record<string, string>;
     scripts?: Record<string, string>;
     dependencies?: Record<string, string>;
   };
+  // Publishable to npm with provenance: not private, MIT, the repository URL matches the GitHub
+  // repository that runs the publish workflow, and both command names are installed.
+  if (packed.private === true) fail('the packed package.json is private');
+  if (packed.license !== 'MIT') fail(`the packed license is ${String(packed.license)}`);
+  if (packed.repository?.url !== 'git+https://github.com/yuki-yano/vde-open.git') {
+    fail(`the packed repository URL is ${String(packed.repository?.url)}`);
+  }
+  if (packed.bin?.['vde-open'] !== 'dist/cli.js' || packed.bin['vo'] !== 'dist/cli.js') {
+    fail('the packed bin does not install both vde-open and vo');
+  }
   for (const hook of ['preinstall', 'install', 'postinstall', 'prepare']) {
     if (packed.scripts?.[hook] !== undefined) fail(`the tarball has a ${hook} script`);
   }

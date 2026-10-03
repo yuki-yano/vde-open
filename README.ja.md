@@ -128,6 +128,14 @@ vo feedback ack <requestId> --submission-id <id> --json
 
 詳しい記録は [docs/implementation-status.md](docs/implementation-status.md)、性能の実測は [docs/performance.ja.md](docs/performance.ja.md)、設計は [docs/architecture.ja.md](docs/architecture.ja.md) と [docs/security-model.ja.md](docs/security-model.ja.md) にあります。
 
+## 公開の手順
+
+npmへの公開は、GitHub Actionsがtrusted publishing（OIDC）で行います。npmのtokenはどこにも置きません。npmjs.comのtrusted publisherは、このrepositoryとworkflow file `publish.yml` に設定してあり、tokenでの公開は禁止しています。
+
+1. `apps/cli/package.json` の `version` を上げ、`main` へcommitする。
+2. その版のtagをpushする: `git tag v0.1.0 && git push origin v0.1.0`。
+3. `.github/workflows/publish.yml` が、tagと版の一致を確かめ、検査とpack smokeを通してから、provenance付きでtarballを公開する。
+
 ## License
 
 [MIT](LICENSE)。同梱した依存のlicenseは、それぞれのpackageに従います。一覧とlicenseの本文は、配布物の`THIRD_PARTY_NOTICES.md`にあります（`pnpm build`がbundleの内容から作ります）。

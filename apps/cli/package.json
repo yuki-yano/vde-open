@@ -1,9 +1,27 @@
 {
   "name": "vde-open",
   "version": "0.1.0",
-  "private": true,
+  "description": "A local document viewer shared by agents and people: open Markdown and HTML documents, search and read them from the CLI, and ask the person questions.",
+  "keywords": [
+    "agent",
+    "cli",
+    "documents",
+    "html",
+    "markdown",
+    "search",
+    "viewer"
+  ],
+  "homepage": "https://github.com/yuki-yano/vde-open#readme",
+  "bugs": {
+    "url": "https://github.com/yuki-yano/vde-open/issues"
+  },
   "license": "MIT",
   "author": "Yuki Yano",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yuki-yano/vde-open.git",
+    "directory": "apps/cli"
+  },
   "bin": {
     "vde-open": "dist/cli.js",
     "vo": "dist/cli.js"
@@ -17,6 +35,9 @@
     "skills"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsdown"
