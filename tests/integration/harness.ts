@@ -174,6 +174,16 @@ export function createTestHome(): TestHome {
         pid = null;
       }
       await execute(['daemon', 'stop'], work, env(), null).catch(() => undefined);
+      // Show shutdown steps that failed or timed out, to diagnose slow stops on CI runners.
+      try {
+        const lines = readFileSync(join(home, 'logs', 'daemon.jsonl'), 'utf8').split('\n');
+        if (lines.some((line) => line.includes('"event":"daemon.shutdown_failed"'))) {
+          const shutdown = lines.filter((line) => line.includes('"event":"daemon.shutdown'));
+          console.warn(`daemon shutdown problems:\n${shutdown.join('\n')}`);
+        }
+      } catch {
+        // No log (the daemon never started).
+      }
       if (pid !== null) {
         try {
           process.kill(pid, 0);

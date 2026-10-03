@@ -50,7 +50,7 @@ export const systemProcessProbe: ProcessProbe = {
     }
   },
   async startTime(pid) {
-    if (process.platform === 'win32') return null;
+    if (process.platform === 'win32') return windowsStartTime(pid);
     try {
       const { stdout } = await execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], {
         env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
@@ -62,6 +62,26 @@ export const systemProcessProbe: ProcessProbe = {
     }
   },
 };
+
+// Windows has no `ps`. PowerShell reports the start time as an ISO 8601 string in UTC.
+async function windowsStartTime(pid: number): Promise<Date | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `(Get-Process -Id ${String(pid)} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`,
+      ],
+      { timeout: 10_000, windowsHide: true },
+    );
+    const parsed = new Date(stdout.trim());
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  } catch {
+    return null;
+  }
+}
 
 export async function inspectOwner(info: LockInfo, probe: ProcessProbe): Promise<OwnerState> {
   if (!probe.isAlive(info.pid)) return 'dead';

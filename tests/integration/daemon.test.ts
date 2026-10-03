@@ -193,7 +193,8 @@ describe('SYS-007 runtime left by a stopped owner', () => {
     mkdirSync(t.home, { mode: 0o700 });
     const location = runtimeLocation();
     mkdirSync(location.runtimeDir, { recursive: true, mode: 0o700 });
-    writeFileSync(location.socketPath, '');
+    // A leftover Unix socket file. On Windows the IPC endpoint is a named pipe, which goes away with its process.
+    if (process.platform !== 'win32') writeFileSync(location.socketPath, '');
     writeLock({ pid: deadPid(), ownerId: 'daemon_dead', startedAt: new Date().toISOString() });
     writeFileSync(
       join(t.home, 'runtime-pointer.json'),
@@ -510,7 +511,9 @@ describe('foreground daemon', () => {
     expect(second.exitCode).toBe(8);
 
     const exited = new Promise<number | null>((resolve) => child.once('exit', resolve));
-    child.kill('SIGTERM');
+    // Windows has no SIGTERM handler (the process would be terminated without cleanup), so stop it with the CLI there.
+    if (process.platform === 'win32') await t.run(['daemon', 'stop']);
+    else child.kill('SIGTERM');
     expect(await exited).toBe(0);
     expect((await status()).state).toBe('stopped');
     expect(lockIsHeld()).toBe(false);

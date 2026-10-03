@@ -368,7 +368,10 @@ describe('CLI-012 key conflict', () => {
 
 describe('CLI-016 title and path with control characters', () => {
   it('escapes the output instead of letting terminal controls run', async () => {
-    const name = 'bad\u001b[31mname.md';
+    // Windows does not allow control characters in file names, so only the title and text carry them there.
+    const pathHasControls = process.platform !== 'win32';
+    const name = pathHasControls ? 'bad\u001b[31mname.md' : 'badname.md';
+    const shownName = pathHasControls ? 'bad\\u001b[31mname.md' : 'badname.md';
     t.write(name, '# \u001b]0;乗っ取り\u0007 \u009b31m 見出し\n');
     const json = await t.run(['open', name, '--title', 'x\u001b[2Jy', '--json']);
     expect(json.exitCode).toBe(0);
@@ -379,7 +382,7 @@ describe('CLI-016 title and path with control characters', () => {
     const text = await t.run(['list']);
     expect(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/.test(text.stdout)).toBe(false);
     expect(text.stdout).toContain('x\\u001b[2Jy');
-    expect(text.stdout).toContain('bad\\u001b[31mname.md');
+    expect(text.stdout).toContain(shownName);
   });
 });
 
