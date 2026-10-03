@@ -119,8 +119,9 @@ The person answers in the answer panel of the management UI. The answers are sub
 
 | Scope | Status |
 |---|---|
-| macOS (Darwin 25.6.0, arm64), Node.js 24.21.0 | Verified (format, lint, typecheck, unit/integration, build, pack, e2e) |
-| Linux, Windows | Not verified yet (CI is defined in `.github/workflows/ci.yml`) |
+| macOS (Darwin 25.6.0, arm64), Node.js 24.21.0, locally | Verified (format, lint, typecheck, unit/integration, build, pack, e2e) |
+| Linux and macOS on CI (GitHub Actions `ubuntu-latest` and `macos-latest`, Node.js 24.21.0) | Verified (format, lint, typecheck, unit/integration, build, pack, and e2e in Chromium, Firefox, and WebKit; `.github/workflows/ci.yml`) |
+| Windows on CI (`windows-latest`, Node.js 24.21.0) | Verified: build, pack smoke (install, both bins, IPC, starting and stopping the daemon, JSON output, the UI and workers), and the daemon and document integration tests. The other unit and integration tests and the e2e tests are not run on Windows |
 | Browsers (macOS) | Chromium (Playwright's Chrome Headless Shell): the full suite is verified. Firefox 155 and WebKit 26.6 (Playwright 1.63.0): the view isolation, CSP, HTML bridge, and authentication tests (`pnpm test:e2e:cross`) are verified |
 | Browsers (not verified) | Other UI interactions in Firefox and WebKit (search, answer panel, narrow screens, a list of 1,000 documents) are not verified |
 | Markdown syntax | As described in "Markdown display limits" above. Full CommonMark and GFM are not verified |

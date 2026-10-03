@@ -119,8 +119,9 @@ vo feedback ack <requestId> --submission-id <id> --json
 
 | 範囲 | 状態 |
 |---|---|
-| macOS（Darwin 25.6.0、arm64）、Node.js 24.21.0 | 検証済み（format・lint・typecheck・unit／integration・build・pack・e2e） |
-| Linux、Windows | 未検証（CIの定義は`.github/workflows/ci.yml`） |
+| macOS（Darwin 25.6.0、arm64）、Node.js 24.21.0、手元 | 検証済み（format・lint・typecheck・unit／integration・build・pack・e2e） |
+| CIのLinuxとmacOS（GitHub Actionsの`ubuntu-latest`と`macos-latest`、Node.js 24.21.0） | 検証済み（format・lint・typecheck・unit／integration・build・pack、Chromium・Firefox・WebKitのe2e。`.github/workflows/ci.yml`） |
+| CIのWindows（`windows-latest`、Node.js 24.21.0） | 検証済み: build、pack smoke（導入、両bin、IPC、daemonの起動と停止、JSON出力、管理画面とworker）、daemonと文書の結合試験。そのほかの単体・結合試験とe2eは、Windowsでは実行していない |
 | browser（macOS） | Chromium（PlaywrightのChrome Headless Shell）は全件を検証済み。Firefox 155・WebKit 26.6（Playwright 1.63.0）は、表示の隔離・CSP・HTMLとの通信・認証の試験（`pnpm test:e2e:cross`）を検証済み |
 | browser（未検証） | Firefox・WebKitのそれ以外の画面操作（検索、回答panel、狭い画面、1,000文書の一覧など）は未検証 |
 | Markdownの構文 | 上の「Markdownの表示の制限」のとおり。CommonMark・GFMの全体は検証していない |

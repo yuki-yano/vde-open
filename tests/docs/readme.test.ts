@@ -72,7 +72,8 @@ describe('UX-008 Verified scope', () => {
   it('separates the verified OS and browsers from what is not verified', () => {
     const section = readme.slice(readme.indexOf('## Verified scope'));
     expect(section).toMatch(/macOS.*Verified/);
-    expect(section).toMatch(/Linux, Windows/);
+    expect(section).toMatch(/Linux and macOS on CI.*Verified/);
+    expect(section).toMatch(/Windows on CI.*not run on Windows/);
     expect(section).toMatch(/Chromium.*the full suite is verified/);
     expect(section).toMatch(/Other UI interactions in Firefox and WebKit.*not verified/);
   });

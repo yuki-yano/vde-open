@@ -432,6 +432,14 @@ P7時点の制約:
 ## P7の後の変更（利用者の依頼）
 
 - 公開: `origin`（github.com/yuki-yano/vde-open、public）へpushした。CIの1回目は、3つのjobとも`corepack enable`の後で`pnpm: command not found`になった（corepackが作ったpnpmの入口が、mise-actionの通すPATHに入らない）。`pnpm/action-setup@v4`（`packageManager`の版を使う）に替えた。
+- CI（GitHub Actions）を通すまでの対応:
+  - 遅いrunnerでの試験の競合と時間切れ: 監視が先に新しい版を公開する場合があるので、版の変化で確かめる（`documents.test.ts`）。CLIを約80回起動する試験は120秒、索引の時間切れの試験は1秒に。試験の後始末の上限を30秒に（`vitest.config.ts`の`hookTimeout`）。
+  - daemonの停止: どれかの手順が失敗すると、lockを解放せず、processも終わらなかった → 手順ごとに失敗を記録して次へ進む。閉じるだけの手順（監視、listener、worker）は5秒で打ち切る。手順ごとの所要時間と失敗を`daemon.shutdown`、`daemon.shutdown_failed`としてlogに書く。
+  - Windowsで、停止の最後のlockの解放（rename）や削除が`EPERM`で失敗していた（別のprocessやantivirusがfileを開いている間）→ Windowsでは、`EPERM`・`EACCES`・`EBUSY`のrenameと削除を最大2秒やり直す（`apps/cli/src/persistence/fs-retry.ts`。lock、pointer、IPCの鍵、stateの保存、doctorで使う）。CLIで止めたときにexit 0で、lockが解放され、停止の失敗が無いことを結合試験で確かめる。
+  - Windowsでprocessの起動時刻を取れず（`ps`がない）、pidが再利用されたlockを回収できなかった → PowerShellの`Get-Process`で取る。
+  - POSIXを前提にした試験のWindows向けの調整: 残ったsocketのfileはPOSIXだけ、前面のdaemonはWindowsでは`vo daemon stop`で止める、制御文字の試験はWindowsではfile名を普通の名前にする。
+  - pack smoke: 各commandに2分の上限、手順ごとの表示、失敗時にcommandの出力とdaemonのlogの末尾を出す。同時に起動したCLIは、終了の1秒後に結果を返す（daemonが出力のpipeを持ち続けても待ち続けない）。CIのjobは30分で打ち切る。
+  - 結果: `ubuntu-latest`と`macos-latest`は、format・lint・typecheck・単体と結合の試験・build・pack・Chromium・Firefox・WebKitのe2eがすべて成功。`windows-latest`は、build・pack smoke・daemonと文書の結合試験が成功。READMEの「Verified scope」に、この範囲を書いた。
 - license: 利用者の決定でMITにした（`LICENSE`、Copyright (c) 2026 Yuki Yano）。仕様16.3の「依頼者が未指定のためprivate/UNLICENSED」は、この決定で置き換える。各package.jsonの`license`、READMEの記載、`THIRD_PARTY_NOTICES.md`の生成文もMITにした。配布物には`LICENSE`を含める。
 - 英語化: code内の日本語（comment、CLIとerrorの文言、管理画面の文言、試験の名前）を英語にした。日本語の処理を確かめる試験データ（検索・分かち書き・日本語のtitleや本文・UTF-8の長さ）、`tests/fixtures/`、pack smokeと性能測定の日本語の入力は日本語のまま。管理画面の`<html lang>`は`en`。一覧の回答待ちのbadgeは、英語で長くなり文書名が切れたため「Question」（titleで説明）にした。
 - 文書: `README.md`、`docs/agent-usage.md`・`architecture.md`・`security-model.md`・`performance.md`を英語にし、日本語版を`README.ja.md`、`docs/*.ja.md`として残した（互いにlinkする）。日本語版の中の画面の文言は英語の表記にした。このfile、`docs/dependency-validation.md`、`docs/adr/`は日本語のまま。
