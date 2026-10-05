@@ -158,7 +158,9 @@ test('FB-008: submit, ack, cancel, search, read, and older-revision confirmation
 test('FB-009: the port is handed to the shown iframe only once; requests from another window and after a reload get no port', async ({
   page: ui,
 }) => {
-  await askInteractive(
+  t.write('first.md', '# First\n');
+  const opened = await t.json<{ documents: Array<{ documentId: string }> }>(['open', 'first.md']);
+  const request = await askInteractive(
     page(
       '',
       `const state = document.getElementById('state');
@@ -180,7 +182,14 @@ test('FB-009: the port is handed to the shown iframe only once; requests from an
       response.url().endsWith('/render-grants') &&
       ((await response.json()) as { data?: { bridge?: unknown } }).data?.bridge != null,
   );
-  await ui.goto(await t.bootstrapUrl());
+  const url = new URL(await t.bootstrapUrl());
+  url.searchParams.set('document', opened.documents[0]!.documentId);
+  await ui.goto(url.href);
+  await expect(ui.locator('article')).toHaveText('First');
+  await ui
+    .getByRole('navigation', { name: 'Open documents' })
+    .locator(`button[data-document-id="${request.documentId}"]`)
+    .click();
   const grant = (await (await granted).json()) as { data: { bridge: { instanceId: string } } };
   const frame = frameOf(ui);
   await expect(frame.locator('#state')).toHaveText('ready 0 ports 1');

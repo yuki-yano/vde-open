@@ -93,10 +93,9 @@ test('DOC-017: each document shows its repository, worktree, path, and format, i
   ).toBeVisible();
 
   await tree.getByRole('button', { name: 'plan.md', exact: true }).click();
-  await expect(page.getByTestId('document-location')).toHaveText(
-    /^vde-open\s+worktree feature\/x \(x\) · docs\/plan\.md/,
-  );
-  await expect(page.getByTestId('document-location')).toHaveAttribute(
+  const shownLocation = page.locator('[data-testid="document-location"]:visible');
+  await expect(shownLocation).toHaveText(/^vde-open\s+worktree feature\/x \(x\) · docs\/plan\.md/);
+  await expect(shownLocation).toHaveAttribute(
     'title',
     join(repo, '.git', 'wt', 'feature', 'x', 'docs', 'plan.md'),
   );
@@ -278,7 +277,10 @@ test('DOC-017: on a touch screen, tapping a badge does not remove the document',
     // A tap on the badge selects the document (and closes the drawer); it is not removed.
     await badge.tap();
     await expect(
-      page.getByRole('region', { name: 'Document view' }).getByRole('heading', { name: 'Beta' }),
+      page
+        .getByRole('region', { name: 'Document view' })
+        .locator('header')
+        .getByRole('heading', { name: 'Beta' }),
     ).toBeVisible();
     const listed = await t.json<{ documents: unknown[] }>(['list']);
     expect(listed.documents).toHaveLength(2);

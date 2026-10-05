@@ -12,6 +12,116 @@ test.afterEach(async () => {
   await t.cleanup();
 });
 
+test('switching Markdown keeps the current preview until the next one is ready, without showing source or loading placeholders', async ({
+  page,
+}) => {
+  t.write('first.md', '# First\n\n**original**\n');
+  t.write('second.md', '# Second\n\n**replacement**\n');
+  const opened = await t.json<{ documents: Array<{ documentId: string }> }>([
+    'open',
+    'first.md',
+    'second.md',
+  ]);
+  await page.goto(await t.bootstrapUrl());
+  await expect(page.locator('article strong')).toHaveText('original');
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let requested = false;
+  await page.route(`**/documents/${opened.documents[1]!.documentId}/content?*`, async (route) => {
+    requested = true;
+    await gate;
+    await route.continue();
+  });
+  // Observe the surface at each animation frame, including the asynchronous parse after the HTTP response.
+  await page.evaluate(() => {
+    const observation = { stopped: false, phases: [] as string[] };
+    (window as unknown as { switchObservation: typeof observation }).switchObservation =
+      observation;
+    const sample = () => {
+      if (observation.stopped) return;
+      const surface = document.querySelector(
+        '[data-testid="document-workspace"][aria-hidden="false"]',
+      );
+      observation.phases.push(
+        surface?.querySelector('article strong')?.textContent ?? 'intermediate',
+      );
+      requestAnimationFrame(sample);
+    };
+    sample();
+  });
+  try {
+    await page
+      .getByRole('navigation', { name: 'Open documents' })
+      .getByRole('button', { name: 'Second', exact: true })
+      .click();
+    await expect.poll(() => requested).toBe(true);
+    await expect(page.locator('article:visible strong')).toHaveText('original');
+    await expect(page.locator('pre:visible')).toHaveCount(0);
+    release();
+    await expect(page.locator('article:visible strong')).toHaveText('replacement');
+    const phases = await page.evaluate(() => {
+      const observation = (
+        window as unknown as { switchObservation: { stopped: boolean; phases: string[] } }
+      ).switchObservation;
+      observation.stopped = true;
+      return observation.phases;
+    });
+    expect(phases.length).toBeGreaterThan(0);
+    expect(phases.every((phase) => phase === 'original' || phase === 'replacement')).toBe(true);
+    await expect(page.getByTestId('document-workspace')).toHaveCount(1);
+  } finally {
+    release();
+  }
+});
+
+test('switching to HTML keeps the previous document until its iframe response loads, then reveals the prepared iframe', async ({
+  page,
+}) => {
+  t.write('first.md', '# First\n\noriginal\n');
+  t.write(
+    'second.html',
+    '<!doctype html><html><head><title>Second</title></head><body><p>replacement</p></body></html>',
+  );
+  await t.json(['open', 'first.md', 'second.html']);
+  await page.goto(await t.bootstrapUrl());
+  await expect(page.locator('article')).toContainText('original');
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let requests = 0;
+  await page.route('**/r/*/files/second.html', async (route) => {
+    requests += 1;
+    await gate;
+    await route.continue();
+  });
+  try {
+    await page
+      .getByRole('navigation', { name: 'Open documents' })
+      .getByRole('button', { name: 'Second', exact: true })
+      .click();
+    await expect.poll(() => requests).toBe(1);
+    await expect(page.locator('article:visible')).toContainText('original');
+    const frame = page.getByTestId('document-frame');
+    await expect(frame).toBeHidden();
+    await frame.evaluate((element) => {
+      element.setAttribute('data-prepared', 'yes');
+    });
+    release();
+    await expect(frame).toBeVisible();
+    await expect(frame).toHaveAttribute('data-prepared', 'yes');
+    await expect(page.frameLocator('[data-testid="document-frame"]').locator('p')).toHaveText(
+      'replacement',
+    );
+    await expect(page.locator('article')).toHaveCount(0);
+    expect(requests).toBe(1);
+  } finally {
+    release();
+  }
+});
+
 test('P2 gate: a document opened from the CLI is shown in the UI, and additions and saves are reflected as they happen', async ({
   page,
 }) => {

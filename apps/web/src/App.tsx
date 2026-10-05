@@ -3,7 +3,7 @@ import { Menu, Monitor, Moon, Search, Sun, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 
 import { RepositoryLabelsContext } from '@/components/document-location';
-import { DocumentWorkspace } from '@/components/document-workspace';
+import { DocumentSwitcher } from '@/components/document-workspace';
 import { SearchDialog } from '@/components/search-dialog';
 import { Sidebar } from '@/components/sidebar';
 import type { SectionTarget } from '@/components/viewer';
@@ -411,8 +411,8 @@ export function Workspace({ api }: { api: Api }) {
         />
         {active ? (
           <RepositoryLabelsContext value={labels}>
-            <DocumentWorkspace
-              key={active.documentId}
+            <DocumentSwitcher
+              documents={documents}
               api={api}
               document={active}
               feedbackSignal={feedbackSignal}

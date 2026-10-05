@@ -64,6 +64,8 @@ export interface ViewerProps {
   restoreHeading?: HeadingRestore | null;
   // Called with the heading the view jumped to, or null when the heading to restore is not in the view any more.
   onHeadingShown?: (heading: HeadingInUrl | null) => void;
+  displayed?: boolean;
+  onReady?: () => void;
 }
 
 // The target to jump to from a search result. The result is a section of the revision that was searched, so keep it with the revision.
@@ -139,6 +141,8 @@ export function Viewer({
   sectionTarget = null,
   restoreHeading = null,
   onHeadingShown,
+  displayed = true,
+  onReady,
 }: ViewerProps) {
   const [mode, setMode] = usePreference<ViewMode>('view-mode', 'preview', isViewMode);
   // The revision at the time updates were paused. While paused, do not replace it with newer revisions.
@@ -243,7 +247,32 @@ export function Viewer({
   const frameUrl = !isMarkdown && wantsPreview ? (grant?.documentUrl ?? null) : null;
   // Communication with the HTML lasts only while the iframe is on screen. Removing it ends the communication.
   const frame = useRef<HTMLIFrameElement>(null);
-  const bridge = useBridge(api, frame, frameUrl !== null ? grant : null, request);
+  const frameLoads = useRef<{ url: string; count: number } | null>(null);
+  const [loadedFrameUrl, setLoadedFrameUrl] = useState<string | null>(null);
+  const bridge = useBridge(
+    api,
+    frame,
+    displayed && frameUrl !== null ? grant : null,
+    request,
+    frameLoads,
+  );
+  const bodyReady =
+    text !== null &&
+    (!wantsPreview ||
+      (isMarkdown
+        ? markdown.status === 'failed' ||
+          (markdown.status === 'ready' && grantState.status !== 'loading')
+        : grantState.status === 'failed'));
+  const ready =
+    !waitingForRequest &&
+    (shownRevision === null ||
+      (frameUrl !== null ? loadedFrameUrl === frameUrl : error !== null || bodyReady));
+  const readyRef = useCallback(
+    (element: HTMLElement | null) => {
+      if (element !== null && ready) onReady?.();
+    },
+    [ready, onReady],
+  );
 
   // Restore the reading position each time the content is replaced.
   useLayoutEffect(() => {
@@ -431,7 +460,11 @@ export function Viewer({
   const links = isMarkdown ? [] : (grant?.links ?? []);
 
   return (
-    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col" aria-label="Document view">
+    <section
+      ref={readyRef}
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+      aria-label="Document view"
+    >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2">
         <div className="min-w-0 flex-1 basis-56">
           <h1 className="truncate text-base font-semibold">{document.title}</h1>
@@ -690,6 +723,14 @@ export function Viewer({
               ref={frame}
               title={`View of ${document.title}`}
               src={frameUrl}
+              onLoad={() => {
+                const previous = frameLoads.current;
+                frameLoads.current = {
+                  url: frameUrl,
+                  count: previous?.url === frameUrl ? previous.count + 1 : 1,
+                };
+                setLoadedFrameUrl(frameUrl);
+              }}
               // Same-origin treatment, form submission, popups, top navigation, and downloads are never allowed.
               // Only interactive allows scripts to run (spec 10.2).
               sandbox={frameMode === 'interactive' ? 'allow-scripts' : ''}
@@ -705,7 +746,9 @@ export function Viewer({
             data-testid="document-body"
           >
             {text === null ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
+              <p className="text-sm text-muted-foreground">
+                {error !== null ? 'Could not load this document.' : 'Loading…'}
+              </p>
             ) : showMarkdown ? (
               <article className="markdown-body mx-auto max-w-3xl">
                 <MarkdownView
@@ -715,7 +758,8 @@ export function Viewer({
                   codeActions={codeActions}
                 />
               </article>
-            ) : !isMarkdown && wantsPreview && grantState.status === 'loading' ? (
+            ) : wantsPreview &&
+              (isMarkdown ? markdown.status === 'parsing' : grantState.status === 'loading') ? (
               <p className="text-sm text-muted-foreground">Preparing the view…</p>
             ) : (
               <pre className="font-mono text-sm leading-relaxed break-words whitespace-pre-wrap">

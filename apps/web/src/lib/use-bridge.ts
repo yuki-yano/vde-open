@@ -33,18 +33,21 @@ export function useBridge(
   frame: RefObject<HTMLIFrameElement | null>,
   grant: RenderGrantResult | null,
   request: FeedbackForUi | null,
+  // A staged iframe may already have loaded before it becomes the on-screen view.
+  frameLoads: RefObject<{ url: string; count: number } | null>,
 ): BridgeStatus {
   const instanceId = grant?.bridge?.instanceId ?? null;
   const requestId = grant?.bridge?.requestId ?? null;
   const grantKey = grant?.grant ?? null;
+  const documentUrl = grant?.documentUrl ?? null;
   const [state, setState] = useState<{ instanceId: string; status: BridgeStatus } | null>(null);
   const hostRef = useRef<BridgeHost | null>(null);
 
   useEffect(() => {
     if (instanceId === null || requestId === null || grantKey === null) return undefined;
     const element = frame.current;
-    let handed = false;
-    let loads = 0;
+    let loads = frameLoads.current?.url === documentUrl ? frameLoads.current.count : 0;
+    let handed = loads > 1;
     let host: BridgeHost | null = null;
     const closeWith = (reason: BridgeCloseReason) =>
       setState({ instanceId, status: { status: 'closed', reason } });
@@ -111,7 +114,7 @@ export function useBridge(
       host?.close('replaced');
       hostRef.current = null;
     };
-  }, [api, frame, instanceId, requestId, grantKey]);
+  }, [api, frame, instanceId, requestId, grantKey, documentUrl, frameLoads]);
 
   // When the question ends, end the communication; tell the HTML about draft-answer changes made by other windows.
   // The draft to report is also fetched through the path that checks the render grant. If the grant has expired, end the communication without reporting.
@@ -142,5 +145,8 @@ export function useBridge(
   }, [api, request, requestId, grantKey]);
 
   if (instanceId === null) return { status: 'none' };
+  if (frameLoads.current?.url === documentUrl && frameLoads.current.count > 1) {
+    return { status: 'closed', reason: 'navigated' };
+  }
   return state?.instanceId === instanceId ? state.status : { status: 'waiting' };
 }

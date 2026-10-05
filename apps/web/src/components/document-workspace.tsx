@@ -1,5 +1,5 @@
 import type { DocumentSummary } from '@vde-open/shared';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { FeedbackPanel } from '@/components/feedback-panel';
 import { Viewer, type SectionTarget } from '@/components/viewer';
@@ -20,6 +20,58 @@ interface DocumentWorkspaceProps {
   restoreHeading?: HeadingRestore | null;
   // Called with the heading the view jumped to (null: the heading in the URL is not in the document any more).
   onHeadingShown?: (heading: HeadingInUrl | null) => void;
+  // Only the workspace on screen accepts draft answers from HTML.
+  displayed?: boolean;
+  // Called once the requested content can replace the document on screen.
+  onReady?: () => void;
+}
+
+// Keep the reading surface in place until the next document is ready. Only two workspaces are mounted:
+// the one on screen and the latest selection. A further selection discards the unfinished workspace.
+export function DocumentSwitcher({
+  documents,
+  ...props
+}: DocumentWorkspaceProps & { documents: DocumentSummary[] }) {
+  const [shownId, setShownId] = useState(props.document.documentId);
+  const shown = documents.find((document) => document.documentId === shownId);
+  const switching = shown !== undefined && shown.documentId !== props.document.documentId;
+  const workspaces = switching ? [shown, props.document] : [props.document];
+  const ready = useCallback(
+    () => setShownId(props.document.documentId),
+    [props.document.documentId],
+  );
+
+  return (
+    <div className="relative flex min-h-0 min-w-0 flex-1" aria-busy={switching}>
+      {workspaces.map((document) => {
+        const selected = document.documentId === props.document.documentId;
+        const displayed = !switching || !selected;
+        return (
+          <div
+            key={document.documentId}
+            className={
+              displayed
+                ? 'flex min-h-0 min-w-0 flex-1'
+                : 'invisible absolute inset-0 flex min-h-0 min-w-0'
+            }
+            aria-hidden={!displayed}
+            inert={switching}
+            data-testid="document-workspace"
+          >
+            <DocumentWorkspace
+              {...props}
+              document={document}
+              displayed={displayed}
+              onReady={selected ? ready : undefined}
+              sectionTarget={selected && displayed ? props.sectionTarget : null}
+              restoreHeading={selected && displayed ? props.restoreHeading : null}
+              onHeadingShown={selected && displayed ? props.onHeadingShown : undefined}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // The document view plus the answer panel for the question on that document. Recreated when the document changes (the caller passes a key).
@@ -31,6 +83,8 @@ export function DocumentWorkspace({
   sectionTarget = null,
   restoreHeading = null,
   onHeadingShown,
+  displayed = true,
+  onReady,
 }: DocumentWorkspaceProps) {
   const pendingId = document.pendingRequestIds[0] ?? null;
   // After submitting, keep showing the question's state (submitted, retrieved) while the same document stays open.
@@ -55,6 +109,8 @@ export function DocumentWorkspace({
         waitingForRequest={waitingForRequest}
         sectionTarget={sectionTarget}
         restoreHeading={restoreHeading}
+        displayed={displayed}
+        {...(onReady ? { onReady } : {})}
         {...(onHeadingShown ? { onHeadingShown } : {})}
       />
       {request ? (
