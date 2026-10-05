@@ -3,15 +3,17 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { analyzeDocument } from '@vde-open/document';
+import { analyzeDocument, HTML_STATIC_PARSER_PROFILE } from '@vde-open/document';
 import { renderDocument, scanReferences } from '@vde-open/document/render';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createCursorCodec } from '../documents/cursor.ts';
+import { computeRevision } from '../documents/revision.ts';
 import { DocumentService } from '../documents/service.ts';
 import { StateStore } from '../persistence/state-store.ts';
 import { nodeStoreFs } from '../persistence/store-fs.ts';
 import { createSessionService } from '../server/session-service.ts';
+import { createWatchService } from '../watch/watch-service.ts';
 import type { ParseService } from '../workers/parse-service.ts';
 import { createRenderService, type RenderService } from './render-service.ts';
 
@@ -397,5 +399,169 @@ describe('interactive view and communication with the HTML', () => {
     expect(tracking.missingOf(other, grant)).toEqual([]);
     // The same file is reported only once.
     expect(notified).toEqual([documentId, documentId]);
+  });
+});
+
+describe('headings the HTML view can be moved to', () => {
+  const questionnaire = JSON.stringify({
+    schemaVersion: 1,
+    title: 'Confirm',
+    fieldOrder: ['ok'],
+    answerSchema: {
+      type: 'object',
+      properties: { ok: { type: 'boolean', title: 'OK' } },
+      required: [],
+      additionalProperties: false,
+    },
+  });
+  const parse: ParseService = {
+    diagnostics: () => Promise.resolve(null),
+    analyze: (format, text) => Promise.resolve(analyzeDocument(text, format)),
+    scan: (kind, text) => Promise.resolve(scanReferences(kind, text)),
+    render: (input) => Promise.resolve(renderDocument(input)),
+    close: () => Promise.resolve(),
+  };
+  const HTML = '<h1>A</h1><object><h2>B</h2></object><h2>C</h2>';
+
+  it('the static HTML view returns them by sectionId; Markdown and interactive views return none', async () => {
+    write('site/a.html', HTML);
+    write('site/b.md', '# B\n');
+    write('site/c.html', HTML);
+    const opened = await documents.open({ cwd: base, paths: ['site/a.html', 'site/b.md'] });
+    const [html, markdown] = opened.data.documents.map((document) => document.documentId) as [
+      string,
+      string,
+    ];
+    const interactive = (
+      await documents.open({ cwd: base, paths: ['site/c.html'], htmlMode: 'interactive' })
+    ).data.documents[0]?.documentId as string;
+    expect(
+      (await render.createGrant(sessionId, { documentId: html }, GRANT_CONTEXT)).headingTargets,
+    ).toEqual([
+      { sectionId: 'sec_0001', anchor: 'h1' },
+      { sectionId: 'sec_0003', anchor: 'h3' },
+    ]);
+    expect(
+      (await render.createGrant(sessionId, { documentId: markdown }, GRANT_CONTEXT)).headingTargets,
+    ).toEqual([]);
+    expect(
+      (
+        await render.createGrant(
+          sessionId,
+          { documentId: interactive, mode: 'interactive' },
+          GRANT_CONTEXT,
+        )
+      ).headingTargets,
+    ).toEqual([]);
+  });
+
+  it('after a restart, file documents analyzed with an older profile get a current revision, and older revisions stay readable', async () => {
+    write('site/a.html', HTML);
+    const fileId = (await documents.open({ cwd: base, paths: ['site/a.html'] })).data.documents[0]
+      ?.documentId as string;
+    const stdinId = (
+      await documents.open({ cwd: base, paths: [], stdin: { content: HTML }, format: 'html' })
+    ).data.documents[0]?.documentId as string;
+    const { FeedbackService } = await import('../feedback/service.ts');
+    const request = (
+      await new FeedbackService({ store, documents }).create({
+        cwd: base,
+        questionnaire,
+        documentId: fileId,
+      })
+    ).data.request;
+
+    // Leave the state as a daemon with the older profile would: the same content and assets, with the revisions computed under it.
+    const older = new Map<string, string>();
+    await store.transaction((tx) => {
+      for (const record of Object.values(tx.state.documents)) {
+        for (const entry of record.revisions) {
+          const revision = computeRevision({
+            format: entry.format,
+            sourceSha256: entry.sourceSha256,
+            parserProfileVersion: 'html-static-v1',
+            assets: entry.assets.map(({ logicalPath, mime, role, sha256 }) => ({
+              logicalPath,
+              mime,
+              role,
+              sha256,
+            })),
+          });
+          older.set(entry.revision, revision);
+          entry.revision = revision;
+          entry.parserProfileVersion = 'html-static-v1';
+        }
+        if (record.currentRevision !== null) {
+          record.currentRevision = older.get(record.currentRevision) ?? record.currentRevision;
+        }
+      }
+      for (const pending of Object.values(tx.state.feedbackRequests)) {
+        pending.revision = older.get(pending.revision) ?? pending.revision;
+      }
+    });
+    const pinned = older.get(request.revision) as string;
+    const stdinRevision = store.payload.documents[stdinId]?.currentRevision;
+    await store.close();
+
+    store = await StateStore.open({ root: join(base, 'home'), fs: nodeStoreFs });
+    const restarted = new DocumentService({
+      store,
+      cursors: createCursorCodec(randomBytes(32)),
+      analyze: parse.analyze,
+    });
+    const sessions = createSessionService();
+    const session = sessions.idOf(sessions.exchange(sessions.createBootstrapTicket()) as string);
+    const restartedRender = createRenderService({
+      store,
+      documents: restarted,
+      sessions,
+      parse,
+      previewOrigin: () => 'http://127.0.0.1:1',
+    });
+    const watcher = createWatchService({ documents: restarted, debounceMs: 20 });
+    try {
+      watcher.sync();
+      const deadline = Date.now() + 10_000;
+      while ((await restarted.read({ documentId: fileId })).data.revision === pinned) {
+        if (Date.now() > deadline) throw new Error('The file document was not read again.');
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const current = store.payload.documents[fileId];
+      expect(current?.currentRevision).not.toBe(pinned);
+      expect(
+        current?.revisions.find((entry) => entry.revision === current.currentRevision)
+          ?.parserProfileVersion,
+      ).toBe(HTML_STATIC_PARSER_PROFILE);
+      // A stdin document has nothing to read again and keeps its revision.
+      expect(store.payload.documents[stdinId]?.currentRevision).toBe(stdinRevision);
+      expect((await restarted.read({ documentId: stdinId })).data.revision).toBe(stdinRevision);
+
+      // The revision the question pins is still served, analyzed and transformed by the current code.
+      const outline = (
+        await restarted.read({ documentId: fileId, outline: true, revision: pinned })
+      ).data.outline;
+      expect(outline?.map((item) => [item.sectionId, item.anchor])).toEqual([
+        ['sec_0001', 'h1'],
+        ['sec_0002', 'h2'],
+        ['sec_0003', 'h3'],
+      ]);
+      const grant = await restartedRender.createGrantForRequest(
+        session,
+        request.requestId,
+        GRANT_CONTEXT,
+      );
+      expect(grant).toMatchObject({ revision: pinned, mode: 'static' });
+      expect(grant.headingTargets).toEqual([
+        { sectionId: 'sec_0001', anchor: 'h1' },
+        { sectionId: 'sec_0003', anchor: 'h3' },
+      ]);
+      const html = (
+        await restartedRender.resolve(grant.grant, grant.documentLogicalPath)
+      )?.body.toString('utf8');
+      expect(html).toContain('<h1 id="h1">A</h1>');
+      expect(html).toContain('<h2 id="h3">C</h2>');
+    } finally {
+      await watcher.close();
+    }
   });
 });

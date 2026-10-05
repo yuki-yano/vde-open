@@ -1,7 +1,7 @@
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
 import { describe, expect, it } from 'vitest';
 
-import { ParseLimitError } from './analysis.ts';
+import { analyzeHtml, ParseLimitError } from './analysis.ts';
 import { scanHtmlReferences, transformStaticHtml } from './html-static.ts';
 import type { AssetRole } from './references.ts';
 
@@ -321,7 +321,8 @@ describe('keeps only registered assets', () => {
     const result = render(source);
     expect(result.diagnostics).toEqual([]);
     // Structure, class, id, data attributes, style attributes and layout CSS are output unchanged.
-    expect(result.html).toBe(source);
+    // The only addition is the id that the outline anchor of a heading without one names.
+    expect(result.html).toBe(source.replace('<h2>節</h2>', '<h2 id="h2">節</h2>'));
   });
 });
 
@@ -410,5 +411,125 @@ describe('interactive view transform', () => {
     const found = inspect(result.html);
     expect(found.tags).not.toContain('script');
     expect(found.attributes).not.toContain('onclick');
+  });
+});
+
+describe('heading anchors in the static view', () => {
+  // Headings of the output as the browser parses it, in document order (the contents of template are not shown).
+  function headingsOf(html: string): Array<{ id: string | null; text: string }> {
+    const headings: Array<{ id: string | null; text: string }> = [];
+    const stack: HtmlNode[] = [parse(html, { scriptingEnabled: false })];
+    while (stack.length > 0) {
+      const node = stack.pop() as HtmlNode;
+      if ('tagName' in node && /^h[1-6]$/.test(node.tagName)) {
+        const id = node.attrs.find((attribute) => attribute.name === 'id')?.value ?? null;
+        const text = node.childNodes.map((child) => ('value' in child ? child.value : '')).join('');
+        headings.push({ id, text });
+      }
+      if ('childNodes' in node) stack.push(...node.childNodes.toReversed());
+    }
+    return headings;
+  }
+
+  // The outline items a link in the view reaches: each target names a heading of the outline, and the element
+  // with that id in the output is that heading.
+  function targetsOf(source: string) {
+    const result = render(source);
+    const outline = analyzeHtml(source).outline;
+    const shown = headingsOf(result.html);
+    for (const target of result.headingTargets) {
+      const item = outline.find((candidate) => candidate.sectionId === target.sectionId);
+      expect(item?.anchor).toBe(target.anchor);
+      expect(shown.find((heading) => heading.id === target.anchor)?.text).toBe(item?.title);
+    }
+    return result.headingTargets;
+  }
+
+  it('gives headings without an id the outline anchor, keeps written ids, and avoids ids used anywhere in the document', () => {
+    const source =
+      '<h1 id="top">A</h1><h2>B</h2><h2 id="">C</h2><h3>D</h3><p id="h4">後方の要素</p>' +
+      '<template><p id="h3">表示されない</p></template>';
+    expect(analyzeHtml(source).outline.map((item) => item.anchor)).toEqual([
+      'top',
+      'h2',
+      'h3-2',
+      'h4-2',
+    ]);
+    expect(headingsOf(render(source).html)).toEqual([
+      { id: 'top', text: 'A' },
+      { id: 'h2', text: 'B' },
+      { id: 'h3-2', text: 'C' },
+      { id: 'h4-2', text: 'D' },
+    ]);
+    expect(targetsOf(source)).toEqual([
+      { sectionId: 'sec_0001', anchor: 'top' },
+      { sectionId: 'sec_0002', anchor: 'h2' },
+      { sectionId: 'sec_0003', anchor: 'h3-2' },
+      { sectionId: 'sec_0004', anchor: 'h4-2' },
+    ]);
+  });
+
+  it('leaves out headings the view removes, without shifting the numbering of later headings', () => {
+    const source =
+      '<h1>A</h1><object><h2>B</h2></object><svg><foreignObject><h2>C</h2></foreignObject></svg><h2>D</h2>';
+    expect(analyzeHtml(source).outline.map((item) => [item.sectionId, item.anchor])).toEqual([
+      ['sec_0001', 'h1'],
+      ['sec_0002', 'h2'],
+      ['sec_0003', 'h3'],
+      ['sec_0004', 'h4'],
+    ]);
+    expect(targetsOf(source)).toEqual([
+      { sectionId: 'sec_0001', anchor: 'h1' },
+      { sectionId: 'sec_0004', anchor: 'h4' },
+    ]);
+  });
+
+  it('leaves out a heading whose id belongs to an earlier element of the view', () => {
+    expect(targetsOf('<h2 id="same">First</h2><h2 id="same">Second</h2>')).toEqual([
+      { sectionId: 'sec_0001', anchor: 'same' },
+    ]);
+    expect(
+      targetsOf('<object><h2 id="same">Removed</h2></object><h2 id="same">Visible</h2>'),
+    ).toEqual([{ sectionId: 'sec_0002', anchor: 'same' }]);
+    expect(targetsOf('<p id="x">段落</p><h2 id="x">X</h2>')).toEqual([]);
+  });
+
+  it('leaves out a heading whose encoded fragment names another element as written, in either order', () => {
+    // The fragment of 節 is %E7%AF%80. The browser looks for it as written before decoding it.
+    expect(targetsOf('<h2 id="節">節</h2>')).toEqual([{ sectionId: 'sec_0001', anchor: '節' }]);
+    expect(targetsOf('<h2 id="%E7%AF%80">表記</h2><h2 id="節">節</h2>')).toEqual([
+      { sectionId: 'sec_0001', anchor: '%E7%AF%80' },
+    ]);
+    expect(targetsOf('<h2 id="節">節</h2><h2 id="%E7%AF%80">表記</h2>')).toEqual([
+      { sectionId: 'sec_0002', anchor: '%E7%AF%80' },
+    ]);
+    expect(targetsOf('<a name="%E7%AF%80"></a><h2 id="節">節</h2>')).toEqual([]);
+    // A name equal to the anchor itself does not matter: an id is looked for first.
+    expect(targetsOf('<a name="x"></a><h2 id="x">X</h2>')).toEqual([
+      { sectionId: 'sec_0001', anchor: 'x' },
+    ]);
+  });
+
+  it('keeps headings inside noscript in static and never counts headings inside template', () => {
+    const source = '<template><h2>T</h2></template><noscript><h2>N</h2></noscript><h2>Z</h2>';
+    expect(targetsOf(source)).toEqual([
+      { sectionId: 'sec_0001', anchor: 'h1' },
+      { sectionId: 'sec_0002', anchor: 'h2' },
+    ]);
+  });
+
+  it('adds no ids to the interactive view and returns no targets for it', () => {
+    const source = '<h1>A</h1><h2 id="">B</h2>';
+    const result = transformStaticHtml({
+      source,
+      documentLogicalPath: 'index.html',
+      assets: new Map(),
+      interactive: true,
+    });
+    expect(headingsOf(result.html)).toEqual([
+      { id: null, text: 'A' },
+      { id: '', text: 'B' },
+    ]);
+    expect(result.headingTargets).toEqual([]);
   });
 });

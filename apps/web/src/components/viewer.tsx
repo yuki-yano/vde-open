@@ -1,4 +1,9 @@
-import { classifyReference, dirnameOfLogicalPath, encodeLogicalPath } from '@vde-open/document';
+import {
+  classifyReference,
+  dirnameOfLogicalPath,
+  encodeLogicalPath,
+  fragmentOfAnchor,
+} from '@vde-open/document';
 import { codeOfBlock, MarkdownView } from '@vde-open/document/react';
 import type { DocumentSummary, FeedbackForUi, OutlineItem } from '@vde-open/shared';
 import { Copy, Hash, Pause, Play, RefreshCw } from 'lucide-react';
@@ -107,6 +112,13 @@ interface PendingLink {
   confirmation: string;
   // The previous confirmation did not hold (the target changed or it expired).
   changed: boolean;
+}
+
+// The first element inside root with the id. Compared as is, so any id works without escaping.
+function elementWithId(root: HTMLElement | null, id: string): Element | null {
+  if (root === null) return null;
+  for (const element of root.querySelectorAll('[id]')) if (element.id === id) return element;
+  return null;
 }
 
 // Recreated when the document changes (the caller passes documentId as key).
@@ -296,9 +308,43 @@ export function Viewer({
   );
 
   const stale = paused && !fixed && document.revision !== shownRevision;
-  const jumpTo = (anchor: string) => {
-    window.document.getElementById(anchor)?.scrollIntoView({ block: 'start' });
-  };
+  // Outline items the HTML view can be moved to (sectionId to anchor). Two headings can share an anchor, so items are
+  // matched by sectionId.
+  const frameTargets = useMemo(
+    () => new Map(grant?.headingTargets.map((target) => [target.sectionId, target.anchor]) ?? []),
+    [grant],
+  );
+  // Why no outline item can be jumped to in this view, or null when the items can be.
+  const outlineUnavailable = showMarkdown
+    ? null
+    : frameUrl === null
+      ? isMarkdown
+        ? 'Available in the Markdown preview'
+        : 'Available in the HTML preview'
+      : grant?.mode !== 'static'
+        ? 'Not available in the Interactive view (jumping reloads the view and restarts its scripts)'
+        : loaded?.revision !== grant.revision
+          ? 'Available once the outline of the shown revision has loaded'
+          : null;
+  const canJump = (item: OutlineItem) =>
+    outlineUnavailable === null &&
+    (showMarkdown || frameTargets.get(item.sectionId) === item.anchor);
+  const jumpTo = useCallback(
+    (item: OutlineItem) => {
+      if (showMarkdown) {
+        // Only the Markdown body is searched, so an id of this UI is never hit.
+        elementWithId(scroller.current, item.anchor)?.scrollIntoView({ block: 'start' });
+        return;
+      }
+      if (frameUrl === null) return;
+      // The view is on another origin, so only its location can be set. Chromium and WebKit load the document again
+      // to move to the heading (Firefox only scrolls). replace adds no history entry.
+      frame.current?.contentWindow?.location.replace(
+        `${frameUrl}#${fragmentOfAnchor(item.anchor)}`,
+      );
+    },
+    [showMarkdown, frameUrl],
+  );
   // Jump to the heading of the section chosen from search results (after the outline and body of the shown revision are loaded).
   // If the result's revision differs from the shown revision, the section number may point to a different heading, so do not jump and explain why.
   // Do not change the view of the question's revision or of the paused revision.
@@ -309,9 +355,9 @@ export function Viewer({
   const targetLoaded =
     sectionTarget !== null && shownRevision !== null && loaded?.revision === shownRevision;
   const targetMatches = targetLoaded && sectionTarget.revision === shownRevision;
-  const targetAnchor =
+  const targetItem =
     targetMatches && showMarkdown
-      ? (outline.find((item) => item.sectionId === sectionTarget.sectionId)?.anchor ?? null)
+      ? (outline.find((item) => item.sectionId === sectionTarget.sectionId) ?? null)
       : null;
   const targetNotice =
     sectionTarget === null || targetNonce === dismissedNonce
@@ -330,9 +376,9 @@ export function Viewer({
             ? null
             : 'This view does not jump to sections (only the Markdown preview does).';
   useEffect(() => {
-    if (targetAnchor === null || targetNonce === 0) return;
-    window.document.getElementById(targetAnchor)?.scrollIntoView({ block: 'start' });
-  }, [targetAnchor, targetNonce]);
+    if (targetItem === null || targetNonce === 0) return;
+    jumpTo(targetItem);
+  }, [targetItem, targetNonce, jumpTo]);
   const diagnostics = [
     ...(grant?.diagnostics ?? []),
     ...missing.map((path) => ({ code: 'asset-requested', target: path, count: 1 })),
@@ -644,22 +690,30 @@ export function Viewer({
               </p>
             )}
             <ul className="flex flex-col gap-0.5 text-sm">
-              {outline.map((item) => (
-                <li
-                  key={item.sectionId}
-                  style={{ paddingLeft: `${String((item.level - 1) * 0.75)}rem` }}
-                >
-                  <button
-                    type="button"
-                    className="w-full truncate rounded px-2 py-1 text-left hover:bg-muted disabled:opacity-50"
-                    disabled={!showMarkdown}
-                    title={showMarkdown ? item.title : 'Available in the Markdown preview'}
-                    onClick={() => jumpTo(item.anchor)}
+              {outline.map((item) => {
+                const jumpable = canJump(item);
+                return (
+                  <li
+                    key={item.sectionId}
+                    style={{ paddingLeft: `${String((item.level - 1) * 0.75)}rem` }}
                   >
-                    {item.title}
-                  </button>
-                </li>
-              ))}
+                    <button
+                      type="button"
+                      className="w-full truncate rounded px-2 py-1 text-left hover:bg-muted disabled:opacity-50"
+                      disabled={!jumpable}
+                      title={
+                        jumpable
+                          ? item.title
+                          : (outlineUnavailable ??
+                            'This heading is not in the view (removed from the display, or an earlier element has the same id)')
+                      }
+                      onClick={() => jumpTo(item)}
+                    >
+                      {item.title}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </aside>
         )}

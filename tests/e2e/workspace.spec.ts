@@ -161,3 +161,25 @@ test('shows every heading even when the outline does not fit in one response', a
   await expect(outline.getByRole('listitem').last()).toContainText('見出し1499');
   await expect(outline.getByRole('alert')).toHaveCount(0);
 });
+
+test('jumping from the outline moves the Markdown preview to the heading', async ({ page }) => {
+  const filler = Array.from({ length: 60 }, (_, index) => `段落${String(index)}`).join('\n\n');
+  t.write(
+    'a.md',
+    `# 文書\n\n${filler}\n\n## 中間の見出し\n\n${filler}\n\n## 最後の見出し\n\n${filler}\n`,
+  );
+  await t.json(['open', 'a.md']);
+  await page.goto(await t.bootstrapUrl());
+  const outline = page.getByRole('complementary', { name: 'Outline' });
+  const middle = page.locator('article').getByRole('heading', { name: '中間の見出し' });
+  await expect(middle).toBeAttached();
+  await expect(middle).not.toBeInViewport();
+
+  await outline.getByRole('button', { name: '中間の見出し' }).click();
+  await expect(middle).toBeInViewport();
+  await outline.getByRole('button', { name: '最後の見出し' }).click();
+  await expect(
+    page.locator('article').getByRole('heading', { name: '最後の見出し' }),
+  ).toBeInViewport();
+  await expect(middle).not.toBeInViewport();
+});

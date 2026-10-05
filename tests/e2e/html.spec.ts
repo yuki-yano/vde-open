@@ -418,3 +418,63 @@ test('updating an HTML document rebuilds the view, and switching to Source does 
   await expect(page.getByTestId('document-frame')).toHaveCount(0);
   await expect(page.getByTestId('document-body')).toContainText('<h1 id="h">版2</h1>');
 });
+
+test('jumping from the outline moves the Static view to the heading, without adding history', async ({
+  page,
+}) => {
+  const filler = Array.from({ length: 120 }, (_, index) => `<p>段落${String(index)}</p>`).join('');
+  t.write('a.md', '# 前の文書\n');
+  t.write(
+    'doc.html',
+    `<!doctype html><title>設計HTML</title><h1>文書</h1>${filler}<h2>中間</h2>${filler}` +
+      `<object><h2>削除</h2></object><h2 id="last">最後</h2>${filler}` +
+      // %E9%87%8D is the fragment of 重: the browser finds the heading written that way first.
+      `<h2 id="日本語の節">日本語のid</h2>${filler}<h2 id="%E9%87%8D">表記のid</h2>${filler}` +
+      `<h2 id="重">重なるid</h2>${filler}`,
+  );
+  await t.json(['open', 'a.md', 'doc.html']);
+  await page.goto(await t.bootstrapUrl());
+  const shown = page
+    .getByRole('region', { name: 'Document view' })
+    .getByRole('heading', { level: 1 })
+    .first();
+  await expect(shown).toHaveText('前の文書');
+  await page
+    .getByRole('navigation', { name: 'Open documents' })
+    .getByRole('button', { name: '設計HTML', exact: true })
+    .click();
+  await expect(shown).toHaveText('設計HTML');
+
+  const outline = page.getByRole('complementary', { name: 'Outline' });
+  const frame = page.frameLocator('[data-testid="document-frame"]');
+  const top = frame.getByRole('heading', { name: '文書' });
+  const middle = frame.getByRole('heading', { name: '中間' });
+  const last = frame.getByRole('heading', { name: '最後' });
+  await expect(middle).toBeAttached();
+  await expect(middle).not.toBeInViewport();
+  // The heading inside object is removed from the view, and the fragment of 重 reaches another heading first,
+  // so the outline cannot jump to them.
+  await expect(outline.getByRole('button', { name: '削除' })).toBeDisabled();
+  await expect(outline.getByRole('button', { name: '重なるid' })).toBeDisabled();
+  const length = await page.evaluate(() => window.history.length);
+
+  await outline.getByRole('button', { name: '中間' }).click();
+  await expect(middle).toBeInViewport();
+  await outline.getByRole('button', { name: '最後' }).click();
+  await expect(last).toBeInViewport();
+  await expect(middle).not.toBeInViewport();
+  await outline.getByRole('button', { name: '中間' }).click();
+  await expect(middle).toBeInViewport();
+  // After reading elsewhere, the same item jumps again.
+  await top.scrollIntoViewIfNeeded();
+  await expect(middle).not.toBeInViewport();
+  await outline.getByRole('button', { name: '中間' }).click();
+  await expect(middle).toBeInViewport();
+  // Ids that are not ASCII, and ids written percent-encoded, are reached through the encoded fragment.
+  for (const name of ['日本語のid', '表記のid']) {
+    await outline.getByRole('button', { name }).click();
+    await expect(frame.getByRole('heading', { name })).toBeInViewport();
+  }
+
+  expect(await page.evaluate(() => window.history.length)).toBe(length);
+});

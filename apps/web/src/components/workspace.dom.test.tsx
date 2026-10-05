@@ -2,6 +2,7 @@
 import type {
   DocumentSummary,
   FeedbackForUi,
+  OutlineItem,
   Questionnaire,
   RenderGrantResult,
   ServerEvent,
@@ -323,5 +324,140 @@ describe('copying the document path and ID (spec 13.2)', () => {
         (item) => item.getAttribute('aria-label') === 'Copy document path',
       ),
     ).toBe(false);
+  });
+});
+
+describe('jumping from the outline of an HTML document', () => {
+  const outline: OutlineItem[] = [
+    { sectionId: 'sec_0001', level: 1, title: '概要', headingPath: ['概要'], anchor: 'h1' },
+    {
+      sectionId: 'sec_0002',
+      level: 2,
+      title: '削除',
+      headingPath: ['概要', '削除'],
+      anchor: 'same',
+    },
+    {
+      sectionId: 'sec_0003',
+      level: 2,
+      title: '詳細',
+      headingPath: ['概要', '詳細'],
+      anchor: 'same',
+    },
+  ];
+  function grantOf(overrides: Partial<RenderGrantResult> = {}): RenderGrantResult {
+    return {
+      grant: 'g1',
+      documentId: 'doc_1',
+      revision: REV1,
+      format: 'html',
+      mode: 'static',
+      documentUrl: 'about:blank',
+      filesBaseUrl: 'about:blank',
+      documentLogicalPath: 'a.html',
+      assets: [],
+      links: [],
+      diagnostics: [],
+      // The second heading shares its anchor with the third and is removed from the view.
+      headingTargets: [
+        { sectionId: 'sec_0001', anchor: 'h1' },
+        { sectionId: 'sec_0003', anchor: 'same' },
+      ],
+      bridge: null,
+      ...overrides,
+    };
+  }
+  const findItem = (title: string): HTMLButtonElement | null => {
+    const found = [...container.querySelectorAll('aside[aria-label="Outline"] button')].find(
+      (candidate) => candidate.textContent === title,
+    );
+    return found instanceof HTMLButtonElement ? found : null;
+  };
+  const item = (title: string): HTMLButtonElement => {
+    const found = findItem(title);
+    if (found === null) throw new Error(`Outline item "${title}" not found`);
+    return found;
+  };
+  // For waiting: the outline can arrive after the view, so a missing item is not an error yet.
+  const enabled = (title: string) => findItem(title)?.disabled === false;
+  // Record where the view is moved to. The view is on another origin, so only its location is set.
+  function recordJumps(): string[] {
+    const jumps: string[] = [];
+    const frame = container.querySelector('iframe') as HTMLIFrameElement;
+    Object.defineProperty(frame, 'contentWindow', {
+      configurable: true,
+      value: { location: { replace: (url: string) => jumps.push(url) } },
+    });
+    return jumps;
+  }
+
+  beforeEach(() => {
+    window.localStorage.setItem('vde-open.pref.view-mode', JSON.stringify('preview'));
+    api.outline = () => Promise.resolve(outline);
+    api.renderMissing = () => Promise.resolve([]);
+  });
+
+  it('jumps only to headings the static view has, matched by sectionId', async () => {
+    api.renderGrant = () => Promise.resolve(grantOf());
+    root.render(<Viewer api={api} document={documentOf()} />);
+    await until(() => container.querySelector('iframe') !== null && enabled('概要'));
+    expect(item('概要').disabled).toBe(false);
+    // Its anchor is reachable, but it names another heading: the second one is not in the view.
+    expect(item('削除').disabled).toBe(true);
+    expect(item('削除').title).toContain('not in the view');
+    expect(item('詳細').disabled).toBe(false);
+
+    const jumps = recordJumps();
+    item('詳細').click();
+    item('概要').click();
+    expect(jumps).toEqual(['about:blank#same', 'about:blank#h1']);
+  });
+
+  it('does not jump while the view shows a newer revision than the outline, including when the body fails to load', async () => {
+    let failNext = false;
+    api.renderGrant = (_documentId, revision) =>
+      Promise.resolve(grantOf({ grant: `g-${revision}`, revision }));
+    api.content = (_documentId, revision) => {
+      contentRequests.push(revision);
+      if (revision === REV1) return Promise.resolve('本文 1');
+      return failNext
+        ? Promise.reject(new Error('Could not be read.'))
+        : new Promise<string>(() => undefined);
+    };
+    root.render(<Viewer api={api} document={documentOf()} />);
+    await until(() => container.querySelector('iframe') !== null && enabled('概要'));
+
+    // The view of the new revision is ready before its body and outline.
+    root.render(<Viewer api={api} document={documentOf({ revision: REV2 })} />);
+    await until(() => contentRequests.includes(REV2) && findItem('概要')?.disabled === true);
+    expect(item('概要').disabled).toBe(true);
+    expect(item('概要').title).toBe('Available once the outline of the shown revision has loaded');
+
+    // The body of the new revision cannot be loaded: the previous outline stays, and still cannot be used for the new view.
+    failNext = true;
+    root.unmount();
+    root = createRoot(container);
+    contentRequests = [];
+    root.render(<Viewer api={api} document={documentOf()} />);
+    await until(() => container.querySelector('iframe') !== null && enabled('概要'));
+    root.render(<Viewer api={api} document={documentOf({ revision: REV2 })} />);
+    await until(() => container.textContent?.includes('Could not be read.') ?? false);
+    expect(item('概要').disabled).toBe(true);
+    expect(item('概要').title).toBe('Available once the outline of the shown revision has loaded');
+    expect(item('詳細').disabled).toBe(true);
+  });
+
+  it('does not jump in the Interactive view', async () => {
+    api.renderGrant = () => Promise.resolve(grantOf({ mode: 'interactive', headingTargets: [] }));
+    root.render(
+      <Viewer
+        api={api}
+        document={documentOf({ htmlMode: 'interactive', interactiveAllowed: true })}
+      />,
+    );
+    await until(() => container.querySelector('iframe') !== null && findItem('概要') !== null);
+    await settle();
+    expect(item('概要').disabled).toBe(true);
+    expect(item('概要').title).toContain('Not available in the Interactive view');
   });
 });

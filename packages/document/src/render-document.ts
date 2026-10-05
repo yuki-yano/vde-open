@@ -5,6 +5,7 @@ import {
   resolveAssetUrl,
   scanHtmlReferences,
   transformStaticHtml,
+  type HeadingTarget,
   type ScannedReference,
   type StaticDiagnostic,
   type StaticLink,
@@ -31,6 +32,8 @@ export interface RenderOutput {
   stylesheets: Array<{ logicalPath: string; css: string }>;
   links: StaticLink[];
   diagnostics: StaticDiagnostic[];
+  // Headings the HTML view can be moved to with `#anchor` (static HTML only; empty otherwise).
+  headingTargets: HeadingTarget[];
 }
 
 export function renderDocument(input: RenderInput): RenderOutput {
@@ -51,7 +54,13 @@ export function renderDocument(input: RenderInput): RenderOutput {
   });
   if (input.format === 'markdown') {
     const info = analyzeMarkdownRender(staticInput, log);
-    return { html: null, stylesheets, links: info.links, diagnostics: info.diagnostics };
+    return {
+      html: null,
+      stylesheets,
+      links: info.links,
+      diagnostics: info.diagnostics,
+      headingTargets: [],
+    };
   }
   const result = transformStaticHtml(
     {
@@ -63,7 +72,13 @@ export function renderDocument(input: RenderInput): RenderOutput {
     },
     log,
   );
-  return { html: result.html, stylesheets, links: result.links, diagnostics: result.diagnostics };
+  return {
+    html: result.html,
+    stylesheets,
+    links: result.links,
+    diagnostics: result.diagnostics,
+    headingTargets: result.headingTargets,
+  };
 }
 
 export type ScanKind = 'markdown' | 'html' | 'css';

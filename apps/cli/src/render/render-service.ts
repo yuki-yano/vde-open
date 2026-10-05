@@ -47,6 +47,7 @@ interface Snapshot {
   assets: Array<{ logicalPath: string; role: AssetRole }>;
   links: RenderLink[];
   diagnostics: RenderDiagnostic[];
+  headingTargets: RenderGrantResult['headingTargets'];
 }
 
 interface Grant {
@@ -214,6 +215,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       assets: usable.map(({ logicalPath, role }) => ({ logicalPath, role })),
       links: output.links,
       diagnostics: output.diagnostics,
+      headingTargets: output.headingTargets,
     };
     snapshots.set(cacheKey, snapshot);
     while (snapshots.size > SNAPSHOT_CACHE_SIZE) {
@@ -368,6 +370,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
         entry.assetScan === 'failed'
           ? [{ code: 'asset-scan-failed', target: null, count: 1 }, ...snapshot.diagnostics]
           : snapshot.diagnostics,
+      headingTargets: snapshot.headingTargets,
       bridge:
         bridge === null ? null : { instanceId: bridge.instanceId, requestId: bridge.requestId },
     };

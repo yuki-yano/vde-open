@@ -308,6 +308,11 @@ export const renderGrantResultSchema = z.strictObject({
   assets: z.array(z.strictObject({ logicalPath: z.string(), role: assetRoleSchema })),
   links: z.array(renderLinkSchema),
   diagnostics: z.array(renderDiagnosticSchema),
+  // Outline items the HTML view can be moved to with `documentUrl#anchor` (static HTML only; empty for Markdown and interactive).
+  // Identified by sectionId: two headings can share an anchor, and only the first element with an id is reached.
+  headingTargets: z.array(
+    z.strictObject({ sectionId: z.string().regex(/^sec_\d{4,}$/), anchor: z.string() }),
+  ),
   // Communication between the HTML and the host. Present only for views that embed the bundled SDK into the HTML. instanceId identifies this view.
   bridge: z.strictObject({ instanceId: z.string(), requestId: z.string() }).nullable(),
 });

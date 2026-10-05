@@ -324,6 +324,79 @@ function htmlText(node: HtmlNode): string {
   return text;
 }
 
+type HtmlElement = DefaultTreeAdapterMap['element'];
+
+const HTML_HEADING = /^h([1-6])$/;
+
+// A heading of an HTML document. sectionId and anchor are the ones the outline gives it.
+export interface HtmlHeading {
+  element: HtmlElement;
+  level: number;
+  sectionId: string;
+  anchor: string;
+}
+
+// The id of an element, or null when it has none or an empty one (an empty id is never the target of a link).
+export function htmlIdOf(element: HtmlElement): string | null {
+  const id = element.attrs.find((attribute) => attribute.name === 'id')?.value;
+  return id === undefined || id === '' ? null : id;
+}
+
+// The URL fragment (without `#`) the view is moved to for an anchor. The UI and the check of reachable headings use the same one.
+export function fragmentOfAnchor(anchor: string): string {
+  return encodeURIComponent(anchor);
+}
+
+// Headings of an HTML document in document order, with the anchor that reaches each one (spec 8.4).
+// The outline (analyzeHtml) and the static view (transformStaticHtml) both use this, so the anchor is the heading's id in the view.
+// A heading keeps the id it was written with. A heading without one gets h{n} (n is its position among the headings);
+// when an element of the document already has that id, the smallest free h{n}-2, h{n}-3, ... is used instead.
+// Headings are found by the same rules as the text walk of analyzeHtml: nothing inside HTML_SKIPPED, nothing inside a heading.
+export function htmlHeadings(document: HtmlNode): HtmlHeading[] {
+  // Every id in the document, including the contents of template and of elements the view removes.
+  const used = new Set<string>();
+  const all: HtmlNode[] = [document];
+  while (all.length > 0) {
+    const node = all.pop() as HtmlNode;
+    if ('tagName' in node) {
+      const id = htmlIdOf(node);
+      if (id !== null) used.add(id);
+      if ('content' in node) all.push(node.content);
+    }
+    if ('childNodes' in node) for (const child of node.childNodes) all.push(child);
+  }
+
+  const found: Array<{ element: HtmlElement; level: number }> = [];
+  const stack: HtmlNode[] = [document];
+  while (stack.length > 0) {
+    const node = stack.pop() as HtmlNode;
+    if ('tagName' in node) {
+      if (HTML_SKIPPED.has(node.tagName)) continue;
+      const match = HTML_HEADING.exec(node.tagName);
+      if (match) {
+        found.push({ element: node, level: Number(match[1]) });
+        continue;
+      }
+    }
+    if ('childNodes' in node) {
+      for (let index = node.childNodes.length - 1; index >= 0; index -= 1) {
+        stack.push(node.childNodes[index] as HtmlNode);
+      }
+    }
+  }
+
+  return found.map(({ element, level }, index) => {
+    let anchor = htmlIdOf(element);
+    if (anchor === null) {
+      const base = `h${String(index + 1)}`;
+      anchor = base;
+      for (let suffix = 2; used.has(anchor); suffix += 1) anchor = `${base}-${String(suffix)}`;
+      used.add(anchor);
+    }
+    return { element, level, sectionId: sectionIdOf(index + 1), anchor };
+  });
+}
+
 // Collapse whitespace per line and drop empty lines.
 function tidy(text: string): string {
   return text
@@ -336,6 +409,9 @@ function tidy(text: string): string {
 // HTML is only analyzed statically; scripts never run (spec 8.4).
 // Extracts the title, the headings, and the text of the body and code. Visibility set by CSS and content scripts create later are not reproduced.
 export function analyzeHtml(source: string): DocumentAnalysis {
+  // Parse assuming scripts do not run. The contents of noscript are collected as displayed text too.
+  const document = parse(source, { scriptingEnabled: false });
+  const headingOf = new Map(htmlHeadings(document).map((heading) => [heading.element, heading]));
   const headings: Array<{ level: number; title: string; anchor: string }> = [];
   // Text per heading. The first entry is the preamble before the first heading.
   const bodies: string[] = [''];
@@ -357,13 +433,12 @@ export function analyzeHtml(source: string): DocumentAnalysis {
         if (text !== '') title = text;
       }
       if (HTML_SKIPPED.has(node.tagName)) return;
-      const match = /^h([1-6])$/.exec(node.tagName);
-      if (match) {
-        const id = node.attrs.find((attribute) => attribute.name === 'id')?.value;
+      const heading = headingOf.get(node);
+      if (heading) {
         headings.push({
-          level: Number(match[1]),
+          level: heading.level,
           title: collapse(htmlText(node)),
-          anchor: id ?? `h${String(headings.length + 1)}`,
+          anchor: heading.anchor,
         });
         // Heading text is not part of the body. From here to the next heading is this section's text.
         bodies.push('');
@@ -383,8 +458,7 @@ export function analyzeHtml(source: string): DocumentAnalysis {
       append(separator);
     }
   };
-  // Parse assuming scripts do not run. The contents of noscript are collected as displayed text too.
-  walk(parse(source, { scriptingEnabled: false }), 0);
+  walk(document, 0);
   const outline = buildOutline(headings);
   const [preamble, ...texts] = bodies.map(tidy);
   return { title, outline, sections: buildSections(outline, preamble ?? '', texts) };

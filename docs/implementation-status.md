@@ -457,6 +457,11 @@ P7時点の制約:
   - 別のAgent（Codex）のレビュー2往復: 1回目 must-fix 2・should-fix 1・nit 1（上の2件の指摘と、文書の内訳の書き分け）、2回目 nit 1（GCの待ちを期限に数えないのは最大10秒までと明記）でマージ可。
 - 0.1.1: 0.1.0の後の変更（検索workerと全threadの操作の後のGC、結果を変えない検索の削減、CIのactionの更新、文書）を、tag `v0.1.1`から`publish.yml`で公開した。
 - READMEのcloneからの導入の手順を直した: Bun 1.4.2の`bun add -g`は相対pathを今のdirectoryではなくglobalの導入先（`$BUN_INSTALL/install/global`）から解決するので、`./artifacts/...`は`ENOENT`になる（利用者の環境で発生。一時の`BUN_INSTALL`で再現し、globalの導入先に同じ相対pathのfileを置くと入ることで確認）→ `"$PWD/artifacts/vde-open-<版>.tgz"`の絶対pathにした。
+- 見出しの一覧（Outline）からの移動（利用者の報告: 右の見出しを押しても移動しない）: Markdownのpreviewでは動いていた（利用者が開いていたMarkdown 3件の全見出しで、Chromium・WebKit・Firefoxとも確認）。HTMLは、buttonが常に無効、管理画面のDOMだけを探していた、表示用のHTMLの見出しにidがない、の3点で動かなかった → staticの表示だけ対応した。
+  - 見出しのanchorは`htmlHeadings`（`packages/document/src/analysis.ts`）で決め、解析（outline）とstaticの変換で共有する。書かれたidはそのまま。idがない・`id=""`の見出しは`h{n}`、文書のどこかの要素（templateの中、表示で消える要素を含む）が同じidを持てば`h{n}-2`、`h{n}-3`…。
+  - staticの変換は、要素を消す前に見出しへそのidを付ける。変換後に表示に残り、かつそのidを持つ最初の要素である見出しだけを、`headingTargets`（sectionIdとanchor）としてrender grantで返す（`<object>`・SVGの`foreignObject`の中の見出しや、手前の要素とidが重なる見出しは入らない）。fragmentは`encodeURIComponent`した形で送り、browserはdecodeする前の形で先にidと`a`の`name`を探すので、その形に当たる要素がある見出し（`id="%E7%AF%80"`と`id="節"`の共存など）も入れない（`fragmentOfAnchor`をUIと判定で共有）。interactiveの出力は変えない。
+  - UIは、iframeの表示がstaticで、Outlineとiframeの版が同じで、sectionIdとanchorが`headingTargets`と一致する項目だけを押せる。iframeの`location.replace(documentUrl#anchor)`で移す（Chromium・WebKitは文書を読み直し、Firefoxはscrollだけ。どちらもhistoryは増えない）。押せない項目はtitleで理由を示す。interactiveは、読み直すとscriptの状態を失うので対象外。Markdownの移動は本文の中だけを探す（管理画面のidに当たらない）。
+  - 解析の結果が変わるので`HTML_STATIC_PARSER_PROFILE`を`html-static-v2`に上げた。daemonの起動時の確認（watcherの`checkDocuments()`）で、開いているfileの文書は新しい版になる。stdinの文書と、質問が固定した古い版は、版のまま今のcodeで解析・変換する。`tests/fixtures/handoff/feedback-response.json`の版を更新した。
 
 ## 全体のDoD（仕様17.1）
 

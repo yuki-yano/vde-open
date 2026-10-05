@@ -2,7 +2,14 @@
 // Rewrites the parse5 syntax tree and serializes it. No regex replacement on the HTML string.
 import { parse, serialize, type DefaultTreeAdapterMap } from 'parse5';
 
-import { ParseLimitError, PARSER_LIMITS } from './analysis.ts';
+import {
+  fragmentOfAnchor,
+  htmlHeadings,
+  htmlIdOf,
+  ParseLimitError,
+  PARSER_LIMITS,
+  type HtmlHeading,
+} from './analysis.ts';
 import { transformCss, type CssKind } from './css-transform.ts';
 import {
   classifyLink,
@@ -55,10 +62,18 @@ export interface StaticHtmlInput {
   sdkScript?: string;
 }
 
+// A heading the view can be moved to with `#anchor`. sectionId and anchor are the ones in the outline.
+export interface HeadingTarget {
+  sectionId: string;
+  anchor: string;
+}
+
 export interface StaticHtmlResult {
   html: string;
   links: StaticLink[];
   diagnostics: StaticDiagnostic[];
+  // Static only. Empty in interactive, whose output gets no added ids.
+  headingTargets: HeadingTarget[];
 }
 
 // Elements removed with their descendants, and the reason.
@@ -480,11 +495,56 @@ export function transformStaticHtml(
   // Parse the contents of noscript as ordinary elements. With the default setting the contents pass through as text
   // and escape removal (in interactive, the whole noscript element is removed).
   const document = parse(input.source, { scriptingEnabled: false });
+  // In static, give each heading the id its outline anchor names, before elements are removed (the numbering covers
+  // headings the view removes too). Interactive output is left as written, so its scripts and CSS see no added ids.
+  const headings = interactive ? [] : htmlHeadings(document);
+  for (const heading of headings) setId(heading.element, heading.anchor);
   rewriteTree(document, policy);
   if (interactive && input.sdkScript !== undefined) insertFirstScript(document, input.sdkScript);
   const html = serialize(document);
   assertOutput(html, interactive);
-  return { html, links, diagnostics: log.list() };
+  return { html, links, diagnostics: log.list(), headingTargets: reachable(document, headings) };
+}
+
+function setId(element: HtmlElement, id: string): void {
+  if (htmlIdOf(element) === id) return;
+  const kept = element.attrs.filter((attribute) => attribute.name !== 'id');
+  element.attrs = [...kept, { name: 'id', value: id }];
+}
+
+// The headings the view reaches with the fragment of their anchor: still in the shown document after the transform, and
+// the element the browser picks for that fragment (the contents of template are not shown). The browser first looks
+// for the fragment as written, as an id and then as the name of an a element, and only then for its percent-decoded
+// form (HTML Standard, the indicated part of the document). So the heading must be the first element with its id, and
+// when the fragment differs from the anchor (an encoded anchor), nothing may answer to the fragment as written.
+function reachable(document: HtmlParent, headings: HtmlHeading[]): HeadingTarget[] {
+  if (headings.length === 0) return [];
+  const present = new Set<HtmlElement>();
+  const firstById = new Map<string, HtmlElement>();
+  const anchorNames = new Set<string>();
+  const stack: HtmlNode[] = [document];
+  while (stack.length > 0) {
+    const node = stack.pop() as HtmlNode;
+    if (isElement(node)) {
+      present.add(node);
+      const id = htmlIdOf(node);
+      if (id !== null && !firstById.has(id)) firstById.set(id, node);
+      const name = node.tagName === 'a' ? getAttribute(node, 'name') : undefined;
+      if (name !== undefined && name !== '') anchorNames.add(name);
+    }
+    if (isParent(node)) {
+      for (let index = node.childNodes.length - 1; index >= 0; index -= 1) {
+        stack.push(node.childNodes[index] as HtmlNode);
+      }
+    }
+  }
+  return headings
+    .filter(({ element, anchor }) => {
+      if (!present.has(element) || firstById.get(anchor) !== element) return false;
+      const fragment = fragmentOfAnchor(anchor);
+      return fragment === anchor || (!firstById.has(fragment) && !anchorNames.has(fragment));
+    })
+    .map(({ sectionId, anchor }) => ({ sectionId, anchor }));
 }
 
 // Insert the script as the first child of head. It runs before any script in the document.

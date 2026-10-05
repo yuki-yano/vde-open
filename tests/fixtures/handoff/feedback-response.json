@@ -4,7 +4,7 @@
   "data": {
     "requestId": "req_2c7f51e2-16a6-43d1-a15d-2872d7e56c3b",
     "documentId": "doc_836b394b-083f-47ce-9044-5739f0d64d91",
-    "revision": "rev_035b7b54a46a75d29695f0852ec21519cd64f86482cfd1ebdbb0824cb4b4f5bc",
+    "revision": "rev_73396b5f40bf091d9c71ff319a42fc5169fa2230f048d440d027c4e743d76c4a",
     "status": "submitted",
     "submission": {
       "submissionId": "sub_c9d64f3b-0497-48d9-8f0e-e8d311c4cdd8",
@@ -14,9 +14,9 @@
         "comment": "説明文を短くしてください。"
       },
       "submittedAt": "2026-10-02T12:10:00.000Z",
-      "revision": "rev_035b7b54a46a75d29695f0852ec21519cd64f86482cfd1ebdbb0824cb4b4f5bc",
+      "revision": "rev_73396b5f40bf091d9c71ff319a42fc5169fa2230f048d440d027c4e743d76c4a",
       "confirmedAgainstOlderRevision": false,
-      "currentRevisionAtSubmit": "rev_035b7b54a46a75d29695f0852ec21519cd64f86482cfd1ebdbb0824cb4b4f5bc"
+      "currentRevisionAtSubmit": "rev_73396b5f40bf091d9c71ff319a42fc5169fa2230f048d440d027c4e743d76c4a"
     },
     "acknowledgedAt": null
   },
