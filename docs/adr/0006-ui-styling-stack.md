@@ -12,6 +12,7 @@
 - 部品はshadcn/uiを使う。primitiveはBase UI（`@base-ui/react`）を選ぶ（`shadcn init -b base`、style `base-nova`）。
 - shadcnの部品は、CLIが`apps/web/src/components/ui/`へ生成するsourceとして持つ。生成後のfileはこのrepositoryの整形とlintの対象にする。
 - 配色などの値は、shadcnが`apps/web/src/index.css`に定義するCSS custom propertiesで持つ。ライト／ダークは`html`の`dark` classで切り替える。
+- 配色はCatppuccinを使う。ライトはLatte、ダークはMocha。shadcnの各役割（`--primary`など）とコードの色付けへの割り当ては、Catppuccinのstyle guideに従う。
 - fontは`@fontsource-variable/geist`をbundleへ同梱する。外部のCDNやfont配信は使わない。
 - 引き継ぎ一式の仕様2.1のUIの行も、この内容へ書き換えた。
 

@@ -362,7 +362,7 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
           </p>
         )}
         {newer && (
-          <div role="alert" className="mt-3 rounded-md border border-amber-500/50 p-3 text-sm">
+          <div role="alert" className="mt-3 rounded-md border border-warning/50 p-3 text-sm">
             <p>A newer revision is available. This answer is for the older revision shown.</p>
             {confirmedRevision !== null && !confirmed && (
               <p className="mt-1">
