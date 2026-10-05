@@ -140,6 +140,42 @@ export function runNodeBin(
   runInvocation(nodeBinInvocation(packageDir, packageName, args), options);
 }
 
+// Wait for the child to exit after cancellation, so staging can be removed safely.
+export function runNodeBinAsync(
+  packageDir: string,
+  packageName: string,
+  args: string[],
+  options: RunOptions,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  const invocation = nodeBinInvocation(packageDir, packageName, args);
+  return new Promise((resolve, reject) => {
+    const child = spawn(invocation.command, invocation.args, {
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      stdio: 'inherit',
+    });
+    const abort = () => child.kill('SIGTERM');
+    signal?.addEventListener('abort', abort, { once: true });
+    child.on('error', (error) => {
+      signal?.removeEventListener('abort', abort);
+      reject(error);
+    });
+    child.on('close', (code, exitSignal) => {
+      signal?.removeEventListener('abort', abort);
+      if (signal?.aborted) reject(signal.reason);
+      else if (code === 0) resolve();
+      else {
+        reject(
+          new Error(`${describe(invocation)} failed with ${exitSignal ?? `exit ${String(code)}`}`),
+        );
+      }
+    });
+    if (signal?.aborted) abort();
+  });
+}
+
 export function runPnpm(args: string[], options: RunOptions): void {
   runInvocation(pnpmInvocation(args), options);
 }

@@ -33,6 +33,26 @@ pnpm test:pack                              # artifacts/vde-open-<版>.tgz を�
 bun add -g "$PWD/artifacts/vde-open-0.1.1.tgz"   # 絶対pathで指定する（bun add -g は相対pathを、今のdirectoryではなくglobalの導入先から解決する）
 ```
 
+## リンクしたCLIで開発する
+
+repositoryのrootで一度buildし、CLI packageをglobalにlinkします。
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+cd apps/cli
+bun link
+bun link -g vde-open
+cd ../..
+pnpm build:watch
+```
+
+`build:watch`は起動時にbuildし、その後はCLI・UI・共有source・build設定・同梱fileの変更を監視します。連続した保存をまとめ、buildを1つずつ実行します。両appと同梱fileを一時directoryで用意してから配布物を更新するので、buildが失敗しても直前に成功した出力が残ります。次のCLI実行から、link先の更新が反映されます。
+
+watcherはdaemonを起動・再起動しません。buildが成功したら`vo daemon restart`、続けて`vo ui`で更新した管理画面を開きます。登録した文書と保存済みの回答は引き継ぎますが、UIのURLが変わり、以前のbrowser sessionとinteractive HTMLの許可は失効します。watcherはCtrl+Cで終了します。build中ならそのprocessも止め、一時出力を削除します。
+
+UIを頻繁に調整するときは`pnpm dev`を使います。別の`.dev-home`でsourceのdaemonを動かし、Vite HMRでUIの変更を反映します。link先のCLIはbuildせず、backendのsourceを変更しても自動再起動しません。この環境へCLIでつなぐときは、同じ絶対pathの`VDE_OPEN_HOME`を指定します（repositoryのrootなら`VDE_OPEN_HOME="$PWD/.dev-home" vo list`）。
+
 ## `vde-open`と`vo`
 
 同じCLIを2つの名前で導入します。どちらで実行しても、同じstateとdaemonを使います。

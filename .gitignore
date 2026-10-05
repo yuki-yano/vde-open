@@ -13,3 +13,4 @@ dist/
 /apps/cli/docs/
 /artifacts/
 /.dev-home/
+/apps/cli/.build-*/

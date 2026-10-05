@@ -33,6 +33,26 @@ pnpm test:pack                              # builds artifacts/vde-open-<version
 bun add -g "$PWD/artifacts/vde-open-0.1.1.tgz"   # use an absolute path: bun add -g resolves relative paths from its global install directory, not the current one
 ```
 
+## Developing with a linked CLI
+
+From the repository root, build once and link the CLI package globally:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+cd apps/cli
+bun link
+bun link -g vde-open
+cd ../..
+pnpm build:watch
+```
+
+`build:watch` builds immediately, then watches the CLI, UI, shared sources, build configuration, and packaged files. Saves are coalesced and builds run one at a time. Both apps and the package files are prepared in a temporary directory before replacing the distribution; a failed build leaves the last successful output in place. The next linked CLI invocation uses the updated build.
+
+The watcher does not start or restart your daemon. After a successful build, run `vo daemon restart`, then `vo ui` to open the updated UI. Restarting preserves registered documents and saved answers, but changes the UI address and invalidates earlier browser sessions and interactive HTML permissions. Stop the watcher with Ctrl+C; it stops an active build and removes its temporary output.
+
+For frequent UI changes, use `pnpm dev` instead. It runs the source daemon with a separate `.dev-home` and serves the UI through Vite HMR. It does not rebuild the linked CLI or automatically restart the backend when its source changes. CLI commands for that environment need the same absolute `VDE_OPEN_HOME` (for example, `VDE_OPEN_HOME="$PWD/.dev-home" vo list` from the repository root).
+
 ## `vde-open` and `vo`
 
 The same CLI is installed under two names. Both use the same state and daemon.
