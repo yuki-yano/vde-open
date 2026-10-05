@@ -434,7 +434,13 @@ describe('jumping from the outline of an HTML document', () => {
 
     // The view of the new revision is ready before its body and outline.
     root.render(<Viewer api={api} document={documentOf({ revision: REV2 })} />);
-    await until(() => contentRequests.includes(REV2) && findItem('概要')?.disabled === true);
+    // The view leaves the screen until the grant of the new revision arrives, so wait for it to be back.
+    await until(
+      () =>
+        contentRequests.includes(REV2) &&
+        container.querySelector('iframe') !== null &&
+        findItem('概要')?.disabled === true,
+    );
     expect(item('概要').disabled).toBe(true);
     expect(item('概要').title).toBe('Available once the outline of the shown revision has loaded');
 
@@ -446,7 +452,11 @@ describe('jumping from the outline of an HTML document', () => {
     root.render(<Viewer api={api} document={documentOf()} />);
     await until(() => container.querySelector('iframe') !== null && enabled('概要'));
     root.render(<Viewer api={api} document={documentOf({ revision: REV2 })} />);
-    await until(() => container.textContent?.includes('Could not be read.') ?? false);
+    await until(
+      () =>
+        (container.textContent?.includes('Could not be read.') ?? false) &&
+        container.querySelector('iframe') !== null,
+    );
     expect(item('概要').disabled).toBe(true);
     expect(item('概要').title).toBe('Available once the outline of the shown revision has loaded');
     expect(item('詳細').disabled).toBe(true);
