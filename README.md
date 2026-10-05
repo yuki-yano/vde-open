@@ -30,7 +30,7 @@ To install from a clone of this repository (pins Node.js 24.21.0 in `mise.toml`)
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test:pack                              # builds artifacts/vde-open-<version>.tgz and verifies an install in a separate directory
-bun add -g ./artifacts/vde-open-0.1.1.tgz   # always start the path with ./ (otherwise it is read as a GitHub repository)
+bun add -g "$PWD/artifacts/vde-open-0.1.1.tgz"   # use an absolute path: bun add -g resolves relative paths from its global install directory, not the current one
 ```
 
 ## `vde-open` and `vo`
@@ -42,7 +42,7 @@ The same CLI is installed under two names. Both use the same state and daemon.
 
 If you already have a different `vo` (another tool's command, an alias, and so on), installing never overwrites or deletes it.
 
-- If the install target's bin directory (for `npm install -g`, npm's global bin) already has another `vo` file, npm stops with `EEXIST`. Do not use `--force`; it replaces the existing `vo`. Install with Bun instead, or into another prefix (for example `npm install -g --prefix ~/.local/vde-open ./artifacts/vde-open-0.1.0.tgz`) and use `vde-open` from that bin directory.
+- If the install target's bin directory (for `npm install -g`, npm's global bin) already has another `vo` file, npm stops with `EEXIST`. Do not use `--force`; it replaces the existing `vo`. Install with Bun instead, or into another prefix (for example `npm install -g --prefix ~/.local/vde-open ./artifacts/vde-open-0.1.1.tgz`) and use `vde-open` from that bin directory.
 - For a `vo` or alias elsewhere, whichever comes first on `PATH` runs. In that case, use `vde-open`. If you want a short name, define an alias in your shell (for example `alias vdo=vde-open`).
 
 ## Basic usage

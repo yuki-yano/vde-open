@@ -30,7 +30,7 @@ npm install -g vde-open  # これでも導入できる
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test:pack                              # artifacts/vde-open-<版>.tgz を作り、別のdirectoryへ導入して確かめる
-bun add -g ./artifacts/vde-open-0.1.1.tgz   # pathの先頭には必ず ./ を付ける（付けないとGitHubのrepositoryの名前として扱われる）
+bun add -g "$PWD/artifacts/vde-open-0.1.1.tgz"   # 絶対pathで指定する（bun add -g は相対pathを、今のdirectoryではなくglobalの導入先から解決する）
 ```
 
 ## `vde-open`と`vo`
@@ -42,7 +42,7 @@ bun add -g ./artifacts/vde-open-0.1.1.tgz   # pathの先頭には必ず ./ を�
 
 既に別の`vo`がある場合（ほかのtoolのcommandやaliasなど）は、導入でそれを上書きしたり消したりしません。
 
-- 導入先のbin（`npm install -g`ならnpmのglobalのbin）に別の`vo`のfileがあると、npmは`EEXIST`で導入をやめます。`--force`を付けると既存の`vo`を置き換えるので、付けないでください。Bunで導入するか、別のprefix（例: `npm install -g --prefix ~/.local/vde-open ./artifacts/vde-open-0.1.0.tgz`）へ導入して、そのbinの`vde-open`を使ってください。
+- 導入先のbin（`npm install -g`ならnpmのglobalのbin）に別の`vo`のfileがあると、npmは`EEXIST`で導入をやめます。`--force`を付けると既存の`vo`を置き換えるので、付けないでください。Bunで導入するか、別のprefix（例: `npm install -g --prefix ~/.local/vde-open ./artifacts/vde-open-0.1.1.tgz`）へ導入して、そのbinの`vde-open`を使ってください。
 - 別の場所の`vo`やaliasは、PATHの順番で先に見つかったものが動きます。その場合は`vde-open`を使ってください。短い名前を使いたいときは、自分のshellで別名（例: `alias vdo=vde-open`）を設定してください。
 
 ## 基本の使い方

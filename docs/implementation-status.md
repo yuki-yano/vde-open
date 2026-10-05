@@ -456,6 +456,7 @@ P7時点の制約:
   - 索引そのものの縮小（MiniSearchの置き換え）と、workerのheapの上限は行っていない。
   - 別のAgent（Codex）のレビュー2往復: 1回目 must-fix 2・should-fix 1・nit 1（上の2件の指摘と、文書の内訳の書き分け）、2回目 nit 1（GCの待ちを期限に数えないのは最大10秒までと明記）でマージ可。
 - 0.1.1: 0.1.0の後の変更（検索workerと全threadの操作の後のGC、結果を変えない検索の削減、CIのactionの更新、文書）を、tag `v0.1.1`から`publish.yml`で公開した。
+- READMEのcloneからの導入の手順を直した: Bun 1.4.2の`bun add -g`は相対pathを今のdirectoryではなくglobalの導入先（`$BUN_INSTALL/install/global`）から解決するので、`./artifacts/...`は`ENOENT`になる（利用者の環境で発生。一時の`BUN_INSTALL`で再現し、globalの導入先に同じ相対pathのfileを置くと入ることで確認）→ `"$PWD/artifacts/vde-open-<版>.tgz"`の絶対pathにした。
 
 ## 全体のDoD（仕様17.1）
 
