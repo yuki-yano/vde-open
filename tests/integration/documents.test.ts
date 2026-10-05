@@ -1,9 +1,17 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, renameSync, symlinkSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  existsSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  symlinkSync,
+  unlinkSync,
+} from 'node:fs';
+import { join, sep } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { gitDir, worktree } from '../../apps/cli/src/documents/git.fixture.ts';
 import { cliEntry, createTestHome, fixture, type TestHome } from './harness.ts';
 
 interface Summary {
@@ -13,6 +21,8 @@ interface Summary {
   sourceKind: string;
   title: string;
   displayPath: string | null;
+  canonicalPath: string | null;
+  repository: unknown;
   revision: string;
   order: number;
 }
@@ -657,5 +667,89 @@ describe('read and close', () => {
     const stale = await t.run(['list', '--cursor', cursor, '--json']);
     expect(stale.exitCode).toBe(4);
     expect(stale.json().error.code).toBe('E_CURSOR_STALE');
+  });
+});
+
+describe('DOC-017 the repository of each document', () => {
+  it('is shown by list, for a repository, a worktree with relative paths, and a file outside', async () => {
+    const work = realpathSync(t.work);
+    const repo = join(work, 'repo');
+    gitDir(join(repo, '.git'));
+    const checkout = join(repo, '.git', 'wt', 'feature', 'x');
+    worktree(join(repo, '.git'), checkout, 'x', {
+      head: 'ref: refs/heads/feature/x\n',
+      relativePaths: true,
+    });
+    t.write('repo/docs/a.md', '# a\n');
+    t.write('repo/.git/wt/feature/x/b.md', '# b\n');
+    t.write('notes/c.md', '# c\n');
+    await t.run(['open', 'repo/docs/a.md', 'repo/.git/wt/feature/x/b.md', 'notes/c.md', '--json']);
+
+    const segments = (path: string) => path.split(sep).filter((part) => part !== '');
+    expect(
+      (await listDocuments()).map(({ canonicalPath, repository }) => ({
+        canonicalPath,
+        repository,
+      })),
+    ).toEqual([
+      {
+        canonicalPath: join(repo, 'docs', 'a.md'),
+        repository: {
+          state: 'resolved',
+          id: join(repo, '.git'),
+          nameSegments: segments(repo),
+          checkout: { id: repo, kind: 'main' },
+          pathInCheckout: ['docs', 'a.md'],
+        },
+      },
+      {
+        canonicalPath: join(checkout, 'b.md'),
+        repository: {
+          state: 'resolved',
+          id: join(repo, '.git'),
+          nameSegments: segments(repo),
+          checkout: { id: checkout, kind: 'linked', name: 'x', branch: 'feature/x' },
+          pathInCheckout: ['b.md'],
+        },
+      },
+      { canonicalPath: join(work, 'notes', 'c.md'), repository: null },
+    ]);
+  });
+
+  // Windows has no O_NOFOLLOW; the type is checked before opening instead. This runs on the Windows CI too.
+  it('does not follow a symlinked HEAD', async (context) => {
+    const work = realpathSync(t.work);
+    gitDir(join(work, 'repo', '.git'));
+    t.write('elsewhere/HEAD', 'ref: refs/heads/main\n');
+    unlinkSync(join(work, 'repo', '.git', 'HEAD'));
+    try {
+      symlinkSync(join(work, 'elsewhere', 'HEAD'), join(work, 'repo', '.git', 'HEAD'));
+    } catch {
+      // Creating a symlink needs a privilege on Windows.
+      context.skip();
+    }
+    t.write('repo/a.md', '# a\n');
+    await t.run(['open', 'repo/a.md', '--json']);
+
+    expect((await listDocuments())[0]?.repository).toMatchObject({
+      state: 'unresolved',
+      reason: 'invalid-git-dir',
+    });
+  });
+
+  it('is in the first list after a restart, including a missing document', async () => {
+    const work = realpathSync(t.work);
+    gitDir(join(work, 'repo', '.git'));
+    t.write('repo/a.md', '# a\n');
+    t.write('repo/gone/b.md', '# b\n');
+    await t.run(['open', 'repo/a.md', 'repo/gone/b.md', '--json']);
+    await t.run(['daemon', 'stop', '--json']);
+    unlinkSync(join(work, 'repo', 'gone', 'b.md'));
+
+    // list starts a new daemon, which detects repositories before it accepts requests.
+    expect((await listDocuments()).map((document) => document.repository)).toMatchObject([
+      { state: 'resolved', id: join(work, 'repo', '.git'), pathInCheckout: ['a.md'] },
+      { state: 'resolved', id: join(work, 'repo', '.git'), pathInCheckout: ['gone', 'b.md'] },
+    ]);
   });
 });

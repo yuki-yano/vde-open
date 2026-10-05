@@ -28,6 +28,7 @@ import {
   VdeError,
   type CloseResult,
   type DocumentFormat,
+  type DocumentRepository,
   type DocumentSummary,
   type HtmlMode,
   type LinkOpenResult,
@@ -60,6 +61,13 @@ import {
   watchBaseOf,
   type Candidate,
 } from './enumerate.ts';
+import {
+  RepositoryTracker,
+  type DetectionBatch,
+  type RepositoryTrackerOptions,
+  type StagedRepositories,
+  type TrackedDocument,
+} from './repository-tracker.ts';
 import { computeRevision } from './revision.ts';
 import {
   canonicalizePath,
@@ -105,6 +113,8 @@ export interface DocumentServiceOptions {
   scan?: (kind: ScanKind, text: string) => Promise<ScannedReference[]>;
   // Per-document search state shown in the list. Without it, documents are treated as excluded from search.
   searchStateOf?: (documentId: string) => DocumentSummary['searchState'];
+  // How the repository of a file document is detected (tests replace the filesystem and the wait limit).
+  repositories?: RepositoryTrackerOptions;
 }
 
 // Result of re-reading a file. signature is the file state matching the content read; null if it could not be read.
@@ -214,6 +224,7 @@ export function toSummary(
   searchState: DocumentSummary['searchState'] = 'excluded',
   pendingRequestIds: string[] = [],
   interactiveAllowed = false,
+  repository: DocumentRepository = null,
 ): DocumentSummary {
   return {
     documentId: record.documentId,
@@ -223,6 +234,8 @@ export function toSummary(
     title: record.title,
     displayPath: record.displayPath,
     pathSegments: record.pathSegments,
+    canonicalPath: record.sourceKind === 'file' ? record.canonicalPath : null,
+    repository,
     revision: record.currentRevision,
     sourceState: record.sourceState,
     searchState,
@@ -341,6 +354,8 @@ export class DocumentService {
   readonly #interactive = new Map<string, { epoch: number; generation: number }>();
   #interactiveGenerations = 0;
   readonly #linkConfirmations = new Map<string, LinkConfirmation>();
+  // Which repository each open file document belongs to. Daemon memory only.
+  readonly #repositories: RepositoryTracker;
 
   constructor(options: DocumentServiceOptions) {
     this.#store = options.store;
@@ -351,6 +366,94 @@ export class DocumentService {
     this.#readSource = options.readSource ?? readSourceFile;
     this.#scan = options.scan ?? ((kind, text) => Promise.resolve(scanReferences(kind, text)));
     this.#searchStateOf = options.searchStateOf ?? (() => 'excluded');
+    this.#repositories = new RepositoryTracker(options.repositories);
+  }
+
+  // Detects the repositories of the open file documents before the daemon accepts requests.
+  // Waits up to the wait limit. Documents still being detected show `pending` and are updated when detection finishes.
+  // Missing documents are detected from their stored path too, since nothing is known about them yet.
+  // Nobody holds a list yet, so the catalog version does not change and nothing is notified.
+  async initializeRepositories(): Promise<void> {
+    const state = this.#store.payload;
+    const targets = this.#trackedFiles(state, state.openOrder);
+    if (targets.length === 0) return;
+    const batch = this.#repositories.begin(targets.map((target) => target.path));
+    await this.#repositories.wait(batch);
+    const staged = this.#repositories.stage(batch, targets, { pendingWhenUnfinished: true });
+    this.#repositories.apply(staged);
+    this.#applyWhenDone(batch, staged.unfinished);
+  }
+
+  #trackedFiles(state: StatePayload, documentIds: Iterable<string>): TrackedDocument[] {
+    const targets: TrackedDocument[] = [];
+    for (const documentId of documentIds) {
+      const record = state.documents[documentId];
+      if (record?.isOpen && record.sourceKind === 'file' && record.canonicalPath !== null) {
+        targets.push({ documentId, path: record.canonicalPath, epoch: this.openEpoch(documentId) });
+      }
+    }
+    return targets;
+  }
+
+  // Applies a finished (or partly finished) batch in its own transaction.
+  // Documents closed or closed and reopened since they were scheduled are skipped.
+  // If anything shown changes, the catalog version goes up so a paged list started before cannot mix old and new values.
+  async #applyBatch(batch: DetectionBatch, targets: TrackedDocument[]): Promise<TrackedDocument[]> {
+    let staged: StagedRepositories | null = null;
+    await this.#store.transaction((tx) => {
+      const live = targets.filter(
+        (target) =>
+          tx.state.documents[target.documentId]?.isOpen === true &&
+          this.openEpoch(target.documentId) === target.epoch,
+      );
+      const next = this.#repositories.stage(batch, live, { pendingWhenUnfinished: false });
+      if (next.changed) tx.state.catalogVersion += 1;
+      staged = next;
+    });
+    // Applied right after the commit, before any other request can read the list.
+    const applied = staged as StagedRepositories | null;
+    if (applied === null) return [];
+    this.#repositories.apply(applied);
+    if (applied.changed) this.#emit({ type: 'catalog-changed' });
+    return applied.unfinished;
+  }
+
+  // Detection that did not finish within the wait limit keeps running. Each result is applied when it arrives,
+  // without waiting for the rest of its batch (one stuck path must not hold back the others).
+  // Results that arrive close together are gathered into one transaction and one notification; the gathering
+  // grows while results keep coming (see REPOSITORY_LATE_APPLY_MS).
+  #applyWhenDone(batch: DetectionBatch, targets: TrackedDocument[]): void {
+    if (targets.length === 0) return;
+    let ready: TrackedDocument[] = [];
+    let timer: NodeJS.Timeout | null = null;
+    let delay = this.#repositories.lateApplyMs;
+    const flush = () => {
+      timer = null;
+      const now = ready;
+      ready = [];
+      delay = Math.min(delay * 2, this.#repositories.lateApplyMaxMs);
+      // The store can be closed by then (the daemon is stopping). The value stays as it was.
+      void this.#applyBatch(batch, now).catch(() => undefined);
+    };
+    for (const target of targets) {
+      void batch.settled(target.path).then(() => {
+        ready.push(target);
+        timer ??= setTimeout(flush, delay);
+      });
+    }
+  }
+
+  // Detects again for documents that are not missing (an explicit refresh). Missing documents keep their value.
+  async #redetect(documentIds: string[]): Promise<void> {
+    const state = this.#store.payload;
+    const targets = this.#trackedFiles(
+      state,
+      documentIds.filter((documentId) => state.documents[documentId]?.sourceState !== 'missing'),
+    );
+    if (targets.length === 0) return;
+    const batch = this.#repositories.begin(targets.map((target) => target.path));
+    await this.#repositories.wait(batch);
+    this.#applyWhenDone(batch, await this.#applyBatch(batch, targets));
   }
 
   // Runs "read then publish" one at a time for the same file.
@@ -610,6 +713,7 @@ export class DocumentService {
       openEpochs: this.#openEpochs.size,
       interactive: this.#interactive.size,
       linkConfirmations: this.#linkConfirmations.size,
+      ...this.#repositories.retainedCounts(),
     };
   }
 
@@ -704,6 +808,8 @@ export class DocumentService {
     ) {
       throw new VdeError('E_INVALID_ARGUMENT', '--html-mode applies to HTML documents.');
     }
+    // Repository detection runs while the documents are read, and is waited for up to the wait limit.
+    const batch = this.#repositories.begin(resolved.unique.keys());
     return this.#withPathLocks(resolved.unique.keys(), async () => {
       const incoming = await this.#readCandidates(resolved, settings, warnings);
       // With --watch, the rule alone can be registered even if there are no documents yet.
@@ -712,7 +818,8 @@ export class DocumentService {
           paths: params.paths,
         });
       }
-      return this.#commitOpen(params, incoming, watchTargets, settings, warnings);
+      await this.#repositories.wait(batch);
+      return this.#commitOpen(params, incoming, watchTargets, settings, warnings, batch);
     });
   }
 
@@ -722,6 +829,7 @@ export class DocumentService {
     watchTargets: Awaited<ReturnType<typeof expandTargets>>['watchTargets'],
     settings: AssetSettings,
     warnings: Warning[],
+    batch?: DetectionBatch,
   ): Promise<ServiceResult<OpenResult>> {
     if ((params.title !== undefined || params.key !== undefined) && incoming.length !== 1) {
       throw new VdeError(
@@ -732,6 +840,7 @@ export class DocumentService {
     }
 
     const events: DocumentEvent[] = [];
+    let repositories: StagedRepositories | null = null;
     const result = await this.#store.transaction((tx) => {
       const state = tx.state;
       const timestamp = this.#now().toISOString();
@@ -797,9 +906,16 @@ export class DocumentService {
       }
 
       assertOpenLimits(state);
-      if (created + updated > 0) state.catalogVersion += 1;
+      // Matched with the documents after they are registered (a new document has an ID only now).
+      if (batch !== undefined) {
+        repositories = this.#repositories.stage(batch, this.#trackedFiles(state, touched), {
+          pendingWhenUnfinished: true,
+        });
+      }
+      const repositoryChanged = (repositories as StagedRepositories | null)?.changed === true;
+      if (created + updated > 0 || repositoryChanged) state.catalogVersion += 1;
       if (state.activeDocumentId === null) state.activeDocumentId = state.openOrder[0] ?? null;
-      if (openSetChanged) events.unshift({ type: 'catalog-changed' });
+      if (openSetChanged || repositoryChanged) events.unshift({ type: 'catalog-changed' });
 
       return {
         data: {
@@ -813,6 +929,12 @@ export class DocumentService {
         warnings,
       };
     });
+    // Applied right after the commit, before any other request can read the list.
+    const staged = repositories as StagedRepositories | null;
+    if (staged !== null && batch !== undefined) {
+      this.#repositories.apply(staged);
+      this.#applyWhenDone(batch, staged.unfinished);
+    }
     for (const item of incoming) this.#record(item);
     // Script permission changes only after the commit. An explicit interactive option grants it;
     // a static option or a stdin update (replacement with other content) revokes it. Reopening the same file keeps it.
@@ -1139,6 +1261,9 @@ export class DocumentService {
       this.#searchStateOf(documentId),
       pendingRequestIdsOf(state, documentId),
       this.interactiveAllowed(documentId),
+      state.documents[documentId]?.sourceKind === 'file'
+        ? this.#repositories.view(documentId)
+        : null,
     );
   }
 
@@ -1624,6 +1749,7 @@ export class DocumentService {
     for (const documentId of result.data.closed) {
       this.#openEpochs.set(documentId, this.openEpoch(documentId) + 1);
     }
+    this.#repositories.forget(result.data.closed);
     if (changed) this.#emit({ type: 'catalog-changed' });
     for (const event of cancelled) this.#emit(event);
     return result;
@@ -1732,6 +1858,8 @@ export class DocumentService {
     for (const documentId of targets) {
       if ((await this.refreshFromDisk(documentId)).changed) changed.push(documentId);
     }
+    // Only an explicit refresh detects repositories again (not the automatic reload on a file change).
+    await this.#redetect(targets);
     const state = this.#store.payload;
     return {
       data: {
@@ -1901,6 +2029,7 @@ export class DocumentService {
     const before = this.#store.payload;
     const rule = before.watchRules.find((candidate) => candidate.watchId === watchId);
     if (!rule) return [];
+    const batch = this.#repositories.begin(candidates.keys());
     const isOpenPath = (state: StatePayload, path: string) =>
       Object.values(state.documents).some(
         (record) => record.isOpen && record.sourceKind === 'file' && record.canonicalPath === path,
@@ -1960,8 +2089,10 @@ export class DocumentService {
       }
     }
     if (discovered.length === 0) return [];
+    await this.#repositories.wait(batch);
 
     const appliedItems: Incoming[] = [];
+    let repositories: StagedRepositories | null = null;
     const registered = await this.#store.transaction((tx) => {
       const state = tx.state;
       const current = state.watchRules.find((candidate) => candidate.watchId === watchId);
@@ -1979,10 +2110,18 @@ export class DocumentService {
       }
       if (added.length === 0) return [];
       assertOpenLimits(state);
+      repositories = this.#repositories.stage(batch, this.#trackedFiles(state, added), {
+        pendingWhenUnfinished: true,
+      });
       state.catalogVersion += 1;
       if (state.activeDocumentId === null) state.activeDocumentId = state.openOrder[0] ?? null;
       return added;
     });
+    const staged = repositories as StagedRepositories | null;
+    if (staged !== null) {
+      this.#repositories.apply(staged);
+      this.#applyWhenDone(batch, staged.unfinished);
+    }
     for (const item of appliedItems) this.#record(item);
     if (registered.length > 0) this.#emit({ type: 'catalog-changed' });
     return registered;

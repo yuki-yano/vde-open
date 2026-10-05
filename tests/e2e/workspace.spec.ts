@@ -27,6 +27,8 @@ test('DOC-007 / DOC-008: the tree view tells same-named files apart, and reorder
 
   // In the flat view, move an item up.
   await expect(sidebar.getByRole('listitem')).toHaveText([/alphaの文書/, /betaの文書/, /説明/]);
+  // The row buttons take clicks only while the row is hovered or has focus.
+  await sidebar.getByRole('listitem').filter({ hasText: '説明' }).hover();
   await sidebar.getByRole('button', { name: 'Move 説明 up' }).click();
   await expect(sidebar.getByRole('listitem')).toHaveText([/alphaの文書/, /説明/, /betaの文書/]);
 
@@ -140,6 +142,7 @@ test('removing from the list keeps the file', async ({ page }) => {
   t.write('a.md', '# 残すfile\n');
   await t.json(['open', 'a.md']);
   await page.goto(await t.bootstrapUrl());
+  await sidebarOf(page).getByRole('listitem').filter({ hasText: '残すfile' }).hover();
   await sidebarOf(page).getByRole('button', { name: 'Remove 残すfile from the list' }).click();
   await expect(sidebarOf(page)).toContainText('No documents are open');
   const { existsSync } = await import('node:fs');

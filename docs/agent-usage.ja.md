@@ -32,6 +32,17 @@ vo search '有効期限' --document <documentId> --json
 - 対象の文書が1件も検索できないときは、空の結果ではなく`E_INDEX_NOT_READY`になる（`error.details`に`failedDocuments`と`indexingDocuments`）。登録中なら、少し待ってから検索し直す。
 - 一致がなければ`hits`は空になる。語を減らした別の検索へは、自動では切り替わらない。
 
+## 文書が属するrepo
+
+`list`と`open`の各文書には、`canonicalPath`（symlinkを解決した絶対path。OSの書き方のまま。stdinと生成した文書は`null`）と`repository`がある。
+
+- `null`: Gitのrepoの外のfile、stdinや生成した文書。
+- `{ "state": "resolved", "id", "nameSegments", "checkout", "pathInCheckout" }`: `id`はrepoの鍵。common git dir、またはrepoとのつながりを確かめられないとき（symlinkの`.git`、submoduleのように`commondir`のない`.git`ファイル）はcheckoutのdirectory。`nameSegments`の最後の要素が表示する名前。`checkout`は`{ "kind": "main", "id" }`、worktreeなら`{ "kind": "linked", "id", "name", "branch" }`。`name`はworktree自身の名前で変わらない。`branch`は最後に確かめたとき（open、明示的なrefresh、daemonの起動）にHEADが指していたbranchで、detached HEADなら`null`。`.git`directoryの中の文書（片付けたworktreeなど）は`checkout`が`null`。`pathInCheckout`はcheckoutからのpath（file名を含む）。
+- `{ "state": "unresolved", "id", "nameSegments", "pathInCheckout", "reason" }`: `.git`は見つかったが、確かめられなかった（`reason`は`invalid-git-file`、`invalid-git-dir`、`link-mismatch`、`unreadable`、`limit-exceeded`、`blocked-path`のどれか）。上にあるrepoには入れない。
+- `{ "state": "pending" }`: 待ち時間の上限までに判定が終わっていない。少し後で`list`をやり直す。
+
+これらはpathから決まる値で、保存しない。値が変わるとcatalogVersionが上がるので、その前に取った`list`のcursorは`E_CURSOR_STALE`になる。
+
 ## 版
 
 `search`の結果の`revision`を`read --revision`へ渡すと、検索した時点と同じ内容を取得できる。その版がもう保持されていなければ`E_REVISION_UNAVAILABLE`になり、現在の版では代用されない。`sectionId`は版の中でだけ決まるので、`revision`と組にして使う。

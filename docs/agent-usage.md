@@ -32,6 +32,17 @@ vo search '有効期限' --document <documentId> --json
 - If none of the target documents can be searched, the result is `E_INDEX_NOT_READY` instead of an empty result (`error.details` has `failedDocuments` and `indexingDocuments`). If documents are still being indexed, wait a little and search again.
 - When nothing matches, `hits` is empty. The search does not automatically retry with fewer terms.
 
+## Which repository a document is in
+
+Each document in `list` and `open` has `canonicalPath` (the absolute path with symlinks resolved, as the OS writes it; `null` for stdin and generated documents) and `repository`:
+
+- `null`: a file outside any Git repository, or a stdin or generated document.
+- `{ "state": "resolved", "id", "nameSegments", "checkout", "pathInCheckout" }`: `id` is the repository key: its common Git directory, or the checkout directory when the link to a repository cannot be verified (a symlinked `.git`, or a `.git` file without `commondir` such as a submodule). The last element of `nameSegments` is the name to show. `checkout` is `{ "kind": "main", "id" }`, or `{ "kind": "linked", "id", "name", "branch" }` for a worktree: `name` is the worktree's own name and never changes; `branch` is the branch HEAD pointed to when last checked (on open, an explicit refresh, or a daemon start), and `null` for a detached HEAD. `checkout` is `null` for a document inside the `.git` directory (for example, a removed worktree). `pathInCheckout` is the path from the checkout, including the file name.
+- `{ "state": "unresolved", "id", "nameSegments", "pathInCheckout", "reason" }`: a `.git` was found but could not be verified (`reason` is one of `invalid-git-file`, `invalid-git-dir`, `link-mismatch`, `unreadable`, `limit-exceeded`, `blocked-path`). It is not part of any repository above it.
+- `{ "state": "pending" }`: detection has not finished within its wait limit. Run `list` again later.
+
+These values are derived from paths and are not stored. A change raises the catalog version, so a `list` cursor taken before fails with `E_CURSOR_STALE`.
+
 ## Revisions
 
 Pass the `revision` from a `search` result to `read --revision` to get the same content that was searched. If that revision is no longer kept, the result is `E_REVISION_UNAVAILABLE`; the current revision is never substituted. A `sectionId` is only meaningful within a revision, so always use it together with `revision`.

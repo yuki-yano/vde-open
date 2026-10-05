@@ -35,6 +35,60 @@ export const assetRecordSchema = z.strictObject({
 });
 export type AssetRecord = z.infer<typeof assetRecordSchema>;
 
+// The checkout of a repository a document is in.
+// main: the checkout that owns the repository. linked: a worktree added with `git worktree add`.
+export const repositoryCheckoutSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ id: z.string(), kind: z.literal('main') }),
+  z.strictObject({
+    id: z.string(),
+    kind: z.literal('linked'),
+    // The name of the worktree's administrative directory (.git/worktrees/<name>). Unique within the repository.
+    name: z.string(),
+    // The branch HEAD pointed to when last checked. null for a detached HEAD and when no branch name is known.
+    branch: z.string().nullable(),
+  }),
+]);
+export type RepositoryCheckout = z.infer<typeof repositoryCheckoutSchema>;
+
+export const repositoryReasonSchema = z.enum([
+  'invalid-git-file',
+  'invalid-git-dir',
+  'link-mismatch',
+  'unreadable',
+  'limit-exceeded',
+  'blocked-path',
+]);
+export type RepositoryReason = z.infer<typeof repositoryReasonSchema>;
+
+// Which Git repository a file document belongs to. Derived from the file's path by the daemon and never stored.
+// null for a file outside any repository, stdin, and generated documents.
+export const documentRepositorySchema = z
+  .discriminatedUnion('state', [
+    z.strictObject({
+      state: z.literal('resolved'),
+      // The repository key: the common Git directory, or the checkout directory when the link to a repository cannot be verified.
+      id: z.string(),
+      // The location the display name comes from. The last segment is the name; parents tell same-named repositories apart.
+      nameSegments: z.array(z.string()),
+      // null when the document is inside the .git directory (for example, a removed worktree).
+      checkout: repositoryCheckoutSchema.nullable(),
+      // From the checkout to the document, including the file name. From the repository location when checkout is null.
+      pathInCheckout: z.array(z.string()),
+    }),
+    z.strictObject({
+      // A .git was found, but its metadata could not be verified. Never placed in a parent repository.
+      state: z.literal('unresolved'),
+      id: z.string(),
+      nameSegments: z.array(z.string()),
+      pathInCheckout: z.array(z.string()),
+      reason: repositoryReasonSchema,
+    }),
+    // Detection did not finish within the wait limit and there is no earlier result.
+    z.strictObject({ state: z.literal('pending') }),
+  ])
+  .nullable();
+export type DocumentRepository = z.infer<typeof documentRepositorySchema>;
+
 // Spec 4.2. Contains neither document content nor answers.
 export const documentSummarySchema = z.strictObject({
   documentId: documentIdSchema,
@@ -44,6 +98,9 @@ export const documentSummarySchema = z.strictObject({
   title: z.string(),
   displayPath: z.string().nullable(),
   pathSegments: z.array(z.string()),
+  // The absolute path with symlinks resolved, as the OS writes it. null for stdin and generated documents.
+  canonicalPath: z.string().nullable(),
+  repository: documentRepositorySchema,
   revision: revisionSchema.nullable(),
   sourceState: sourceStateSchema,
   searchState: searchStateSchema,

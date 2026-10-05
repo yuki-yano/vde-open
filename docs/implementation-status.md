@@ -465,6 +465,21 @@ P7時点の制約:
   - UIは、iframeの表示がstaticで、Outlineとiframeの版が同じで、sectionIdとanchorが`headingTargets`と一致する項目だけを押せる。iframeの`location.replace(documentUrl#anchor)`で移す（Chromium・WebKitは文書を読み直し、Firefoxはscrollだけ。どちらもhistoryは増えない）。押せない項目はtitleで理由を示す。interactiveは、読み直すとscriptの状態を失うので対象外。Markdownの移動は本文の中だけを探す（管理画面のidに当たらない）。
   - 解析の結果が変わるので`HTML_STATIC_PARSER_PROFILE`を`html-static-v2`に上げた。daemonの起動時の確認（watcherの`checkDocuments()`）で、開いているfileの文書は新しい版になる。stdinの文書と、質問が固定した古い版は、版のまま今のcodeで解析・変換する。`tests/fixtures/handoff/feedback-response.json`の版を更新した。
 
+## 一覧のrepo表示と形式の色（利用者の依頼、2026-10-05）
+
+- 目的: Flat・Treeのどちらでも、各文書がどのGitのrepo（worktreeならどのworktree）に属するかを読めるようにする。HTMLとMarkdownを見た目で見分けられるようにする。方式は、別のAgent（Codex、Claude）による設計のレビュー5往復でmust-fixが0になった案（全項目を利用者が承認）。
+- daemon: `apps/cli/src/documents/repository.ts`（判定）、`repository-tracker.ts`（memoryでの保持と反映の規則）。`DocumentSummary`に`repository`と`canonicalPath`を足した（`vo list --json`にも出る）。stateには保存しない（`STATE_FORMAT_VERSION`は1のまま）。判定の手順・検証・更新の契機は`docs/architecture.md`、信頼できないmetadataの扱いは`docs/security-model.md`、項目の意味は`docs/agent-usage.md`。
+- 管理画面: Flatの行は2行（2行目にrepo・worktree・checkout内のpath。dirは直近の1つで、同じ名前のfileが重なるときだけ段を足す）。縮む順はworktree名、dir、file名の語幹で、repo名（行幅の6割まで）と拡張子は縮めない。読み上げの名前は1行目のまま、2行目と形式は`aria-describedby`。keyboardのfocusでは全文を折り返して出す。Treeは最上位をrepo、その下にworktree（1つだけならrepoの行に並べる）。repoとworktreeの行は上に貼り付く。一覧の更新でfocusと位置を保つ（作り直された行だけにfocusを戻す。見えていた行が押し出されたときだけscrollする）。viewerのheaderにrepo・worktree（名前も）・checkout内のpathを省略せずに出す。Markdownは青の`FileText`、HTMLはオレンジの`FileCode`（lightは`#c44a00`）。
+- 180pxの対策: badgeは一覧の内側が13rem未満のときと、行のhover・focusのときにiconだけにする（文字は読み上げ用に残す。`Question`と並ぶ状態badgeは常にicon）。上下移動のbuttonは13rem未満で出さず、Alt+↑／↓で並べ替える。行のbuttonはhover・focus中とタッチの画面でだけクリックを受ける。
+- 性能: 一覧の行が重くなり、1,000文書で最初の表示が変更前より約29%遅かった（CPUのprofileでは、base UIのtoolbarの切り替えが表示状態を確かめるときに強制されるstyleの再計算）→ 一覧の行に`content-visibility: auto`を付け、画面外の行のstyleとlayoutを省いた（focusの枠は行の内側に描く）。変更前より少し速い。数値は`docs/performance.md`。
+- 試験の環境: このworktreeは`.git/wt/feature/sidebar-repository`にあり、Viteの既定の`server.fs.deny`（`**/.git/**`）でhappy-domのDOM試験が「Cannot find module」になる。無視対象の`tmp/vitest.worktree.config.ts`（`server.fs.deny`を空にする）で実行した。codeの問題ではない。
+- 実装のレビュー（別のAgent、Codex・Claude）1回目の指摘への対応: 見えない行のボタンがbadgeの上でtapを受けて文書を外す（ボタンはhover・focus中とタッチの画面でだけクリックを受ける）、遅れた判定が回の全部を待つ（届いたものから反映）、checkoutの共有がrepoの鍵と名前に及ばない（checkoutの項目に移した）、Windowsで終端のsymlinkをたどる（開く前の`lstat`と、開いた後の`ino`・`dev`の照合）、閉じて開き直した文書がfocusとscrollを奪う、上下移動とbadgeの文字のしきい値、同じ名前のfileが多いときの短い表示の計算（件数の2乗→ほぼ比例）、同じ場所の通常のrepoとbare repoの名前、viewerのheaderの区別済みの名前、Alt+↓を続けて押すと2回目の並べ替えが失われる（1件ずつ、前の結果の版で保存）。
+- 実装のレビュー2回目の指摘への対応: マウスのあるタッチパネルの画面で、tapの直前のhoverで現れたボタンがclickを受ける（タッチのできる画面ではボタンを常に出し、pointerのclickは押し始めが同じボタンのときだけ受ける。CDPでタッチを送るe2eで確認）、並べ替えの保存待ちの間に取り直した一覧が順を戻す・保存の応答が版を戻す（保存待ちの順をstateに持ち、版は戻さない。DOM試験）、短い表示の計算に残っていた配列の複写（pushに）、遅れた判定の反映の間隔（250msから1秒まで延ばす）。
+- 実装のレビュー3回目の指摘への対応: 保存の後の一覧の取り直しの間に押した並べ替えが、取り直しの完了で消える・取り直しの失敗でも保存待ちの順を消す（取り直しが成功し、始めたときに保存待ちがなく、その後も増えていないときだけ消す。DOM試験）。
+- 未実施（利用者の判断待ち）: 応答しないnetwork mountの上に文書を置いた手動確認（CIでは再現できない。並行数の上限と、2つの処理を止めたままでも`vo open`・`vo refresh`が3秒以内に応答することはunit試験で確認）。Windowsでの手動確認（Windows CIで実行される`tests/integration/documents.test.ts`に、通常のrepo・worktree・repoの外・再起動・symlinkの`HEAD`の試験を足した）。
+- 既知の制限: 判定のfilesystem処理が応答しないmountで止まっている間にdaemonを止めると、lockは解放され`vo daemon stop`は返るが、processはその処理がOSから返るまで残る（文書そのものの読み込みが止まった場合と同じ）。
+- 見つけた既存の問題（今回は直していない）: 幅180pxで、一覧の見出しの「Tree」の切り替えが一部見切れる。
+
 ## 全体のDoD（仕様17.1）
 
 機能完了条件:
@@ -531,7 +546,7 @@ P7時点の制約:
 | DOC-004 | P2 | PASS | `tests/integration/watch.test.ts` |  |
 | DOC-005 | P2 | PASS | `tests/integration/watch.test.ts` |  |
 | DOC-006 | P2 | PASS | `tests/integration/watch.test.ts` |  |
-| DOC-007 | P2 | PASS | `apps/web/src/lib/tree.test.ts`、`tests/e2e/workspace.spec.ts` |  |
+| DOC-007 | P2 | PASS | `apps/web/src/lib/tree.test.ts`、`tests/e2e/workspace.spec.ts`、`tests/e2e/repository.spec.ts` | 2026-10-05: Treeの最上位をrepoにした（同じ名前の`docs/a.md`はrepoかpathで分かれる） |
 | DOC-008 | P2 | PASS | `tests/integration/http.test.ts`、`tests/e2e/workspace.spec.ts` |  |
 | DOC-009 | P2 | PASS | `tests/integration/watch.test.ts`、`tests/e2e/viewer.spec.ts` |  |
 | DOC-010 | P2 | PASS | `apps/cli/src/documents/service-analysis.test.ts` |  |
@@ -541,6 +556,7 @@ P7時点の制約:
 | DOC-014 | P2 | PASS | `tests/e2e/workspace.spec.ts`、`tests/e2e/viewer.spec.ts` |  |
 | DOC-015 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | DOC-016 | P5 | PASS | `tests/integration/feedback.test.ts`（close --all）、`tests/integration/watch.test.ts` | 回答の履歴と原本は残り、回答待ちは中止になる |
+| DOC-017 | 追加 | PASS | `apps/cli/src/documents/repository.test.ts`、`apps/cli/src/documents/service-repository.test.ts`、`tests/integration/documents.test.ts`（DOC-017）、`apps/web/src/lib/tree.test.ts`、`apps/web/src/lib/repository-labels.test.ts`、`apps/web/src/components/sidebar.dom.test.tsx`、`tests/e2e/repository.spec.ts` | 各文書の`repository`（通常のrepo、vwのworktree、相対path、bare、submodule、`.git`の中、repoの外、reftable）。同じcheckoutはbranchを共有し、変わるとcatalogVersionが上がる。古い判定で巻き戻らない。再起動直後の一覧に入る。Flatの2行目、Treeのrepoとworktree、180px・260px・drawerでrepo名と拡張子が切れない、focusと位置の保持、viewerのheader、形式の色 |
 | SRCH-001 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-index.test.ts` |  |
 | SRCH-002 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-index.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
 | SRCH-003 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`、`apps/cli/src/search/tokenize.test.ts`、`tests/integration/search.test.ts` |  |
@@ -583,6 +599,7 @@ P7時点の制約:
 | SEC-018 | P5 | PASS | `tests/integration/feedback.test.ts`（log）、`tests/integration/daemon.test.ts`、`tests/integration/preview.test.ts`、`tests/integration/http.test.ts` | 回答・回答案・質問のtitle・tokenがlogにない |
 | SEC-019 | P3 | PASS | `tests/integration/preview.test.ts`、`tests/e2e/html.spec.ts` |  |
 | SEC-020 | P3 | PASS | `tests/e2e/release.spec.ts` | 配布物（`apps/cli/dist`）を対象に確認 |
+| SEC-021 | 追加 | PASS | `apps/cli/src/documents/repository.test.ts` | Gitのmetadataを信頼できない入力として読む: FIFOの`HEAD`で止まらない、4KiBを超えると読まない、読むfileは`.git`・`commondir`・`HEAD`・`gitdir`だけ、他のworktreeの管理directoryを指す`.git`ファイルと`cp -r`で複製したworktreeは`unresolved`、他のrepoの`.git`へのsymlinkと他のworktreeの`.git`ファイルへのsymlinkはそのrepoに入らない、WindowsのUNC・device pathにfilesystemの処理をしない |
 | FB-001 | P5 | PASS | `tests/e2e/feedback.spec.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx` | 回答案の保存の応答と再取得の順番、空の回答の明示 |
 | FB-002 | P5 | PASS | `packages/shared/src/feedback.test.ts`、`apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` | Zodのrecordが`__proto__`を黙って捨てるので、JSONの読み込みで拒否する（ADR-0011） |
 | FB-003 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`packages/shared/src/feedback.test.ts`、`apps/web/src/lib/bridge-host.test.ts` | 質問定義と回答案がともに最大に近い大きさ（日本語で各60KiB程度）でも、SDKのready（2回）とupdateDraftが成立する。64KiBを超える回答案、Date・undefined・非有限の数などの値は、変換せずに拒否 |

@@ -44,6 +44,8 @@ function documentOf(overrides: Partial<DocumentSummary> = {}): DocumentSummary {
     title: '文書',
     displayPath: 'a.html',
     pathSegments: ['a.html'],
+    canonicalPath: '/a.html',
+    repository: null,
     revision: REV1,
     sourceState: 'ready',
     searchState: 'ready',
@@ -591,7 +593,7 @@ describe('jumping from the outline of an HTML document', () => {
       expect(params().get('heading')).toBe('詳細');
       expect(window.history.length).toBe(length);
 
-      const listItem = container.querySelector('#document-list button[title="b.html"]');
+      const listItem = container.querySelector('#document-list button[data-document-id="doc_2"]');
       (listItem as HTMLButtonElement).click();
       await until(() => params().get('document') === 'doc_2');
       expect(window.location.search).toBe('?document=doc_2');
@@ -626,7 +628,9 @@ describe('jumping from the outline of an HTML document', () => {
       item('詳細').click();
       // The other document is shown, then closed, so the view returns to the first document without its heading.
       (
-        container.querySelector('#document-list button[title="b.html"]') as HTMLButtonElement
+        container.querySelector(
+          '#document-list button[data-document-id="doc_2"]',
+        ) as HTMLButtonElement
       ).click();
       await until(() => params().get('document') === 'doc_2');
       current.documents = [documentOf()];
@@ -722,9 +726,13 @@ describe('keeping the shown document in the URL', () => {
   });
   const shownTitle = () =>
     container.querySelector('section[aria-label="Document view"] h1')?.textContent ?? '';
-  const listItem = (path: string) => {
-    const found = container.querySelector(`#document-list button[title="${path}"]`);
-    if (!(found instanceof HTMLButtonElement)) throw new Error(`List item "${path}" not found`);
+  // A row of the list, found by its document (its tooltip holds the whole location, not only the path).
+  const listItem = (documentId: string) => {
+    const found = container.querySelector(
+      `#document-list button[data-document-id="${documentId}"]`,
+    );
+    if (!(found instanceof HTMLButtonElement))
+      throw new Error(`List item "${documentId}" not found`);
     return found;
   };
   let sequence = 0;
@@ -792,12 +800,12 @@ describe('keeping the shown document in the URL', () => {
     await start('/');
     await until(() => window.location.search === '?document=doc_1');
     const length = window.history.length;
-    listItem('b.html').click();
+    listItem('doc_2').click();
     await until(() => shownTitle() === '二つ目');
     expect(window.location.search).toBe('?document=doc_2');
     expect(window.history.length).toBe(length + 1);
 
-    listItem('b.html').click();
+    listItem('doc_2').click();
     notify({ type: 'focus-requested', documentId: 'doc_2' });
     await settle();
     expect(window.history.length).toBe(length + 1);

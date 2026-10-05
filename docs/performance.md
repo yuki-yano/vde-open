@@ -58,6 +58,27 @@ Management UI:
 | About 1 second from a normal save to the updated view | Met (308.8ms to the screen; 350.3ms even under load) |
 | CPU does not keep spinning while idle | Met (1.2%, 3.1% in the first 5 seconds, which include the one garbage collection after the operations, see below) |
 
+## Repository detection and the document list (2026-10-05)
+
+Environment: macOS (darwin arm64), Apple M5 Max, Node.js v24.21.0, Chromium (Playwright, headless, 1280×800).
+
+- Detection: `node scripts/perf-repository.ts`. One batch over 2,000 documents, as the daemon runs it at start (with the limit of 2 filesystem operations at once), 3 runs on a fresh tracker each, median.
+
+| case | median | runs |
+|---|---|---|
+| 2,000 documents in one repository (200 directories) | 9.6ms | 14.8, 9.6, 7.8ms |
+| 2,000 documents outside any repository, each 16 levels deep in its own directory | 357.4ms | 367.0, 310.1, 357.4ms |
+
+  Goals: 500 ms and 2 s. Both met.
+- Management UI list (until every document is in the list, as in "How it is measured"): documents in one Git repository, the build before the change (commit `86f0493`) and after it, on the same machine on the same day, alternating, 3 rounds of 3 page loads each (median of each round).
+
+| documents | before | after |
+|---|---|---|
+| 100 | 120.4, 122.6, 123.5ms | 122.2, 120.9ms |
+| 1,000 | 226.5, 227.2, 235.4ms | 216.8, 214.5ms |
+
+  Goal: within +20% of before. Met. The rows of the flat list became two lines and the list response grew from about 300 KB to about 578 KB per 500 documents. A CPU profile showed the extra time in style recalculation forced on the first render (base UI checks the visibility of the toolbar toggles). With `content-visibility: auto`, rows off screen skip style and layout until they scroll into view; with it, the list is a little faster than before the change.
+
 ## Memory
 
 - **What stays: the search index.** The search worker holds the index of the open documents: about 117 MB of heap for the 10 MiB fixture and about 489 MB for 50 MiB. With 452 Markdown files taken from `node_modules` (7.6 MiB, real text), the search worker's heap in the daemon was 80 MB, the daemon settled at about 263 MiB of RSS and 191 MiB of footprint, and search p95 was 14 ms. A separate script that builds the same index outside the daemon and compares the heap after collection gives the main parts: MiniSearch's inverted index about 44 MB, the extracted sections as written about 9.8 MB, and the normalized copies for literal matches about 7.7 MB (the last two include the arrays and objects that hold the text, not only the strings). These script figures are not a breakdown of the 80 MB.

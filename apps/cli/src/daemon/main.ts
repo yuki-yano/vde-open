@@ -267,6 +267,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       scan: (kind, text) => parser.scan(kind, text),
       emit,
     });
+    // Before any request is accepted, so the first list already shows repositories (waits up to 2 seconds).
+    await documents.initializeRepositories();
     feedback = new FeedbackService({ store: openedStore, documents, emit });
     const answering = feedback;
     const sessions = createSessionService();

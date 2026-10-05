@@ -26,12 +26,14 @@
 - Interactive HTML limits CSP `script-src` and `connect-src` to the render grant, and never adds `allow-same-origin`. The MessagePort is handed over only once, to the iframe that is showing the document, and frames are checked for size, rate, order, and shape. Draft answers saved from HTML check the render grant again inside the save transaction (ADR-0012).
 - Answers are submitted only from the submit button of the management UI. The submitted content is taken from the draft answer saved on the server. Submission is idempotent per ID, and a mismatch in conditions is a conflict (ADR-0011).
 - Logs never contain tokens, tickets, render grants, answers, or document text.
+- To show which repository a document is in, the daemon reads Git metadata next to open documents: the `.git` file, `commondir`, `HEAD`, and the `gitdir` back-link of a worktree. Whoever owns those directories can write them, so they are untrusted input: regular files only, opened without following a final symlink and without blocking on a FIFO, at most 4 KiB each. `git` is never run (it would read that directory's Git configuration). A `.git` file or symlink that points into another repository is not placed in that repository: worktrees must be pointed back to by the repository, and a symlinked `.git` or a `.git` file without `commondir` makes the checkout its own repository. On Windows, a path taken from that metadata whose root is not a drive letter (UNC and device paths) and differs from the document's root is rejected before any filesystem access, so the metadata cannot make the daemon connect to another host directly. The UI and the CLI receive only the repository and checkout paths, the worktree name, the branch name, and the document's canonical path (the same kind of information as the absolute paths they already receive).
 
 ## What is not protected
 
 - A malicious process running as the same OS user (it can read the key and the state).
 - Vulnerabilities in the browser itself.
 - Scripts in interactive HTML navigating their own iframe or consuming CPU and memory. Interactive mode is not a way to run arbitrary hostile scripts safely.
+- Reaching another host indirectly while reading Git metadata: a directory on the way that is a symlink (reparse point) to a UNC path, or a network drive with a drive letter. This is the same as opening a document stored in such a place.
 
 ## Verification
 

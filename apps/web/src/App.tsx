@@ -2,6 +2,7 @@ import type { DocumentSummary, SearchHit, ServerEvent } from '@vde-open/shared';
 import { Menu, Monitor, Moon, Search, Sun, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 
+import { RepositoryLabelsContext } from '@/components/document-location';
 import { DocumentWorkspace } from '@/components/document-workspace';
 import { SearchDialog } from '@/components/search-dialog';
 import { Sidebar } from '@/components/sidebar';
@@ -26,10 +27,21 @@ import {
   type Theme,
 } from '@/lib/preferences';
 import { createRefresher } from '@/lib/refresher';
+import { buildLabels } from '@/lib/repository-labels';
 
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 480;
 const SIDEBAR_DEFAULT = 260;
+// Shows the documents in the order the user set but has not been saved yet. Documents opened since then follow.
+function arrange(documents: DocumentSummary[], order: string[] | null): DocumentSummary[] {
+  if (order === null) return documents;
+  const byId = new Map(documents.map((document) => [document.documentId, document]));
+  const placed = order.flatMap((documentId) => byId.get(documentId) ?? []);
+  const ordered = new Set(order);
+  const rest = documents.filter((document) => !ordered.has(document.documentId));
+  return [...placed, ...rest];
+}
+
 const isWidth = (value: unknown): value is number =>
   typeof value === 'number' && value >= SIDEBAR_MIN && value <= SIDEBAR_MAX;
 
@@ -75,7 +87,13 @@ export function Workspace({ api }: { api: Api }) {
     restore: null,
     restores: 0,
   });
-  const { documents } = catalog;
+  // An order the user set that is still being saved. Lists fetched meanwhile (the notification of the first save
+  // among them) keep showing it, so a further move builds on what is shown.
+  const [unsavedOrder, setUnsavedOrder] = useState<string[] | null>(null);
+  const documents = useMemo(
+    () => arrange(catalog.documents, unsavedOrder),
+    [catalog.documents, unsavedOrder],
+  );
   const { activeId } = selection;
   // Switch to a document (list, search results, focus requests). Choosing the shown document again adds no history entry,
   // but a newer focus request still protects it (it can be the shown document closed and opened again).
@@ -209,6 +227,26 @@ export function Workspace({ api }: { api: Api }) {
   // Failures (such as while disconnected) are ignored; refetch on reconnect.
   const load = useMemo(() => createRefresher(fetchList), [fetchList]);
 
+  // Changes of order are saved one at a time, each on the catalog version the previous one returned.
+  // Moving a row twice quickly (Alt+Down twice) would otherwise send the second with a stale version and lose it.
+  const reorders = useRef<{ chain: Promise<void>; pending: number; drained: number }>({
+    chain: Promise.resolve(),
+    pending: 0,
+    drained: 0,
+  });
+  // Fetches the list. The order still being saved is dropped only when this fetch shows the saved state:
+  // no save was pending when it started, none was added meanwhile, and it succeeded. Otherwise it stays shown,
+  // and a later successful fetch drops it.
+  const refetch = useCallback(async () => {
+    const queue = reorders.current;
+    const idle = queue.pending === 0;
+    const drained = queue.drained;
+    const succeeded = await load();
+    if (succeeded && idle && queue.pending === 0 && queue.drained === drained) {
+      setUnsavedOrder(null);
+    }
+  }, [load]);
+
   useEffect(() => {
     const onEvent = (event: ServerEvent) => {
       const previous = lastEvent.current;
@@ -230,7 +268,7 @@ export function Workspace({ api }: { api: Api }) {
         setFeedbackSignal((value) => value + 1);
       }
       if (event.type === 'render-diagnostics') setRenderSignal((value) => value + 1);
-      if (event.type !== 'hello' || gap) void load();
+      if (event.type !== 'hello' || gap) void refetch();
     };
     const stream = api.events({
       onEvent,
@@ -238,26 +276,45 @@ export function Workspace({ api }: { api: Api }) {
       onConnect: () => {
         setNotice(null);
         setFeedbackSignal((value) => value + 1);
-        void load();
+        void refetch();
       },
     });
     return () => stream.close();
-  }, [api, load, selectDocument]);
+  }, [api, refetch, selectDocument]);
 
   const active = useMemo(
     () => documents.find((document) => document.documentId === activeId) ?? null,
     [documents, activeId],
   );
+  const labels = useMemo(() => buildLabels(documents), [documents]);
 
+  const savedVersion = useRef(0);
+  useEffect(() => {
+    // Versions only grow; a list fetched before a save finished must not take the saved version back.
+    savedVersion.current = Math.max(savedVersion.current, catalog.version);
+  }, [catalog.version]);
   const reorder = (order: string[]) => {
-    // Reorder the view first; if saving fails, refetch.
-    setCatalog((current) => ({
-      ...current,
-      documents: order.flatMap((documentId) =>
-        current.documents.filter((document) => document.documentId === documentId),
-      ),
-    }));
-    void api.reorder(order, catalog.version).then(load, load);
+    // Reorder the view first. If saving fails, the list fetched afterwards shows the saved order.
+    setUnsavedOrder(order);
+    const queue = reorders.current;
+    queue.pending += 1;
+    queue.chain = queue.chain.then(async () => {
+      try {
+        const saved = await api.reorder(order, savedVersion.current);
+        // A list fetched meanwhile can already know a later version; never go back to an earlier one.
+        savedVersion.current = Math.max(savedVersion.current, saved);
+      } catch {
+        // A conflict or a failure: the list fetched below shows the saved order.
+      }
+      queue.pending -= 1;
+      if (queue.pending === 0) {
+        queue.drained += 1;
+        // The saved order is fetched first, then the unsaved one is dropped, so the list does not flicker.
+        // Not awaited: whether to drop it is decided by refetch itself, and a stream of notifications that keeps
+        // the fetches going must not hold back the next save.
+        void refetch();
+      }
+    });
   };
 
   // Capture the pointer on the handle. Without it, moves over the document's iframe go to the iframe and the drag stops.
@@ -332,6 +389,7 @@ export function Workspace({ api }: { api: Api }) {
         >
           <Sidebar
             documents={documents}
+            labels={labels}
             activeId={activeId}
             view={view}
             onViewChange={setView}
@@ -352,16 +410,18 @@ export function Workspace({ api }: { api: Api }) {
           onPointerMove={resize}
         />
         {active ? (
-          <DocumentWorkspace
-            key={active.documentId}
-            api={api}
-            document={active}
-            feedbackSignal={feedbackSignal}
-            renderSignal={renderSignal}
-            sectionTarget={sectionTarget?.documentId === active.documentId ? sectionTarget : null}
-            restoreHeading={selection.restore}
-            onHeadingShown={showHeading}
-          />
+          <RepositoryLabelsContext value={labels}>
+            <DocumentWorkspace
+              key={active.documentId}
+              api={api}
+              document={active}
+              feedbackSignal={feedbackSignal}
+              renderSignal={renderSignal}
+              sectionTarget={sectionTarget?.documentId === active.documentId ? sectionTarget : null}
+              restoreHeading={selection.restore}
+              onHeadingShown={showHeading}
+            />
+          </RepositoryLabelsContext>
         ) : (
           <main className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
             Select a document from the list on the left to show it here.

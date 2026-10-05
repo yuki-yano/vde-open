@@ -26,12 +26,14 @@
 - interactiveのHTMLは、CSPの`script-src`と`connect-src`を表示の権限の中に限り、`allow-same-origin`を付けない。MessagePortは表示したiframeへ1回だけ渡し、frameの大きさ・件数・順番・形を検証する。HTMLからの回答案の保存は、表示の権限を保存のtransactionの中でも確かめる（ADR-0012）。
 - 回答は、管理画面の送信buttonでだけ確定する。確定する内容は、serverが保存済みの回答案から取る。送信はIDで冪等にし、条件が違えば競合にする（ADR-0011）。
 - logには、token・ticket・表示の権限・回答・本文を残さない。
+- 文書がどのrepoに属するかを示すため、daemonは開いている文書の近くのGitのmetadata（`.git`ファイル、`commondir`、`HEAD`、worktreeの`gitdir`の逆向きのlink）を読む。これはそのdirectoryの持ち主が自由に書けるので、信頼できない入力として扱う。通常のfileだけを、最後のsymlinkをたどらず、FIFOで止まらないように開き、それぞれ4KiBまで読む。`git`は起動しない（そのdirectoryのGitの設定を読ませないため）。別のrepoを指す`.git`ファイルやsymlinkで、そのrepoに入れることはできない（worktreeはrepoから指し返されている必要があり、symlinkの`.git`と`commondir`のない`.git`ファイルはcheckout自体をrepoにする）。Windowsでは、metadataから得たpathのrootがdrive文字でなく（UNC、device path）、文書のrootと違うとき、filesystemに触れる前に拒否する。metadataに直接書いて、daemonを別のhostへ接続させることはできない。UIとCLIに渡すのは、repoとcheckoutのpath、worktreeの名前、branch名、文書のcanonical pathだけ（すでに渡している絶対pathと同じ種類の情報）。
 
 ## 守らないもの
 
 - 同じOSのuserとして動く悪意のあるprocess（鍵とstateを読める）。
 - browser自体の脆弱性。
 - interactiveのHTMLの中のscriptによる、iframe自身の移動、CPU・memoryの消費。interactiveは、任意の敵対的なscriptを安全に動かす仕組みではない。
+- Gitのmetadataを読む途中で、間接的に別のhostへ届くこと（途中のdirectoryがUNCを指すsymlink（reparse point）の場合や、drive文字を持つnetwork drive）。そうした場所に置いた文書を開くのと同じ扱い。
 
 ## 検証
 

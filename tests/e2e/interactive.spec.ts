@@ -458,7 +458,10 @@ test('SEC-007 / SEC-013: registered JSON and modules load by relative reference,
     '--focus',
   ]);
   await ui.goto(await t.bootstrapUrl());
-  await ui.getByRole('navigation', { name: 'Open documents' }).getByText('app.html').click();
+  await ui
+    .getByRole('navigation', { name: 'Open documents' })
+    .getByRole('button', { name: 'app.html', exact: true })
+    .click();
   const frame = frameOf(ui);
   await expect(frame.locator('#data')).toHaveText('登録したJSON');
   await expect(frame.locator('#module')).toHaveText('登録したmodule');

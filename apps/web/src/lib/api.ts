@@ -93,7 +93,8 @@ export interface Api {
   content(documentId: string, revision: string): Promise<string>;
   outline(documentId: string, revision: string): Promise<NonNullable<ReadResult['outline']>>;
   close(documentId: string): Promise<void>;
-  reorder(order: string[], expectedCatalogVersion: number): Promise<void>;
+  // Returns the catalog version after the change, for the next change to build on.
+  reorder(order: string[], expectedCatalogVersion: number): Promise<number>;
   focus(documentId: string): Promise<void>;
   refresh(documentId: string): Promise<void>;
   // Fetch a render grant for one revision of a document.
@@ -212,10 +213,11 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
       await request(`/documents/${documentId}`, { method: 'DELETE' });
     },
     async reorder(order, expectedCatalogVersion) {
-      await request('/documents/order', {
+      const body = await request('/documents/order', {
         method: 'PUT',
         body: JSON.stringify({ order, expectedCatalogVersion }),
       });
+      return body.meta?.catalogVersion ?? expectedCatalogVersion;
     },
     async focus(documentId) {
       await request(`/documents/${documentId}/focus`, { method: 'POST' });

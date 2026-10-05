@@ -30,12 +30,13 @@ CLI（vde-open／vo） ──IPC（Unix socket、鍵で相互確認）──▶ 
 - 解析と検索: worker thread（`apps/cli/src/workers/`）。解析は時間と構造の上限つき。検索はMiniSearchで、節ごとに索引する（ADR-0010）。
 - 表示: `apps/cli/src/render/render-service.ts`が、文書・版・表示方法・sessionに結び付いた表示の権限を発行し、`apps/cli/src/server/http/preview.ts`が配信する（ADR-0008、0009、0012）。
 - 質問と回答: `apps/cli/src/feedback/service.ts`（ADR-0011）。
+- repo: `apps/cli/src/documents/repository.ts`が、file文書のpathから上へ最も近い`.git`を探し、属するGitのrepoとcheckoutを決める。`git`は起動しない。repoの鍵はcommon git dir（`.git`がsymlinkのときと、`commondir`のない`.git`ファイルのときは、つながりを確かめられないのでcheckoutのdirectory）。linked worktreeは、管理directoryが`<common>/worktrees/<name>`で、その`gitdir`がcheckoutを指し返すときだけ認める。確かめられないものは`unresolved`とし、親のrepoには入れない。`apps/cli/src/documents/repository-tracker.ts`が結果をdaemonのmemoryだけに持つ（pathから決まり、古くなりうる値なのでstateには書かない）。判定するのは、daemonの起動時（受け付けの前）、open、reopen、明示的なrefresh、監視ruleでの追加のとき。保存の後の自動の再読み込みでは判定しない。各操作は判定を最大2秒待ち、終わらない文書は前の値（なければ`pending`）のまま処理を終え、判定が終わったら反映する。判定のfilesystem処理はdaemon全体で同時に2つまでにし、応答しないnetwork mountでもlibuvのpoolを使い切らない。判定ごとに増える番号を付け、その文書・checkoutにもっと新しい判定が反映済みなら捨てる。閉じた文書、判定の後に閉じて開き直した文書には反映しない。一覧の表示が変わるときはcatalogVersionを上げ、`catalog-changed`を1件送る。
 - 通知: `apps/cli/src/server/event-hub.ts`。SSEで、IDと状態だけを運ぶ（本文は運ばない）。接続ごとの書き終わっていない通知は256件までで、超えた分は捨てて取り直しの合図（`resync-required`）にまとめる（`apps/cli/src/server/http/event-queue.ts`）。sessionの失効・破棄と、書き込みが60秒進まないときは、残りを送らずにsocketまで閉じる（`apps/cli/src/server/http/management.ts`）。
 
 ## 管理画面
 
 - 一回限りのURL（`vo ui`）でsessionを作り、tokenはsessionStorageに置く（URLのfragmentはすぐ消す）。
-- 一覧・表示・検索（`Cmd/Ctrl+K`）・回答panel。通知を受けて一覧と質問を取り直し、通知が欠けたら取り直して合わせる。
+- 一覧・表示・検索（`Cmd/Ctrl+K`）・回答panel。Flatの一覧の各行は、2行目にrepo・worktree・checkout内のpathを出す。Treeは、repo、worktreeの順に文書をまとめる。MarkdownとHTMLのiconは形と色が違う（`--format-markdown`、`--format-html`）。通知を受けて一覧と質問を取り直し、通知が欠けたら取り直して合わせる。
 - HTMLの表示は、別のoriginのiframe（`sandbox`）。interactiveの表示とだけ、MessagePortで回答案を受け渡す（`apps/web/src/lib/bridge-host.ts`、`use-bridge.ts`）。
 
 ## 配布

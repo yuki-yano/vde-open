@@ -23,7 +23,7 @@ vde-open is a local document viewer shared by a person and agents. The person re
 
 ## Read only what you need
 
-1. `vo list --json`: open documents with `documentId`, `title`, `displayPath`, `revision`, and `searchState`.
+1. `vo list --json`: open documents with `documentId`, `title`, `displayPath`, `revision`, `searchState`, and `repository` (which Git repository and worktree each file is in; see `docs/agent-usage.md`).
 2. `vo search '<terms>' --json`: sections that contain every term. Options: `--mode exact` (contiguous string), `--mode path` (file names and paths), `--document <documentId>`, `--limit <n>` (default 5, max 50).
 3. `vo read <documentId> --outline --json`: the heading structure (`sectionId`, level, heading).
 4. `vo read <documentId> --section <sectionId> --revision <revision> --json`: one section's extracted text. Use `--lines A:B` for source lines (1-based, inclusive).
