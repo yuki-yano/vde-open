@@ -30,7 +30,7 @@ npm install -g vde-open  # これでも導入できる
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test:pack                              # artifacts/vde-open-<版>.tgz を作り、別のdirectoryへ導入して確かめる
-bun add -g ./artifacts/vde-open-0.1.0.tgz   # pathの先頭には必ず ./ を付ける（付けないとGitHubのrepositoryの名前として扱われる）
+bun add -g ./artifacts/vde-open-0.1.1.tgz   # pathの先頭には必ず ./ を付ける（付けないとGitHubのrepositoryの名前として扱われる）
 ```
 
 ## `vde-open`と`vo`
