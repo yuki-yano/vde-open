@@ -163,17 +163,15 @@ export function Workspace({ api }: { api: Api }) {
     void api.reorder(order, catalog.version).then(load, load);
   };
 
+  // Capture the pointer on the handle. Without it, moves over the document's iframe go to the iframe and the drag stops.
+  // The capture is released on pointerup or pointercancel, which ends the drag.
   const startResize = (event: PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
-    const onMove = (move: globalThis.PointerEvent) => {
-      setWidth(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, move.clientX)));
-    };
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const resize = (event: PointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    setWidth(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, event.clientX)));
   };
 
   return (
@@ -254,6 +252,7 @@ export function Workspace({ api }: { api: Api }) {
           aria-label="Resize document list"
           className="hidden w-1 shrink-0 cursor-col-resize hover:bg-border min-[900px]:block"
           onPointerDown={startResize}
+          onPointerMove={resize}
         />
         {active ? (
           <DocumentWorkspace
