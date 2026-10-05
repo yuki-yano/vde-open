@@ -464,6 +464,7 @@ P7時点の制約:
   - staticの変換は、要素を消す前に見出しへそのidを付ける。変換後に表示に残り、かつそのidを持つ最初の要素である見出しだけを、`headingTargets`（sectionIdとanchor）としてrender grantで返す（`<object>`・SVGの`foreignObject`の中の見出しや、手前の要素とidが重なる見出しは入らない）。fragmentは`encodeURIComponent`した形で送り、browserはdecodeする前の形で先にidと`a`の`name`を探すので、その形に当たる要素がある見出し（`id="%E7%AF%80"`と`id="節"`の共存など）も入れない（`fragmentOfAnchor`をUIと判定で共有）。interactiveの出力は変えない。
   - UIは、iframeの表示がstaticで、Outlineとiframeの版が同じで、sectionIdとanchorが`headingTargets`と一致する項目だけを押せる。iframeの`location.replace(documentUrl#anchor)`で移す（Chromium・WebKitは文書を読み直し、Firefoxはscrollだけ。どちらもhistoryは増えない）。押せない項目はtitleで理由を示す。interactiveは、読み直すとscriptの状態を失うので対象外。Markdownの移動は本文の中だけを探す（管理画面のidに当たらない）。
   - 解析の結果が変わるので`HTML_STATIC_PARSER_PROFILE`を`html-static-v2`に上げた。daemonの起動時の確認（watcherの`checkDocuments()`）で、開いているfileの文書は新しい版になる。stdinの文書と、質問が固定した古い版は、版のまま今のcodeで解析・変換する。`tests/fixtures/handoff/feedback-response.json`の版を更新した。
+- 0.1.2: 0.1.1の後の変更（Catppuccinの配色、HTMLの上での一覧の幅の変更、Static表示のHTMLのoutlineからの移動、表示中の文書と見出しのURLへの保持、一覧のrepo・worktree・形式の表示（下の節））を、tag `v0.1.2`から`publish.yml`で公開した。
 
 ## 一覧のrepo表示と形式の色（利用者の依頼、2026-10-05）
 
