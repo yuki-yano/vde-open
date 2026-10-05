@@ -57,11 +57,12 @@ async function parseEnvelope<T>(response: Response): Promise<EnvelopeBody<T>> {
 }
 
 // Take the ticket from the fragment of the URL the CLI opened and exchange it for a session token (spec 6.4).
-// The fragment is removed from history right after reading. The token lives only in this tab's memory and sessionStorage.
+// The fragment is removed from history right after reading (the query, which names the shown document, stays).
+// The token lives only in this tab's memory and sessionStorage.
 export async function establishSession(): Promise<string | null> {
   const match = /^#bootstrap=([A-Za-z0-9_-]+)$/.exec(window.location.hash);
   if (match) {
-    window.history.replaceState(null, '', window.location.pathname);
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
     try {
       const response = await fetch(`${API}/sessions/bootstrap`, {
         method: 'POST',

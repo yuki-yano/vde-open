@@ -5,6 +5,8 @@ import type {
   OutlineItem,
   Questionnaire,
   RenderGrantResult,
+  SearchHit,
+  SearchResult,
   ServerEvent,
 } from '@vde-open/shared';
 import { createRoot, type Root } from 'react-dom/client';
@@ -12,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Workspace } from '@/App';
 import type { Api } from '@/lib/api';
+import { writeHeadingToUrl, type HeadingInUrl } from '@/lib/location';
 
 import { Viewer } from './viewer.tsx';
 
@@ -459,5 +462,466 @@ describe('jumping from the outline of an HTML document', () => {
     await settle();
     expect(item('概要').disabled).toBe(true);
     expect(item('概要').title).toContain('Not available in the Interactive view');
+  });
+
+  describe('the heading kept in the URL', () => {
+    // Record every jump, including the one made right as the view appears.
+    let jumps: string[];
+    const original = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow');
+    const second = documentOf({
+      documentId: 'doc_2',
+      title: '二つ目',
+      displayPath: 'b.html',
+      pathSegments: ['b.html'],
+      order: 1,
+    });
+    const params = () => new URLSearchParams(window.location.search);
+
+    beforeEach(() => {
+      jumps = [];
+      Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+        configurable: true,
+        get: () => ({ location: { replace: (url: string) => jumps.push(url) } }),
+      });
+      api.renderGrant = () => Promise.resolve(grantOf());
+    });
+
+    afterEach(() => {
+      if (original) Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', original);
+      window.history.replaceState(null, '', '/');
+    });
+
+    it('jumps to it once the view can jump, by the same section and title, else by the title, and reports where it went', async () => {
+      api.renderGrant = (_documentId, revision) =>
+        Promise.resolve(grantOf({ grant: `g-${revision}`, revision }));
+      const shown: Array<HeadingInUrl | null> = [];
+      const view = (revision: string) => (
+        <Viewer
+          api={api}
+          document={documentOf({ revision })}
+          // A heading was added above it, so the section number no longer matches the title.
+          restoreHeading={{ sectionId: 'sec_0001', title: '詳細', id: 1 }}
+          onHeadingShown={(heading) => shown.push(heading)}
+        />
+      );
+      root.render(view(REV1));
+      await until(() => shown.length > 0);
+      expect(jumps).toEqual(['about:blank#same']);
+      expect(shown).toEqual([{ sectionId: 'sec_0003', title: '詳細' }]);
+
+      // Only once per view, even when a new revision is shown.
+      root.render(view(REV2));
+      await until(() => contentRequests.includes(REV2));
+      await settle(100);
+      expect(jumps).toHaveLength(1);
+      expect(shown).toHaveLength(1);
+
+      item('概要').click();
+      expect(jumps).toEqual(['about:blank#same', 'about:blank#h1']);
+      expect(shown.at(-1)).toEqual({ sectionId: 'sec_0001', title: '概要' });
+
+      // A new request (back or forward within the document) is handled by the same view.
+      root.render(
+        <Viewer
+          api={api}
+          document={documentOf({ revision: REV2 })}
+          restoreHeading={{ sectionId: 'sec_0003', title: '詳細', id: 2 }}
+          onHeadingShown={(heading) => shown.push(heading)}
+        />,
+      );
+      await until(() => jumps.length === 3);
+      expect(jumps).toHaveLength(3);
+      expect(jumps.at(-1)).toBe('about:blank#same');
+    });
+
+    it('drops a heading that is gone, or that the view cannot reach, without jumping', async () => {
+      for (const heading of [
+        { sectionId: 'sec_0003', title: '無い見出し', id: 1 },
+        { sectionId: 'sec_0002', title: '削除', id: 1 },
+      ]) {
+        root.unmount();
+        root = createRoot(container);
+        const shown: Array<HeadingInUrl | null> = [];
+        root.render(
+          <Viewer
+            api={api}
+            document={documentOf()}
+            restoreHeading={heading}
+            onHeadingShown={(next) => shown.push(next)}
+          />,
+        );
+        await until(() => shown.length > 0);
+        expect(shown).toEqual([null]);
+      }
+      expect(jumps).toEqual([]);
+    });
+
+    it('waits while the view cannot jump (the Interactive view)', async () => {
+      api.renderGrant = () => Promise.resolve(grantOf({ mode: 'interactive', headingTargets: [] }));
+      const shown: Array<HeadingInUrl | null> = [];
+      root.render(
+        <Viewer
+          api={api}
+          document={documentOf({ htmlMode: 'interactive', interactiveAllowed: true })}
+          restoreHeading={{ sectionId: 'sec_0003', title: '詳細', id: 1 }}
+          onHeadingShown={(heading) => shown.push(heading)}
+        />,
+      );
+      await until(() => container.querySelector('iframe') !== null && findItem('詳細') !== null);
+      await settle(100);
+      expect(shown).toEqual([]);
+      expect(jumps).toEqual([]);
+    });
+
+    async function start(url: string): Promise<void> {
+      window.history.replaceState(null, '', url);
+      root.render(<Workspace api={api} />);
+      await settle();
+      handlers?.onConnect();
+      await until(() => container.querySelector('iframe') !== null);
+    }
+
+    it('keeps the heading jumped to without adding history, drops it on a switch, and jumps to it again on back', async () => {
+      current.documents = [documentOf(), second];
+      await start('/');
+      await until(() => params().get('document') === 'doc_1' && enabled('詳細'));
+      const length = window.history.length;
+      item('詳細').click();
+      expect(params().get('section')).toBe('sec_0003');
+      expect(params().get('heading')).toBe('詳細');
+      expect(window.history.length).toBe(length);
+
+      const listItem = container.querySelector('#document-list button[title="b.html"]');
+      (listItem as HTMLButtonElement).click();
+      await until(() => params().get('document') === 'doc_2');
+      expect(window.location.search).toBe('?document=doc_2');
+      expect(window.history.length).toBe(length + 1);
+
+      // Back to the entry of the first document, which still has its heading.
+      window.history.replaceState(null, '', '/?document=doc_1&section=sec_0003&heading=詳細');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await until(() => jumps.length === 2);
+      expect(jumps).toEqual(['about:blank#same', 'about:blank#same']);
+    });
+
+    it('on first load jumps to the heading in the URL; the heading of a document no longer open is dropped', async () => {
+      await start('/?document=doc_1&section=sec_0003&heading=詳細');
+      await until(() => jumps.length === 1);
+      expect(jumps).toEqual(['about:blank#same']);
+      expect(params().get('heading')).toBe('詳細');
+
+      root.unmount();
+      root = createRoot(container);
+      await start('/?document=doc_9&section=sec_0003&heading=詳細');
+      await until(() => params().get('document') === 'doc_1');
+      await settle(100);
+      expect(window.location.search).toBe('?document=doc_1');
+      expect(jumps).toHaveLength(1);
+    });
+
+    it('back within the shown document jumps to the heading its entry keeps, for every such entry', async () => {
+      current.documents = [documentOf(), second];
+      await start('/');
+      await until(() => params().get('document') === 'doc_1' && enabled('詳細'));
+      item('詳細').click();
+      // The other document is shown, then closed, so the view returns to the first document without its heading.
+      (
+        container.querySelector('#document-list button[title="b.html"]') as HTMLButtonElement
+      ).click();
+      await until(() => params().get('document') === 'doc_2');
+      current.documents = [documentOf()];
+      handlers?.onEvent({
+        type: 'catalog-changed',
+        daemonId: 'd1',
+        sequence: 1,
+        catalogVersion: 2,
+      });
+      await until(() => window.location.search === '?document=doc_1');
+      await until(() => enabled('詳細'));
+      expect(jumps).toEqual(['about:blank#same']);
+
+      for (const expected of [2, 3]) {
+        window.history.replaceState(null, '', '/?document=doc_1&section=sec_0003&heading=詳細');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+        await until(() => jumps.length === expected);
+        expect(jumps).toHaveLength(expected);
+        expect(jumps.at(-1)).toBe('about:blank#same');
+      }
+    });
+
+    it('a search result chosen while a heading of the URL waits to be restored cancels that restore', async () => {
+      let showView: () => void = () => undefined;
+      api.renderGrant = () =>
+        new Promise<RenderGrantResult>((resolve) => {
+          showView = () => resolve(grantOf());
+        });
+      const searches: Array<() => void> = [];
+      const hit: SearchHit = {
+        documentId: 'doc_1',
+        revision: REV1,
+        title: '文書',
+        displayPath: 'a.html',
+        sectionId: 'sec_0001',
+        headingPath: ['概要'],
+        excerpt: '概要',
+        matchKind: 'text',
+        score: 1,
+        sourceRange: null,
+        extraction: 'static-html',
+      };
+      api.search = () =>
+        new Promise((resolve) =>
+          searches.push(() => resolve({ hits: [hit] } as unknown as SearchResult)),
+        );
+      window.history.replaceState(null, '', '/?document=doc_1&section=sec_0003&heading=詳細');
+      root.render(<Workspace api={api} />);
+      await settle();
+      handlers?.onConnect();
+      await until(() => container.querySelector('aside[aria-label="Outline"]') !== null);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
+      await until(() => document.querySelector('input[aria-label="Search query"]') !== null);
+      const query = document.querySelector('input[aria-label="Search query"]') as HTMLInputElement;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+        query,
+        '概要',
+      );
+      query.dispatchEvent(new Event('input', { bubbles: true }));
+      await until(() => searches.length > 0);
+      searches.shift()?.();
+      await until(() => document.querySelectorAll('[role="option"]').length === 1);
+      query.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await until(() => document.querySelector('input[aria-label="Search query"]') === null);
+
+      // The view becomes ready only now. The heading of the URL is not jumped to any more.
+      showView();
+      await until(() => container.querySelector('iframe') !== null && enabled('詳細'));
+      await settle(100);
+      expect(jumps).toEqual([]);
+    });
+
+    it('a view being left never writes its heading into the next document of the URL', () => {
+      window.history.replaceState(null, '', '/?document=doc_2');
+      writeHeadingToUrl('doc_1', { sectionId: 'sec_0001', title: '概要' });
+      expect(window.location.search).toBe('?document=doc_2');
+      writeHeadingToUrl('doc_2', { sectionId: 'sec_0001', title: '概要' });
+      expect(params().get('section')).toBe('sec_0001');
+      writeHeadingToUrl('doc_2', null);
+      expect(window.location.search).toBe('?document=doc_2');
+    });
+  });
+});
+
+describe('keeping the shown document in the URL', () => {
+  const second = documentOf({
+    documentId: 'doc_2',
+    title: '二つ目',
+    displayPath: 'b.html',
+    pathSegments: ['b.html'],
+    order: 1,
+  });
+  const shownTitle = () =>
+    container.querySelector('section[aria-label="Document view"] h1')?.textContent ?? '';
+  const listItem = (path: string) => {
+    const found = container.querySelector(`#document-list button[title="${path}"]`);
+    if (!(found instanceof HTMLButtonElement)) throw new Error(`List item "${path}" not found`);
+    return found;
+  };
+  let sequence = 0;
+  const notify = (event: Partial<ServerEvent>) => {
+    sequence += 1;
+    handlers?.onEvent({
+      type: 'document-status',
+      daemonId: 'd1',
+      sequence,
+      catalogVersion: 1,
+      ...event,
+    });
+  };
+  async function start(url: string): Promise<void> {
+    window.history.replaceState(null, '', url);
+    root.render(<Workspace api={api} />);
+    await settle();
+    // The list is fetched once the notification stream connects.
+    handlers?.onConnect();
+    await until(() => shownTitle() !== '');
+  }
+
+  beforeEach(() => {
+    current.documents = [documentOf(), second];
+    sequence = 0;
+  });
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('on first load, shows the document in the URL if it is open, otherwise the one the daemon remembers, without adding history', async () => {
+    const length = window.history.length;
+    await start('/?document=doc_2');
+    expect(shownTitle()).toBe('二つ目');
+    expect(window.location.search).toBe('?document=doc_2');
+
+    for (const url of ['/?document=doc_9', '/']) {
+      root.unmount();
+      root = createRoot(container);
+      await start(url);
+      expect(shownTitle()).toBe('文書');
+      await until(() => window.location.search === '?document=doc_1');
+      expect(window.location.search).toBe('?document=doc_1');
+    }
+    expect(window.history.length).toBe(length);
+  });
+
+  it('keeps the query when the bootstrap fragment is removed', async () => {
+    const { establishSession } = await import('@/lib/api');
+    window.history.replaceState(null, '', '/?document=doc_2#bootstrap=used');
+    const fetchMock = () => Promise.reject(new Error('offline'));
+    const original = window.fetch;
+    window.fetch = fetchMock as typeof window.fetch;
+    try {
+      await establishSession();
+    } finally {
+      window.fetch = original;
+    }
+    expect(window.location.search).toBe('?document=doc_2');
+    expect(window.location.hash).toBe('');
+  });
+
+  it('a switch from the list or a focus request adds a history entry; choosing the shown document again does not', async () => {
+    await start('/');
+    await until(() => window.location.search === '?document=doc_1');
+    const length = window.history.length;
+    listItem('b.html').click();
+    await until(() => shownTitle() === '二つ目');
+    expect(window.location.search).toBe('?document=doc_2');
+    expect(window.history.length).toBe(length + 1);
+
+    listItem('b.html').click();
+    notify({ type: 'focus-requested', documentId: 'doc_2' });
+    await settle();
+    expect(window.history.length).toBe(length + 1);
+
+    notify({ type: 'focus-requested', documentId: 'doc_1' });
+    await until(() => shownTitle() === '文書');
+    expect(window.location.search).toBe('?document=doc_1');
+    expect(window.history.length).toBe(length + 2);
+  });
+
+  it('back and forward show the document in the URL; for a document no longer open, the shown one stays and the URL is fixed', async () => {
+    await start('/?document=doc_2');
+    const length = window.history.length;
+    window.history.replaceState(null, '', '/?document=doc_1');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await until(() => shownTitle() === '文書');
+    expect(shownTitle()).toBe('文書');
+
+    for (const url of ['/?document=doc_9', '/']) {
+      window.history.replaceState(null, '', url);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await until(() => window.location.search === '?document=doc_1');
+      expect(shownTitle()).toBe('文書');
+      expect(window.location.search).toBe('?document=doc_1');
+    }
+    expect(window.history.length).toBe(length);
+  });
+
+  it('when the shown document is closed, shows the first one and replaces the URL; an empty list removes the document from it', async () => {
+    await start('/?document=doc_2');
+    const length = window.history.length;
+    current.documents = [documentOf()];
+    notify({});
+    await until(() => shownTitle() === '文書');
+    expect(window.location.search).toBe('?document=doc_1');
+
+    current.documents = [];
+    notify({});
+    await until(() => window.location.search === '');
+    expect(window.location.search).toBe('');
+    expect(shownTitle()).toBe('');
+    expect(window.history.length).toBe(length);
+  });
+
+  it('a list fetched before a focus request does not drop the focused document, which the next list confirms or drops', async () => {
+    // Each fetch returns the list as it was when the fetch started. While holding, replies wait to be released.
+    let holding = false;
+    let catalogVersion = 1;
+    const held: Array<() => void> = [];
+    api.documents = () => {
+      const reply = { documents: current.documents, catalogVersion, cursor: null };
+      if (!holding) return Promise.resolve(reply);
+      return new Promise((resolve) => held.push(() => resolve(reply)));
+    };
+    current.documents = [documentOf()];
+    await start('/');
+    await until(() => window.location.search === '?document=doc_1');
+    const length = window.history.length;
+
+    // A fetch starts before the second document is opened and focused from the CLI.
+    holding = true;
+    notify({});
+    await until(() => held.length === 1);
+    holding = false;
+    current.documents = [documentOf(), second];
+    catalogVersion = 2;
+    notify({ type: 'focus-requested', documentId: 'doc_2', catalogVersion });
+    await until(() => window.location.search === '?document=doc_2');
+    held.shift()?.();
+    await until(() => shownTitle() === '二つ目');
+    await settle(100);
+    expect(shownTitle()).toBe('二つ目');
+    expect(window.location.search).toBe('?document=doc_2');
+    expect(window.history.length).toBe(length + 1);
+
+    // A focused document that the next list does not have is dropped.
+    holding = true;
+    notify({});
+    await until(() => held.length === 1);
+    holding = false;
+    notify({ type: 'focus-requested', documentId: 'doc_9', catalogVersion });
+    held.shift()?.();
+    await until(() => window.location.search === '?document=doc_1');
+    expect(shownTitle()).toBe('文書');
+  });
+
+  it('a focus request for the shown document, closed and opened again, is not undone by a list fetched in between', async () => {
+    let holding = false;
+    let catalogVersion = 1;
+    const held: Array<() => void> = [];
+    api.documents = () => {
+      const reply = { documents: current.documents, catalogVersion, cursor: null };
+      if (!holding) return Promise.resolve(reply);
+      return new Promise((resolve) => held.push(() => resolve(reply)));
+    };
+    await start('/?document=doc_2');
+    expect(shownTitle()).toBe('二つ目');
+    const length = window.history.length;
+
+    // The shown document is closed; the list fetched for that is held.
+    current.documents = [documentOf()];
+    catalogVersion = 2;
+    holding = true;
+    notify({ catalogVersion });
+    await until(() => held.length === 1);
+    holding = false;
+    // It is opened again with the same ID and focused before that list arrives.
+    current.documents = [documentOf(), second];
+    catalogVersion = 3;
+    notify({ type: 'focus-requested', documentId: 'doc_2', catalogVersion });
+    held.shift()?.();
+    await settle(100);
+    expect(shownTitle()).toBe('二つ目');
+    expect(window.location.search).toBe('?document=doc_2');
+    expect(window.history.length).toBe(length);
+  });
+
+  it('does not judge or rewrite the URL before the first list arrives', async () => {
+    api.documents = () => new Promise(() => undefined);
+    window.history.replaceState(null, '', '/?document=doc_9');
+    root.render(<Workspace api={api} />);
+    await settle();
+    handlers?.onConnect();
+    await settle(100);
+    expect(window.location.search).toBe('?document=doc_9');
   });
 });

@@ -477,4 +477,31 @@ test('jumping from the outline moves the Static view to the heading, without add
   }
 
   expect(await page.evaluate(() => window.history.length)).toBe(length);
+  await page.goBack();
+  await expect(shown).toHaveText('前の文書');
+});
+
+test('the heading jumped to in the Static view is kept in the URL, and a reload jumps to it again', async ({
+  page,
+}) => {
+  const filler = Array.from({ length: 120 }, (_, index) => `<p>段落${String(index)}</p>`).join('');
+  t.write(
+    'doc.html',
+    `<!doctype html><title>設計HTML</title><h1>文書</h1>${filler}<h2>中間</h2>${filler}<h2>最後</h2>${filler}`,
+  );
+  await t.json(['open', 'doc.html']);
+  await page.goto(await t.bootstrapUrl());
+  const outline = page.getByRole('complementary', { name: 'Outline' });
+  const middle = page
+    .frameLocator('[data-testid="document-frame"]')
+    .getByRole('heading', { name: '中間' });
+  await expect(middle).toBeAttached();
+  await expect(middle).not.toBeInViewport();
+
+  await outline.getByRole('button', { name: '中間' }).click();
+  await expect(middle).toBeInViewport();
+  await expect(page).toHaveURL(/[?&]heading=/);
+
+  await page.reload();
+  await expect(middle).toBeInViewport();
 });

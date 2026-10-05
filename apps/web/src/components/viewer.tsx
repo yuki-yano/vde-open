@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ApiError, type Api } from '@/lib/api';
 import { describeDiagnostic } from '@/lib/diagnostics';
+import type { HeadingInUrl, HeadingRestore } from '@/lib/location';
 import { isViewMode, usePreference, type ViewMode } from '@/lib/preferences';
 import { useBridge, type BridgeStatus } from '@/lib/use-bridge';
 import { useCopy } from '@/lib/use-copy';
@@ -57,6 +58,11 @@ export interface ViewerProps {
   waitingForRequest?: boolean;
   // The section to jump to from a search result. In the Markdown preview, jump to that heading.
   sectionTarget?: SectionTarget | null;
+  // The heading the URL keeps for this document (a reload, back or forward). Each request (id) is handled once, when
+  // the view can jump.
+  restoreHeading?: HeadingRestore | null;
+  // Called with the heading the view jumped to, or null when the heading to restore is not in the view any more.
+  onHeadingShown?: (heading: HeadingInUrl | null) => void;
 }
 
 // The target to jump to from a search result. The result is a section of the revision that was searched, so keep it with the revision.
@@ -130,6 +136,8 @@ export function Viewer({
   renderSignal = 0,
   waitingForRequest = false,
   sectionTarget = null,
+  restoreHeading = null,
+  onHeadingShown,
 }: ViewerProps) {
   const [mode, setMode] = usePreference<ViewMode>('view-mode', 'preview', isViewMode);
   // The revision at the time updates were paused. While paused, do not replace it with newer revisions.
@@ -378,7 +386,39 @@ export function Viewer({
   useEffect(() => {
     if (targetItem === null || targetNonce === 0) return;
     jumpTo(targetItem);
-  }, [targetItem, targetNonce, jumpTo]);
+    onHeadingShown?.({ sectionId: targetItem.sectionId, title: targetItem.title });
+  }, [targetItem, targetNonce, jumpTo, onHeadingShown]);
+
+  // Jump again to the heading the URL keeps, once the view of the shown revision can jump. A heading added above moves
+  // the section number, so the title decides: the same section with that title, else the first heading with that title.
+  // A heading that is no longer there, or that this view cannot reach, is dropped from the URL. Each request once.
+  const restoreReady =
+    restoreHeading !== null &&
+    outlineUnavailable === null &&
+    shownRevision !== null &&
+    loaded?.revision === shownRevision &&
+    outlineError === null;
+  const restoreItem = restoreReady
+    ? (outline.find(
+        (item) =>
+          item.sectionId === restoreHeading.sectionId && item.title === restoreHeading.title,
+      ) ??
+      outline.find((item) => item.title === restoreHeading.title) ??
+      null)
+    : null;
+  const restoreJumpable = restoreItem !== null && canJump(restoreItem);
+  const restoreId = restoreHeading?.id ?? null;
+  const restoredId = useRef<number | null>(null);
+  useEffect(() => {
+    if (!restoreReady || restoreId === null || restoredId.current === restoreId) return;
+    restoredId.current = restoreId;
+    if (restoreItem === null || !restoreJumpable) {
+      onHeadingShown?.(null);
+      return;
+    }
+    jumpTo(restoreItem);
+    onHeadingShown?.({ sectionId: restoreItem.sectionId, title: restoreItem.title });
+  }, [restoreReady, restoreId, restoreItem, restoreJumpable, jumpTo, onHeadingShown]);
   const diagnostics = [
     ...(grant?.diagnostics ?? []),
     ...missing.map((path) => ({ code: 'asset-requested', target: path, count: 1 })),
@@ -707,7 +747,10 @@ export function Viewer({
                           : (outlineUnavailable ??
                             'This heading is not in the view (removed from the display, or an earlier element has the same id)')
                       }
-                      onClick={() => jumpTo(item)}
+                      onClick={() => {
+                        jumpTo(item);
+                        onHeadingShown?.({ sectionId: item.sectionId, title: item.title });
+                      }}
                     >
                       {item.title}
                     </button>

@@ -162,6 +162,34 @@ test('shows every heading even when the outline does not fit in one response', a
   await expect(outline.getByRole('alert')).toHaveCount(0);
 });
 
+test('the shown document is kept in the URL: a reload shows it again, and back and forward move between documents', async ({
+  page,
+}) => {
+  t.write('a.md', '# 一つ目\n\n本文A\n');
+  t.write('b.md', '# 二つ目\n\n本文B\n');
+  await t.json(['open', 'a.md', 'b.md']);
+  await page.goto(await t.bootstrapUrl());
+  const shown = page
+    .getByRole('region', { name: 'Document view' })
+    .getByRole('heading', { level: 1 })
+    .first();
+  await expect(shown).toHaveText('一つ目');
+  await expect(page).toHaveURL(/\?document=doc_/);
+  const first = page.url();
+
+  await sidebarOf(page).getByRole('button', { name: '二つ目', exact: true }).click();
+  await expect(shown).toHaveText('二つ目');
+  expect(page.url()).not.toBe(first);
+  await page.reload();
+  await expect(shown).toHaveText('二つ目');
+
+  await page.goBack();
+  await expect(shown).toHaveText('一つ目');
+  expect(page.url()).toBe(first);
+  await page.goForward();
+  await expect(shown).toHaveText('二つ目');
+});
+
 test('jumping from the outline moves the Markdown preview to the heading', async ({ page }) => {
   const filler = Array.from({ length: 60 }, (_, index) => `段落${String(index)}`).join('\n\n');
   t.write(
@@ -182,4 +210,83 @@ test('jumping from the outline moves the Markdown preview to the heading', async
     page.locator('article').getByRole('heading', { name: '最後の見出し' }),
   ).toBeInViewport();
   await expect(middle).not.toBeInViewport();
+});
+
+test('the heading jumped to is kept in the URL: a reload, and going back to the document, jump to it again', async ({
+  page,
+}) => {
+  const filler = Array.from({ length: 60 }, (_, index) => `段落${String(index)}`).join('\n\n');
+  t.write(
+    'a.md',
+    `# 文書\n\n${filler}\n\n## 中間の見出し\n\n${filler}\n\n## 最後の見出し\n\n${filler}\n`,
+  );
+  t.write('b.md', '# 別の文書\n');
+  await t.json(['open', 'a.md', 'b.md']);
+  await page.goto(await t.bootstrapUrl());
+  const outline = page.getByRole('complementary', { name: 'Outline' });
+  const middle = page.locator('article').getByRole('heading', { name: '中間の見出し' });
+  await expect(middle).toBeAttached();
+  const length = await page.evaluate(() => window.history.length);
+
+  await outline.getByRole('button', { name: '中間の見出し' }).click();
+  await expect(middle).toBeInViewport();
+  await expect(page).toHaveURL(/[?&]heading=/);
+  const url = new URL(page.url());
+  expect(url.searchParams.get('section')).toBe('sec_0002');
+  expect(url.searchParams.get('heading')).toBe('中間の見出し');
+  expect(await page.evaluate(() => window.history.length)).toBe(length);
+
+  await page.reload();
+  await expect(middle).toBeInViewport();
+
+  await sidebarOf(page).getByRole('button', { name: '別の文書', exact: true }).click();
+  await expect(page.locator('article')).toContainText('別の文書');
+  expect(new URL(page.url()).searchParams.get('heading')).toBeNull();
+  await page.goBack();
+  await expect(middle).toBeInViewport();
+});
+
+test('back within the document jumps to the heading its entry keeps, and a search result chosen while that heading waits wins', async ({
+  page,
+}) => {
+  const filler = Array.from({ length: 60 }, (_, index) => `段落${String(index)}`).join('\n\n');
+  t.write(
+    'a.md',
+    `# 文書\n\n${filler}\n\n## 中間の見出し\n\n${filler}\n\n## 最後の見出し\n\nquokka\n\n${filler}\n`,
+  );
+  t.write('b.md', '# 別の文書\n');
+  await t.json(['open', 'a.md', 'b.md']);
+  await page.goto(await t.bootstrapUrl());
+  const outline = page.getByRole('complementary', { name: 'Outline' });
+  const middle = page.locator('article').getByRole('heading', { name: '中間の見出し' });
+  const last = page.locator('article').getByRole('heading', { name: '最後の見出し' });
+  await outline.getByRole('button', { name: '中間の見出し' }).click();
+  await expect(middle).toBeInViewport();
+
+  // The other document is shown and then closed, so the view returns to this document without its heading.
+  await sidebarOf(page).getByRole('button', { name: '別の文書', exact: true }).click();
+  await expect(page.locator('article')).toContainText('別の文書');
+  await t.json(['close', 'b.md']);
+  await expect(middle).toBeAttached();
+  await expect(middle).not.toBeInViewport();
+  expect(new URL(page.url()).searchParams.get('heading')).toBeNull();
+  await page.goBack();
+  await expect(middle).toBeInViewport();
+  expect(new URL(page.url()).searchParams.get('heading')).toBe('中間の見出し');
+
+  // Reloaded in the Source view, the heading of the URL waits for the preview. A search result chosen meanwhile wins.
+  await page.getByRole('button', { name: 'Source' }).click();
+  await page.reload();
+  await expect(page.getByTestId('document-body').locator('pre')).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+k');
+  const dialog = page.getByRole('dialog', { name: 'Search open documents' });
+  await dialog.getByRole('textbox', { name: 'Search query' }).fill('quokka');
+  await expect(dialog.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await page.getByRole('button', { name: 'Preview' }).click();
+  await expect(last).toBeInViewport();
+  await expect(middle).not.toBeInViewport();
+  await expect(page).toHaveURL(/heading=/);
+  expect(new URL(page.url()).searchParams.get('heading')).toBe('最後の見出し');
 });

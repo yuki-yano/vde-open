@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { FeedbackPanel } from '@/components/feedback-panel';
 import { Viewer, type SectionTarget } from '@/components/viewer';
 import type { Api } from '@/lib/api';
+import type { HeadingInUrl, HeadingRestore } from '@/lib/location';
 import { useFeedback } from '@/lib/use-feedback';
 
 interface DocumentWorkspaceProps {
@@ -15,6 +16,10 @@ interface DocumentWorkspaceProps {
   renderSignal: number;
   // The section to jump to from a search result.
   sectionTarget?: SectionTarget | null;
+  // The heading the URL keeps for this document, to jump to again once the view is ready.
+  restoreHeading?: HeadingRestore | null;
+  // Called with the heading the view jumped to (null: the heading in the URL is not in the document any more).
+  onHeadingShown?: (heading: HeadingInUrl | null) => void;
 }
 
 // The document view plus the answer panel for the question on that document. Recreated when the document changes (the caller passes a key).
@@ -24,6 +29,8 @@ export function DocumentWorkspace({
   feedbackSignal,
   renderSignal,
   sectionTarget = null,
+  restoreHeading = null,
+  onHeadingShown,
 }: DocumentWorkspaceProps) {
   const pendingId = document.pendingRequestIds[0] ?? null;
   // After submitting, keep showing the question's state (submitted, retrieved) while the same document stays open.
@@ -47,6 +54,8 @@ export function DocumentWorkspace({
         renderSignal={renderSignal}
         waitingForRequest={waitingForRequest}
         sectionTarget={sectionTarget}
+        restoreHeading={restoreHeading}
+        {...(onHeadingShown ? { onHeadingShown } : {})}
       />
       {request ? (
         <FeedbackPanel key={request.requestId} api={api} request={request} reload={reload} />

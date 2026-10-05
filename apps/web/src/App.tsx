@@ -10,6 +10,15 @@ import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { createApi, establishSession, forgetSession, type Api } from '@/lib/api';
 import {
+  documentInUrl,
+  headingInUrl,
+  writeDocumentToUrl,
+  writeHeadingToUrl,
+  type HeadingInUrl,
+  type HeadingRestore,
+  type HistoryMode,
+} from '@/lib/location';
+import {
   isSidebarView,
   isTheme,
   usePreference,
@@ -45,15 +54,83 @@ export function Workspace({ api }: { api: Api }) {
     documents: [],
     version: 0,
   });
-  // The document being shown. initialized is whether the document the daemon remembers has been selected on first load.
-  const [selection, setSelection] = useState<{ activeId: string | null; initialized: boolean }>({
+  // The document being shown. initialized is whether the first list has been fetched and a document chosen from it.
+  // history is how the URL follows this change: push for a switch the user can go back from, replace otherwise.
+  // requestedAt is the catalogVersion of the focus request that chose the document (0 otherwise). A focus request can
+  // name a document opened just before it, so a list older than that version does not drop the choice.
+  // restore is the heading in the URL to jump to again after a navigation through the URL (a reload, back or forward);
+  // restores counts those requests and gives each its id.
+  const [selection, setSelection] = useState<{
+    activeId: string | null;
+    initialized: boolean;
+    history: HistoryMode;
+    requestedAt: number;
+    restore: HeadingRestore | null;
+    restores: number;
+  }>({
     activeId: null,
     initialized: false,
+    history: 'replace',
+    requestedAt: 0,
+    restore: null,
+    restores: 0,
   });
   const { documents } = catalog;
   const { activeId } = selection;
-  const setActiveId = useCallback((documentId: string) => {
-    setSelection((current) => ({ ...current, activeId: documentId }));
+  // Switch to a document (list, search results, focus requests). Choosing the shown document again adds no history entry,
+  // but a newer focus request still protects it (it can be the shown document closed and opened again).
+  const selectDocument = useCallback((documentId: string, requestedAt = 0) => {
+    setSelection((current) => {
+      if (current.activeId !== documentId) {
+        return { ...current, activeId: documentId, history: 'push', requestedAt, restore: null };
+      }
+      return requestedAt > current.requestedAt ? { ...current, requestedAt } : current;
+    });
+  }, []);
+  // Keep the heading the shown document's view jumped to in the URL.
+  const showHeading = useCallback(
+    (heading: HeadingInUrl | null) => {
+      if (activeId !== null) writeHeadingToUrl(activeId, heading);
+    },
+    [activeId],
+  );
+  const latestDocuments = useRef(documents);
+  useEffect(() => {
+    latestDocuments.current = documents;
+  }, [documents]);
+  // Keep the URL on the shown document. Until the first list arrives, the URL is not judged or rewritten.
+  // The first write replaces the entry the UI was opened with.
+  const urlWritten = useRef(false);
+  useEffect(() => {
+    if (!selection.initialized) return;
+    writeDocumentToUrl(selection.activeId, urlWritten.current ? selection.history : 'replace');
+    urlWritten.current = true;
+  }, [selection]);
+  // Back and forward: show the document in the URL if it is open, and jump to the heading the URL keeps (also within the
+  // shown document). Otherwise stay and point the URL back at the shown document.
+  useEffect(() => {
+    const onPopState = () => {
+      const fromUrl = documentInUrl();
+      const heading = headingInUrl();
+      setSelection((current) => {
+        if (!current.initialized) return current;
+        const open =
+          fromUrl === current.activeId ||
+          latestDocuments.current.some((document) => document.documentId === fromUrl);
+        if (!open || fromUrl === null) return { ...current, history: 'replace' };
+        const restores = current.restores + 1;
+        return {
+          ...current,
+          activeId: fromUrl,
+          history: 'replace',
+          requestedAt: fromUrl === current.activeId ? current.requestedAt : 0,
+          restore: heading === null ? null : { ...heading, id: restores },
+          restores,
+        };
+      });
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, []);
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = usePreference<SidebarView>('sidebar-view', 'flat', isSidebarView);
@@ -84,7 +161,9 @@ export function Workspace({ api }: { api: Api }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
   const openHit = (hit: SearchHit) => {
-    setActiveId(hit.documentId);
+    selectDocument(hit.documentId);
+    // The search result chosen now wins over a heading of the URL still waiting to be restored.
+    setSelection((current) => (current.restore === null ? current : { ...current, restore: null }));
     setSectionTarget((current) => ({
       documentId: hit.documentId,
       sectionId: hit.sectionId,
@@ -98,15 +177,31 @@ export function Workspace({ api }: { api: Api }) {
     const [list, status] = await Promise.all([api.documents(), api.status()]);
     setCatalog({ documents: list.documents, version: list.catalogVersion });
     setSelection((current) => {
-      const stillOpen =
-        current.activeId !== null &&
-        list.documents.some((document) => document.documentId === current.activeId);
-      if (stillOpen) return current.initialized ? current : { ...current, initialized: true };
-      // Only on first load, select the document the daemon remembers.
-      const preferred = current.initialized ? null : status.activeDocumentId;
+      const isOpen = (documentId: string | null): documentId is string =>
+        documentId !== null &&
+        list.documents.some((document) => document.documentId === documentId);
+      const olderThanRequest = list.catalogVersion < current.requestedAt;
+      if (isOpen(current.activeId) || (olderThanRequest && current.activeId !== null)) {
+        return current.initialized
+          ? current
+          : { ...current, initialized: true, history: 'replace' };
+      }
+      // On first load, the document in the URL comes first (with the heading the URL keeps for it), then the one the
+      // daemon remembers. Afterwards (the shown document was closed), the first in the list.
+      const fromUrl = documentInUrl();
+      const preferred = current.initialized
+        ? null
+        : ([fromUrl, status.activeDocumentId].find(isOpen) ?? null);
+      const heading = preferred !== null && preferred === fromUrl ? headingInUrl() : null;
+      const restores = current.restores + 1;
       return {
+        ...current,
         activeId: preferred ?? list.documents[0]?.documentId ?? null,
         initialized: true,
+        history: 'replace',
+        requestedAt: 0,
+        restore: heading === null ? null : { ...heading, id: restores },
+        restores,
       };
     });
   }, [api]);
@@ -122,8 +217,10 @@ export function Workspace({ api }: { api: Api }) {
         setNotice('The daemon has stopped. Run the CLI to open it again.');
         return;
       }
-      // Switch the shown document only on an explicit focus request.
-      if (event.type === 'focus-requested' && event.documentId) setActiveId(event.documentId);
+      // Switch the shown document only on an explicit focus request. The list is fetched again below.
+      if (event.type === 'focus-requested' && event.documentId) {
+        selectDocument(event.documentId, event.catalogVersion);
+      }
       // Notifications can be missed. On any notification, refetch the list to match the current state.
       const gap =
         previous !== null &&
@@ -145,7 +242,7 @@ export function Workspace({ api }: { api: Api }) {
       },
     });
     return () => stream.close();
-  }, [api, load, setActiveId]);
+  }, [api, load, selectDocument]);
 
   const active = useMemo(
     () => documents.find((document) => document.documentId === activeId) ?? null,
@@ -239,7 +336,7 @@ export function Workspace({ api }: { api: Api }) {
             view={view}
             onViewChange={setView}
             onSelect={(documentId) => {
-              setActiveId(documentId);
+              selectDocument(documentId);
               setDrawerOpen(false);
             }}
             onClose={(documentId) => void api.close(documentId).then(load, load)}
@@ -262,6 +359,8 @@ export function Workspace({ api }: { api: Api }) {
             feedbackSignal={feedbackSignal}
             renderSignal={renderSignal}
             sectionTarget={sectionTarget?.documentId === active.documentId ? sectionTarget : null}
+            restoreHeading={selection.restore}
+            onHeadingShown={showHeading}
           />
         ) : (
           <main className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
