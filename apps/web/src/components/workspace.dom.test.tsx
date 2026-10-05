@@ -898,7 +898,8 @@ describe('keeping the shown document in the URL', () => {
     holding = false;
     notify({ type: 'focus-requested', documentId: 'doc_9', catalogVersion });
     held.shift()?.();
-    await until(() => window.location.search === '?document=doc_1');
+    // The URL follows the selection immediately; the previous view stays until the next body is ready.
+    await until(() => window.location.search === '?document=doc_1' && shownTitle() === '文書');
     expect(shownTitle()).toBe('文書');
   });
 
