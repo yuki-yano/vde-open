@@ -672,7 +672,8 @@ describe('read and close', () => {
 
 describe('DOC-017 the repository of each document', () => {
   it('is shown by list, for a repository, a worktree with relative paths, and a file outside', async () => {
-    const work = realpathSync(t.work);
+    // The daemon resolves paths with the native realpath, which also expands Windows short names (such as RUNNER~1).
+    const work = realpathSync.native(t.work);
     const repo = join(work, 'repo');
     gitDir(join(repo, '.git'));
     const checkout = join(repo, '.git', 'wt', 'feature', 'x');
@@ -718,7 +719,7 @@ describe('DOC-017 the repository of each document', () => {
 
   // Windows has no O_NOFOLLOW; the type is checked before opening instead. This runs on the Windows CI too.
   it('does not follow a symlinked HEAD', async (context) => {
-    const work = realpathSync(t.work);
+    const work = realpathSync.native(t.work);
     gitDir(join(work, 'repo', '.git'));
     t.write('elsewhere/HEAD', 'ref: refs/heads/main\n');
     unlinkSync(join(work, 'repo', '.git', 'HEAD'));
@@ -738,7 +739,7 @@ describe('DOC-017 the repository of each document', () => {
   });
 
   it('is in the first list after a restart, including a missing document', async () => {
-    const work = realpathSync(t.work);
+    const work = realpathSync.native(t.work);
     gitDir(join(work, 'repo', '.git'));
     t.write('repo/a.md', '# a\n');
     t.write('repo/gone/b.md', '# b\n');
