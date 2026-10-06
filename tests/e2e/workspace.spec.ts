@@ -27,9 +27,8 @@ test('DOC-007 / DOC-008: the tree view tells same-named files apart, and reorder
 
   // In the flat view, move an item up.
   await expect(sidebar.getByRole('listitem')).toHaveText([/alphaの文書/, /betaの文書/, /説明/]);
-  // The row buttons take clicks only while the row is hovered or has focus.
-  await sidebar.getByRole('listitem').filter({ hasText: '説明' }).hover();
-  await sidebar.getByRole('button', { name: 'Move 説明 up' }).click();
+  const row = sidebar.locator('button[data-document-id]').filter({ hasText: '説明' });
+  await row.press('Alt+ArrowUp');
   await expect(sidebar.getByRole('listitem')).toHaveText([/alphaの文書/, /説明/, /betaの文書/]);
 
   // In the tree view, the difference in roots remains. Files are not moved.

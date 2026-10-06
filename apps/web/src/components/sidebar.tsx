@@ -1,7 +1,15 @@
+import { PointerActivationConstraints } from '@dnd-kit/dom';
+import {
+  DragDropProvider,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  useDragDropManager,
+  useDragOperation,
+} from '@dnd-kit/react';
+import { isSortable, useSortable } from '@dnd-kit/react/sortable';
 import type { DocumentSummary } from '@vde-open/shared';
 import {
-  ChevronDown,
-  ChevronUp,
   CircleAlert,
   FileLock,
   FileX,
@@ -20,13 +28,12 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
-  type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
   type RefObject,
 } from 'react';
 
+import { DetailsPopover } from '@/components/details-popover';
 import { FormatIcon } from '@/components/format-icon';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -68,7 +75,7 @@ const STATE_LABEL: Record<string, { label: string; icon: LucideIcon }> = {
 };
 
 // Badges show their text when the list is wide enough. They shrink to an icon on narrow lists (under 13rem, the same
-// width below which the move buttons go), and while the row shows its buttons, so the title keeps room.
+// width), and while the row shows its remove button, so the title keeps room.
 // The text stays for screen readers.
 const BADGE_COMPACT = 'px-0.5 @min-[13rem]/list:px-2 @min-[13rem]/list:row-open:px-0.5';
 const BADGE_ICON = '@min-[13rem]/list:hidden @min-[13rem]/list:row-open:inline';
@@ -128,7 +135,10 @@ function descriptionOf(document: DocumentSummary, labels: Labels): string {
 function tooltipOf(document: DocumentSummary, labels: Labels, movable = false): string {
   const lines = [document.title, visible(locationText(document, labels))];
   if (document.canonicalPath !== null) lines.push(document.canonicalPath);
-  if (movable) lines.push('Alt+↑ / Alt+↓ moves it in the list');
+  if (movable) {
+    lines.push('Drag to reorder. Space picks up, ↑↓ moves, Space drops, Escape cancels.');
+    lines.push('Alt+↑ / Alt+↓ moves it in the list');
+  }
   return [...new Set(lines)].join('\n');
 }
 
@@ -222,8 +232,25 @@ const OFFSCREEN_ROW = '[content-visibility:auto]';
 const ROW_FOCUS =
   'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring';
 
-const BUTTON_WIDTH_REM = 1.5;
-const BUTTON_GAP_REM = 0.125;
+const ROW_SENSORS = [
+  PointerSensor.configure({
+    // Pointer dragging uses the entire row, including its document button.
+    activatorElements: (source) => [source.element],
+    preventActivation: (event, source) =>
+      source.data['canReorder'] !== true ||
+      (event.target instanceof Element && event.target.closest('[data-row-action]') !== null),
+    activationConstraints: (event) =>
+      event.pointerType === 'touch'
+        ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
+        : [new PointerActivationConstraints.Distance({ value: 8 })],
+  }),
+  KeyboardSensor.configure({
+    // Enter opens the document; Space starts keyboard sorting on its row button.
+    keyboardCodes: { ...KeyboardSensor.defaults.keyboardCodes, start: ['Space'] },
+    preventActivation: (event, source) =>
+      source.data['canReorder'] !== true || event.target !== source.handle,
+  }),
+];
 
 function FlatRow({
   document,
@@ -232,14 +259,10 @@ function FlatRow({
   labels,
   short,
   active,
-  dragging,
   pressedOn,
   onSelect,
   onClose,
   onMove,
-  onDragStart,
-  onDragEnd,
-  onDrop,
 }: {
   document: DocumentSummary;
   index: number;
@@ -247,27 +270,27 @@ function FlatRow({
   labels: Labels;
   short: ShortDirectory | undefined;
   active: boolean;
-  dragging: boolean;
   // The button the last press in the list started on.
   pressedOn: RefObject<Element | null>;
   onSelect: () => void;
   onClose: () => void;
   onMove: (to: number) => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onDrop: (event: DragEvent) => void;
 }) {
   const descriptionId = useId();
   const canMoveUp = index > 0;
   const canMoveDown = index < count - 1;
-  // Room kept on the first line for the buttons while they show. Below 13rem only the remove button shows.
-  const wide = 1 + Number(canMoveUp) + Number(canMoveDown);
-  const actions = {
-    '--actions-narrow': `${String(BUTTON_WIDTH_REM)}rem`,
-    '--actions-wide': `${String(wide * BUTTON_WIDTH_REM + (wide - 1) * BUTTON_GAP_REM)}rem`,
-  } as CSSProperties;
-  // Reordering without dragging. The buttons are hidden on narrow lists, so the keys always work.
+  const { ref, handleRef, isDragSource } = useSortable({
+    id: document.documentId,
+    index,
+    // Keep the document button enabled when there is only one item.
+    disabled: { droppable: count < 2 },
+    data: { canReorder: count > 1 },
+    sensors: ROW_SENSORS,
+    transition: { duration: 180, easing: 'ease-out' },
+  });
+  // Alt+Up / Alt+Down remains available on the document button.
   const onKeyDown = (event: KeyboardEvent) => {
+    if (isDragSource) return;
     if (!event.altKey || event.metaKey || event.ctrlKey) return;
     if (event.key === 'ArrowUp' && canMoveUp) {
       event.preventDefault();
@@ -286,42 +309,44 @@ function FlatRow({
   };
 
   return (
-    // Reorder by drag. With the keyboard, use Alt+Up / Alt+Down, or "Move up" / "Move down".
-    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <li
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={onDrop}
+      ref={ref}
+      data-drag-source={isDragSource || undefined}
       className={cn(
         'group/row relative rounded-md [contain-intrinsic-size:auto_3.125rem]',
         OFFSCREEN_ROW,
+        count > 1 && 'cursor-grab active:cursor-grabbing',
         active ? 'bg-accent text-accent-foreground' : 'hover:bg-muted',
-        dragging && 'opacity-50',
+        isDragSource &&
+          'bg-primary/10 outline-2 -outline-offset-2 outline-dashed outline-primary [&>button]:opacity-0 [&>span]:opacity-0',
       )}
-      style={actions}
     >
+      {isDragSource && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm font-medium text-primary"
+          data-testid="drop-position"
+        >
+          Drop here
+        </div>
+      )}
       <button
+        ref={handleRef}
         type="button"
         className={cn(
-          'group/button flex w-full min-w-0 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left text-sm',
+          'group/button flex w-full min-w-0 flex-col gap-0.5 rounded-md py-1.5 pr-2 pl-2 text-left text-sm',
+          count > 1 && 'cursor-grab active:cursor-grabbing',
           ROW_FOCUS,
         )}
         aria-current={active ? 'true' : undefined}
         aria-describedby={descriptionId}
-        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+        aria-keyshortcuts={count > 1 ? 'Alt+ArrowUp Alt+ArrowDown Space' : undefined}
         title={tooltipOf(document, labels, count > 1)}
         data-document-id={document.documentId}
         onClick={onSelect}
         onKeyDown={onKeyDown}
       >
-        <span
-          className={cn(
-            'flex w-full min-w-0 items-center gap-1.5',
-            'row-open:pr-(--actions-narrow) @min-[13rem]/list:row-open:pr-(--actions-wide)',
-          )}
-        >
+        <span className="flex w-full min-w-0 items-center gap-1.5 row-open:pr-6">
           <FormatIcon format={document.format} />
           <span className="min-w-12 flex-1 truncate" data-part="title">
             {document.title}
@@ -351,34 +376,13 @@ function FlatRow({
       </span>
       {/* Invisible buttons take no clicks: a tap on a badge under them must not remove the document. */}
       <span className="pointer-events-none absolute top-1 right-1 flex items-center gap-0.5 row-open:pointer-events-auto">
-        {canMoveUp && (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className={cn('hidden @min-[13rem]/list:inline-flex', hoverButton)}
-            aria-label={`Move ${document.title} up`}
-            onClick={pressed(() => onMove(index - 1))}
-          >
-            <ChevronUp aria-hidden="true" />
-          </Button>
-        )}
-        {canMoveDown && (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className={cn('hidden @min-[13rem]/list:inline-flex', hoverButton)}
-            aria-label={`Move ${document.title} down`}
-            onClick={pressed(() => onMove(index + 1))}
-          >
-            <ChevronDown aria-hidden="true" />
-          </Button>
-        )}
         <Button
           variant="ghost"
           size="icon-xs"
           className={hoverButton}
           aria-label={`Remove ${document.title} from the list`}
           title="Remove from the list (the file is not deleted)"
+          data-row-action="remove"
           onClick={pressed(onClose)}
         >
           <X aria-hidden="true" />
@@ -656,9 +660,41 @@ function useKeepFocus(container: RefObject<HTMLDivElement | null>) {
   });
 }
 
+// Keep the frozen rows until the library has restored their DOM order and finished the drop.
+// Updating the catalog sooner would prevent its cancellation cleanup from restoring the rows.
+function DragCatalogGuard({
+  documents,
+  snapshot,
+  onChanged,
+  onFinished,
+}: {
+  documents: DocumentSummary[];
+  snapshot: DocumentSummary[] | null;
+  onChanged: () => void;
+  onFinished: () => void;
+}) {
+  const manager = useDragDropManager();
+  const { source } = useDragOperation();
+  useEffect(() => {
+    if (!snapshot) return;
+    if (!source) {
+      onFinished();
+    } else if (
+      !manager?.dragOperation.controller?.signal.aborted &&
+      (snapshot.length !== documents.length ||
+        snapshot.some((item, index) => item.documentId !== documents[index]?.documentId))
+    ) {
+      onChanged();
+      manager?.actions.stop({ canceled: true });
+    }
+  }, [documents, snapshot, source, manager, onChanged, onFinished]);
+  return null;
+}
+
 export function Sidebar(props: SidebarProps) {
   const { documents, activeId, view, onViewChange, onSelect, onClose, onReorder } = props;
-  const [dragging, setDragging] = useState<string | null>(null);
+  const [dragDocuments, setDragDocuments] = useState<DocumentSummary[] | null>(null);
+  const [reorderMessage, setReorderMessage] = useState<string | null>(null);
   const order = documents.map((document) => document.documentId);
   const given = props.labels;
   const labels = useMemo(() => given ?? buildLabels(documents), [given, documents]);
@@ -671,13 +707,6 @@ export function Sidebar(props: SidebarProps) {
   const list = useRef<HTMLDivElement>(null);
   useKeepFocus(list);
 
-  const onDrop = (event: DragEvent, targetId: string) => {
-    event.preventDefault();
-    if (dragging === null || dragging === targetId) return;
-    onReorder(move(order, order.indexOf(dragging), order.indexOf(targetId)));
-    setDragging(null);
-  };
-
   return (
     <nav
       aria-label="Open documents"
@@ -688,6 +717,26 @@ export function Sidebar(props: SidebarProps) {
     >
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
         <h2 className="text-sm font-medium">Open documents ({documents.length})</h2>
+        {reorderMessage && (
+          <DetailsPopover
+            title="Order not changed"
+            trigger={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Order not changed"
+                className="text-destructive"
+              >
+                <CircleAlert aria-hidden="true" />
+              </Button>
+            }
+          >
+            <p>{reorderMessage}</p>
+          </DetailsPopover>
+        )}
+        <span role="status" className="sr-only">
+          {reorderMessage}
+        </span>
         <ToggleGroup
           value={[view]}
           onValueChange={(value) => {
@@ -716,27 +765,80 @@ export function Sidebar(props: SidebarProps) {
         ) : view === 'tree' ? (
           <Tree nodes={tree} depth={0} labels={labels} props={{ activeId, onSelect, onClose }} />
         ) : (
-          <ul className="flex flex-col gap-0.5">
-            {documents.map((document, index) => (
-              <FlatRow
-                key={document.documentId}
-                document={document}
-                index={index}
-                count={documents.length}
-                labels={labels}
-                short={shortened.get(document.documentId)}
-                active={document.documentId === activeId}
-                dragging={dragging === document.documentId}
-                pressedOn={pressedOn}
-                onSelect={() => onSelect(document.documentId)}
-                onClose={() => onClose(document.documentId)}
-                onMove={(to) => onReorder(move(order, index, to))}
-                onDragStart={() => setDragging(document.documentId)}
-                onDragEnd={() => setDragging(null)}
-                onDrop={(event) => onDrop(event, document.documentId)}
-              />
-            ))}
-          </ul>
+          <DragDropProvider
+            onDragStart={() => {
+              setDragDocuments(documents);
+              setReorderMessage(null);
+            }}
+            onDragEnd={(event) => {
+              if (event.canceled || !event.operation.target || !isSortable(event.operation.source))
+                return;
+              const source = event.operation.source;
+              if (source.initialIndex === source.index) return;
+              const snapshot = (dragDocuments ?? documents).map((item) => item.documentId);
+              // A concurrent catalog change must not save an old list over the new one.
+              if (
+                snapshot.length !== order.length ||
+                snapshot.some((id, index) => id !== order[index])
+              ) {
+                setReorderMessage(
+                  'The document list changed while dragging. Drag again to reorder the current list.',
+                );
+                return;
+              }
+              onReorder(move(order, source.initialIndex, source.index));
+            }}
+          >
+            <DragCatalogGuard
+              documents={documents}
+              snapshot={dragDocuments}
+              onChanged={() =>
+                setReorderMessage(
+                  'The document list changed while dragging. Drag again to reorder the current list.',
+                )
+              }
+              onFinished={() => setDragDocuments(null)}
+            />
+            <ul className="flex flex-col gap-0.5">
+              {(dragDocuments ?? documents).map((document, index) => (
+                <FlatRow
+                  key={document.documentId}
+                  document={document}
+                  index={index}
+                  count={(dragDocuments ?? documents).length}
+                  labels={labels}
+                  short={shortened.get(document.documentId)}
+                  active={document.documentId === activeId}
+                  pressedOn={pressedOn}
+                  onSelect={() => onSelect(document.documentId)}
+                  onClose={() => onClose(document.documentId)}
+                  onMove={(to) => onReorder(move(order, index, to))}
+                />
+              ))}
+            </ul>
+            <DragOverlay dropAnimation={{ duration: 180, easing: 'ease-out' }}>
+              {(source) => {
+                const item = (dragDocuments ?? documents).find(
+                  (candidate) => candidate.documentId === source.id,
+                );
+                return item ? (
+                  <div
+                    aria-hidden="true"
+                    data-testid="drag-card"
+                    className="rounded-md border border-primary bg-background p-3 text-sm shadow-lg"
+                  >
+                    <p className="flex items-center gap-2 font-medium">
+                      <FormatIcon format={item.format} />
+                      {item.title}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {visible(locationText(item, labels))}
+                    </p>
+                  </div>
+                ) : null;
+              }}
+            </DragOverlay>
+          </DragDropProvider>
         )}
       </div>
     </nav>

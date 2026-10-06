@@ -57,6 +57,15 @@
 
 shadcnのCLIが`package.json`へ書くrange指定（`^`）は、導入後に完全版番号へ直した。
 
+## 文書一覧の並べ替えで追加した依存
+
+2026-10-06に追加。完全版番号で固定し、React 19.3.0で型検査とビルドを確認した。
+
+| package | 版 | 使う場所 | peer／enginesの確認 | 実施した検証 |
+|---|---|---|---|---|
+| @dnd-kit/react | 0.5.0 | apps/web | react／react-dom ^18.0.0 または ^19.0.0 | Chromium・Firefox・WebKitで行全体からのドラッグ、挿入位置、キャンセル、キーボード操作、自動スクロールを確認。Chromiumではタッチ操作も確認 |
+| @dnd-kit/dom | 0.5.0 | apps/web | peer／engines指定なし | ポインター移動距離とタッチ長押しの開始条件に使用。削除ボタンの操作と短いタッチスクロールで並べ替えが始まらないことを確認 |
+
 ## 契約テストで確かめたこと
 
 - `@tanstack/markdown`のASTはserializableで、nodeに原文位置を持たない。原文行の取得はsourceから直接切り出す（仕様8.3）。

@@ -2,7 +2,13 @@ import { defineConfig, devices } from '@playwright/test';
 
 // Verify the built distribution (apps/cli/dist) in real browsers. Requires pnpm build first.
 // Tests that also run on Firefox and WebKit (view isolation, CSP, communication with the HTML).
-const CROSS_BROWSER = ['html.spec.ts', 'interactive.spec.ts', 'release.spec.ts', 'viewer.spec.ts'];
+const CROSS_BROWSER = [
+  'html.spec.ts',
+  'interactive.spec.ts',
+  'release.spec.ts',
+  'viewer.spec.ts',
+  'sidebar-drag.spec.ts',
+];
 
 export default defineConfig({
   testDir: 'tests/e2e',
