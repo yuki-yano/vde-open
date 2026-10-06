@@ -225,15 +225,17 @@ test("UX-004: view settings such as the color scheme stay in the browser, and op
   t.write('b.md', '# B\n');
   await t.json(['open', 'a.md', 'b.md']);
   await page.goto(await t.bootstrapUrl());
+  const titles = page
+    .getByRole('navigation', { name: 'Open documents' })
+    .locator('[data-part="title"]');
+  await expect(titles).toHaveText(['A', 'B']);
   await page.getByRole('button', { name: 'Dark' }).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
   // A document closed from the CLI is gone from the list after reloading. The view setting remains.
   await t.json(['close', 'b.md']);
   await page.reload();
   await expect(page.locator('html')).toHaveClass(/dark/);
-  const list = page.getByRole('navigation', { name: 'Open documents' });
-  await expect(list).toContainText('A');
-  await expect(list).not.toContainText('B');
+  await expect(titles).toHaveText(['A']);
 });
 
 test('UX-005: what cannot be shown is reported with the target, reason, and fix, and there is no button that widens permissions', async ({
