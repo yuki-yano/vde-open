@@ -28,7 +28,7 @@ To install from a clone of this repository (Node.js 24.21.0 is pinned in `mise.t
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test:pack                                   # builds artifacts/vde-open-<version>.tgz and verifies an install in a separate directory
-bun add -g "$PWD/artifacts/vde-open-0.1.6.tgz"   # bun add -g needs an absolute path
+bun add -g "$PWD/artifacts/vde-open-0.1.7.tgz"   # bun add -g needs an absolute path
 ```
 
 ## `vde-open` and `vo`
