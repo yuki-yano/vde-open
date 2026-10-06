@@ -97,6 +97,8 @@ export interface Api {
   reorder(order: string[], expectedCatalogVersion: number): Promise<number>;
   focus(documentId: string): Promise<void>;
   refresh(documentId: string): Promise<void>;
+  // PDF of one revision of a Markdown document, printed by the daemon.
+  exportPdf(documentId: string, revision: string): Promise<Blob>;
   // Fetch a render grant for one revision of a document.
   renderGrant(
     documentId: string,
@@ -224,6 +226,17 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
     },
     async refresh(documentId) {
       await request(`/documents/${documentId}/refresh`, { method: 'POST' });
+    },
+    async exportPdf(documentId, revision) {
+      const response = await fetch(`${API}/documents/${documentId}/pdf`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ revision }),
+      });
+      if (response.status === 401) onUnauthorized();
+      // A failure comes back as the JSON envelope, and the PDF itself on success.
+      if (!response.ok) await parseEnvelope(response);
+      return response.blob();
     },
     async renderGrant(documentId, revision, options = {}) {
       const { data } = await request<RenderGrantResult>(`/documents/${documentId}/render-grants`, {

@@ -40,6 +40,7 @@ export default defineConfig({
   deps: {
     onlyBundle: [
       '@hono/node-server',
+      '@tanstack/highlight',
       '@tanstack/markdown',
       'chokidar',
       'commander',

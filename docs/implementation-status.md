@@ -481,6 +481,16 @@ P7時点の制約:
 - 既知の制限: 判定のfilesystem処理が応答しないmountで止まっている間にdaemonを止めると、lockは解放され`vo daemon stop`は返るが、processはその処理がOSから返るまで残る（文書そのものの読み込みが止まった場合と同じ）。
 - 見つけた既存の問題（今回は直していない）: 幅180pxで、一覧の見出しの「Tree」の切り替えが一部見切れる。
 
+## MarkdownのPDF出力（利用者の依頼、2026-10-06）
+
+- 目的: 管理画面で開いているMarkdownを、印刷のdialogなしに、白背景の資料としてPDFへ保存する。余白に文書名とpage番号を入れる。品質の保証はChrome・Edgeでよい（利用者の回答）。方式の決定はADR-0013。
+- 方式の検討: 別のAgent（Codex、Claude）と調査し、ブラウザの印刷・headless Chromium・JSのPDF library・外部commandを比べた。daemonが利用者の環境のChrome・Edgeを`--remote-debugging-pipe`で操作し、`Page.printToPDF`で印刷する。設計のレビュー（Claude）で、解析のworkerとの時間上限の共有、測定できないDoD、`--print-to-pdf`が文書化されていない一時profileの挙動に頼る点などの指摘を受け、専用のworker、画像のbyteをworkerへ通さない書き出し、CDPのpipe、e2eでのPDFの検査に改めた。Codexの設計レビューの本文は、応答の回収で受け取れなかった。
+- 実装: `packages/document/src/print.ts`・`print-style.ts`（印刷用の文書と紙のstyle）、`rendering-rules.ts`（linkと画像の判定。表示の`MarkdownView`も使う）、`highlight.ts`（色付けを表示と共有）。`apps/cli/src/export/`の`browser.ts`（探索）・`cdp.ts`（pipeのclient）・`pdf-service.ts`（出力）。管理APIの`POST /documents/:id/pdf`、viewerの「Export PDF」。
+- 確認: macOS（Chrome 154・Edge 154）で、日本語・表・コード・画像・脚注・タスクリストを含む文書を出力し、header・footer・改ページ・配色を目で確かめた。e2eでは、PDFから文字を取り出し（`tests/e2e/pdf-text.ts`。ChromeはToUnicodeが康熙部首になる漢字を`ActualText`で正しい字にしている）、全pageのheaderとfooterを確かめる。
+- 設計レビュー（Codex）: 応答の回収が遅れ、実装の後に受け取った。指摘のうち、Windowsでのprocess treeの停止（`taskkill /T /F`）、page書き出し中の停止でbrowserを起動しないこと、一時directoryの削除の失敗で結果を変えないことを反映した。ほかは対応済みだった。
+- 実装レビュー（Claude）1回目の指摘への対応: browserからの読めないmessageでdaemonが落ちる（捕まえてその出力だけを失敗に。messageは16MiBまで）、about:blankの読み込みのeventを取り違える余地（`loaderId`で照合）、同じ画像の繰り返しで一時fileが肥大する（pageは256MiBまで）、文書を切り替えると出力の状態と失敗が消える（文書ごとのstoreに）、本体の終了後に残る補助process・強制終了で残る一時directory（終了後もprocess groupを止める。1時間より古いものを起動時に消す）、daemonのlocaleを文書の言語にしていた（本文の仮名・ハングルから決める）、接続の切断・描画中の停止・掃除の失敗・header/footerのテストの不足、文書の事実との食い違い。
+- 未確認: LinuxとWindowsでの、実際のbrowserでの印刷（CIのLinuxのe2eは、runnerのChromeで行う。pushの後に確認する）。
+
 ## 全体のDoD（仕様17.1）
 
 機能完了条件:

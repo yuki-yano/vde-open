@@ -14,6 +14,7 @@ import {
   linkOpenParamsSchema,
   parseStrictJson,
   requestIdSchema,
+  revisionSchema,
   StrictJsonError,
   successEnvelope,
   VdeError,
@@ -27,6 +28,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z, ZodError } from 'zod';
 
 import type { DocumentService, ServiceResult } from '../../documents/service.ts';
+import type { PdfService } from '../../export/pdf-service.ts';
 import type { FeedbackService } from '../../feedback/service.ts';
 import type { RenderService } from '../../render/render-service.ts';
 import type { SearchService } from '../../search/search-service.ts';
@@ -77,6 +79,7 @@ export interface ManagementDeps {
   render: RenderService;
   search: SearchService;
   feedback: FeedbackService;
+  pdf: PdfService;
   // Origin of the listener that serves documents.
   previewOrigin: string;
   // Directory of the built UI. If absent, the UI is not served.
@@ -409,6 +412,17 @@ export async function startManagementServer(
   api.post('/documents/:id/refresh', async (c) =>
     ok(c, 'documents.refresh', await deps.documents.refresh({ documentId: c.req.param('id') })),
   );
+
+  // PDF of the shown revision of a Markdown document. The body is the PDF itself; failures use the JSON envelope.
+  api.post('/documents/:id/pdf', async (c) => {
+    const body = z.strictObject({ revision: revisionSchema }).parse(await c.req.json());
+    // When the UI goes away (the request is aborted), the browser is stopped.
+    const pdf = await deps.pdf.exportMarkdown(c.req.param('id'), body.revision, c.req.raw.signal);
+    return c.body(new Uint8Array(pdf), 200, {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment',
+    });
+  });
 
   // Search over open documents. The accepted parameters are the same as the CLI (spec 12.2).
   api.get('/search', async (c) => {

@@ -194,6 +194,8 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     ...process.env,
     PATH: `${dirname(process.execPath)}${delimiter}${process.env['PATH'] ?? ''}`,
     VDE_OPEN_HOME: stateHome,
+    // No browser here: the PDF export step checks the print document up to looking for the browser.
+    VDE_OPEN_BROWSER: join(installDir, 'no browser here'),
   };
   const binDir = join(installDir, 'node_modules', '.bin');
   const runBin = (name: string, args: string[]): string => {
@@ -217,6 +219,7 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
   interface Envelope<T> {
     ok: boolean;
     data: T;
+    error?: { code: string };
   }
   const runJson = <T>(name: string, args: string[]): T => {
     const envelope = JSON.parse(runBin(name, [...args, '--json'])) as Envelope<T>;
@@ -351,6 +354,32 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
       fail('an unregistered file is served from the preview listener');
     }
     if (htmlId) runJson('vo', ['close', htmlId]);
+
+    progress(
+      'Step 6, continued: the PDF export renders the print document (the lazily loaded chunk with bundled TanStack Highlight) with only the install target.',
+    );
+    writeFileSync(join(installDir, 'print.md'), '# 印刷\n\n```ts\nconst a = 1;\n```\n');
+    const printDoc = runJson<{ documents: Array<{ documentId: string; revision: string }> }>('vo', [
+      'open',
+      'print.md',
+    ]).documents[0];
+    const exported = await fetch(`${origin}/_/api/v1/documents/${printDoc?.documentId ?? ''}/pdf`, {
+      method: 'POST',
+      headers: {
+        Origin: origin,
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ revision: printDoc?.revision }),
+    });
+    // The browser is looked for after the print document is rendered, so this error means rendering worked.
+    const exportError = ((await exported.json()) as Envelope<never>).error?.code;
+    if (exportError !== 'E_BROWSER_NOT_FOUND') {
+      fail(
+        `the print document for the PDF export does not render in the install target: ${String(exportError)}`,
+      );
+    }
+    if (printDoc) runJson('vo', ['close', printDoc.documentId]);
 
     progress(
       'Step 6, continued: the interactive view and injecting the bundled SDK into HTML work with only the install target.',

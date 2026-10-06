@@ -1,41 +1,11 @@
 // React rendering of Markdown. References to TanStack Markdown and Highlight stay inside this package.
-import { createHighlighter } from '@tanstack/highlight';
-import {
-  css,
-  html,
-  js,
-  json,
-  jsx,
-  markdown,
-  plaintext,
-  shell,
-  ts,
-  tsx,
-  yaml,
-} from '@tanstack/highlight/languages';
-import { createTanStackMarkdownHighlighter } from '@tanstack/highlight/markdown';
-import type { CodeHighlighter, MarkdownDocument } from '@tanstack/markdown';
+import type { MarkdownDocument } from '@tanstack/markdown';
 import { renderMarkdownReact } from '@tanstack/markdown/react';
 import { useMemo, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 
-import { isSafeLink, MARKDOWN_PARSE_OPTIONS } from './analysis.ts';
-import { classifyLink } from './references.ts';
-
-// Upper limit of a code block to highlight (spec 7.4). Larger blocks are shown without coloring.
-const MAX_HIGHLIGHT_CHARS = 256 * 1024;
-
-// Languages are registered explicitly. Unregistered languages are not colored.
-const highlighter = createHighlighter({
-  languages: [js, jsx, ts, tsx, json, yaml, html, css, shell, markdown, plaintext],
-});
-const registered = new Set(highlighter.listLanguages());
-const highlightAdapter = createTanStackMarkdownHighlighter(highlighter);
-
-const safeHighlighter: CodeHighlighter = (code, lang, options) => {
-  const normalized = lang ? highlighter.normalizeLanguage(lang) : 'plaintext';
-  const usable = registered.has(normalized) && code.length <= MAX_HIGHLIGHT_CHARS;
-  return highlightAdapter(code, usable ? normalized : 'plaintext', options);
-};
+import { MARKDOWN_PARSE_OPTIONS } from './analysis.ts';
+import { safeHighlighter } from './highlight.ts';
+import { renderedLinkOf } from './rendering-rules.ts';
 
 export interface MarkdownViewProps {
   // Result of parseMarkdownDocument. Parsing happens in a worker; only rendering happens here.
@@ -64,15 +34,15 @@ function createComponents(
   codeActions: MarkdownViewProps['codeActions'],
 ): Components {
   function Link({ href, children, ...rest }: ComponentPropsWithoutRef<'a'>): ReactNode {
-    if (!href) return <span>{children}</span>;
-    if (isSafeLink(href)) {
-      if (href.startsWith('#')) {
-        return (
-          <a href={href} {...rest}>
-            {children}
-          </a>
-        );
-      }
+    const kind = renderedLinkOf(href);
+    if (kind === 'fragment') {
+      return (
+        <a href={href} {...rest}>
+          {children}
+        </a>
+      );
+    }
+    if (kind === 'external') {
       return (
         <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
           {children}
@@ -80,7 +50,7 @@ function createComponents(
       );
     }
     // Link to a local document. No navigation; the host checks whether it may be opened, then opens it.
-    if (onOpenLink && classifyLink(href).kind === 'document') {
+    if (kind === 'document' && onOpenLink && href !== undefined) {
       return (
         <button type="button" data-local-link="" onClick={() => onOpenLink(href)}>
           {children}

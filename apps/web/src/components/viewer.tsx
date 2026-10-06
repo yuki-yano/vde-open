@@ -1,12 +1,7 @@
-import {
-  classifyReference,
-  dirnameOfLogicalPath,
-  encodeLogicalPath,
-  fragmentOfAnchor,
-} from '@vde-open/document';
+import { encodeLogicalPath, fragmentOfAnchor, localImagePath } from '@vde-open/document';
 import { codeOfBlock, MarkdownView } from '@vde-open/document/react';
 import type { DocumentSummary, FeedbackForUi, OutlineItem } from '@vde-open/shared';
-import { Copy, Hash, Pause, Play, RefreshCw } from 'lucide-react';
+import { Copy, FileDown, Hash, Pause, Play, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -26,6 +21,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ApiError, type Api } from '@/lib/api';
 import { describeDiagnostic } from '@/lib/diagnostics';
 import type { HeadingInUrl, HeadingRestore } from '@/lib/location';
+import { pdfExports, usePdfExport } from '@/lib/pdf-export';
 import { isViewMode, usePreference, type ViewMode } from '@/lib/preferences';
 import { useBridge, type BridgeStatus } from '@/lib/use-bridge';
 import { useCopy } from '@/lib/use-copy';
@@ -232,6 +228,7 @@ export function Viewer({
   const missing = useMissingAssets(api, grant?.grant ?? null, renderSignal);
   const [confirmingInteractive, setConfirmingInteractive] = useState(false);
   const [modeError, setModeError] = useState<string | null>(null);
+  const pdfExport = usePdfExport(document.documentId);
   const changeMode = (next: 'static' | 'interactive') => {
     setConfirmingInteractive(false);
     setModeError(null);
@@ -289,11 +286,10 @@ export function Viewer({
         .filter((asset) => asset.role === 'image' || asset.role === 'svg')
         .map((asset) => asset.logicalPath),
     );
-    const baseDir = dirnameOfLogicalPath(grant.documentLogicalPath);
     return (src: string): string | null => {
-      const reference = classifyReference(src, baseDir);
-      if (reference.kind !== 'local' || !images.has(reference.logicalPath)) return null;
-      return `${grant.filesBaseUrl}${encodeLogicalPath(reference.logicalPath)}`;
+      const logicalPath = localImagePath(src, grant.documentLogicalPath);
+      if (logicalPath === null || !images.has(logicalPath)) return null;
+      return `${grant.filesBaseUrl}${encodeLogicalPath(logicalPath)}`;
     };
   }, [grant]);
 
@@ -553,6 +549,20 @@ export function Viewer({
           <RefreshCw aria-hidden="true" />
           Refresh
         </Button>
+        {isMarkdown && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={pdfExport.exporting || loaded === null}
+            onClick={() => {
+              // The shown revision. The daemon prints it with a headless browser; no print dialog is shown.
+              if (loaded !== null) pdfExports.start(api, document, loaded.revision);
+            }}
+          >
+            <FileDown aria-hidden="true" />
+            {pdfExport.exporting ? 'Exporting…' : 'Export PDF'}
+          </Button>
+        )}
       </header>
 
       <div role="status" aria-live="polite" className="empty:hidden">
@@ -647,6 +657,21 @@ export function Viewer({
           </div>
         )}
         {modeError && <p className="border-b bg-destructive/10 px-4 py-2 text-sm">{modeError}</p>}
+        {pdfExport.error && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-2 border-b bg-destructive/10 px-4 py-2 text-sm"
+          >
+            <p className="min-w-0 flex-1">{pdfExport.error}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => pdfExports.dismiss(document.documentId)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        )}
         {error && <p className="border-b bg-destructive/10 px-4 py-2 text-sm">{error}</p>}
         {linkError && <p className="border-b bg-destructive/10 px-4 py-2 text-sm">{linkError}</p>}
       </div>

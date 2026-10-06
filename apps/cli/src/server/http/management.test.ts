@@ -64,6 +64,10 @@ async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> 
       previewOrigin: () => 'http://127.0.0.1:1',
     }),
     search: createSearchService({ store, cursors }),
+    pdf: {
+      exportMarkdown: () => Promise.reject(new Error('Not used in this test.')),
+      close: () => Promise.resolve(),
+    },
     feedback: new FeedbackService({ store, documents }),
     previewOrigin: 'http://127.0.0.1:1',
     webRoot: null,

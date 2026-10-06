@@ -115,6 +115,17 @@ Markdownは、TanStack Markdown 1.0.0で表示します。CommonMark・GFMの完
 - コードの色付けは、JS・JSX・TS・TSX・JSON・YAML・HTML・CSS・Bash・Markdownだけです。256KiBを超えるコードと、それ以外の言語は色を付けません。
 - 解析が2秒で終わらない文書や、要素が10万を超える・入れ子が64段を超える文書は、原文で表示します。
 
+## MarkdownのPDF出力
+
+Markdown文書のheaderの「Export PDF」で、表示中の版を、印刷のdialogを挟まずにPDFとして保存します。
+
+- PDFは白背景のA4の資料です（管理画面の配色は使いません）。全pageのheaderに文書名、footerにpage番号（「3 / 12」）を入れ、見出しをPDFのしおりにします。
+- daemonが、その環境に入っているGoogle ChromeかMicrosoft Edge（131以降）を、使い終えたら消す一時profileでheadlessに起動して印刷します。何もdownloadしません。別のChromium系browserや、別の場所にあるbrowserを使うときは、daemonの環境変数`VDE_OPEN_BROWSER`に実行fileの絶対pathを指定します（変えたら`vo daemon restart`を実行します）。
+- 表示と同じ規則に従います。生のHTMLは文字として表示し、文書に登録された画像だけを入れ（それ以外は代替textを表示）、他のlocal文書へのlinkは文字だけにします。
+- file名は、文書のfile名の拡張子を`.pdf`にしたものです（`README.md` → `README.pdf`）。stdinから開いた文書は文書名を使います。
+- 書体はその環境に入っているもの（macOSはSan Franciscoとヒラギノ角ゴシック、WindowsはSegoe UIと游ゴシック、LinuxはNoto Sans CJK）を使うため、OSごとに少し見た目が変わります。
+- HTML文書は出力できません。印刷は60秒以内に終わる必要があります。
+
 ## 状態の保存先と停止
 
 - 状態（開いている文書、版、質問と回答）は、次の場所に保存します。`VDE_OPEN_HOME`で変えられます。
@@ -143,6 +154,7 @@ vo feedback ack <requestId> --submission-id <id> --json
 | 終了コード8（daemonへ接続できない・起動できない） | `vo daemon status`で確かめ、`vo doctor`で残ったfileを調べる |
 | 画像やCSSが表示されない | 「Differences from the original document」を開き、`--assets-root`・`--asset`で登録する |
 | 検索で見つからない | `vo list --json`で、文書が開いていて`searchState`が`ready`かを確かめる |
+| Export PDFで、Google ChromeかMicrosoft Edgeが必要と表示される | Chrome・Edgeの131以降を入れるか、`VDE_OPEN_BROWSER`にChromium系browserの絶対pathを指定して`vo daemon restart`を実行する |
 
 ## 検証した範囲
 
@@ -154,6 +166,7 @@ vo feedback ack <requestId> --submission-id <id> --json
 | browser（macOS） | Chromium（PlaywrightのChrome Headless Shell）は全件を検証済み。Firefox 155・WebKit 26.6（Playwright 1.63.0）は、表示の隔離・CSP・HTMLとの通信・認証の試験（`pnpm test:e2e:cross`）を検証済み |
 | browser（未検証） | Firefox・WebKitのそれ以外の画面操作（検索、回答panel、狭い画面、1,000文書の一覧など）は未検証 |
 | Markdownの構文 | 上の「Markdownの表示の制限」のとおり。CommonMark・GFMの全体は検証していない |
+| PDF出力 | macOS（手元）で、Google Chrome 154とMicrosoft Edge 154での出力を検証済み。LinuxとWindowsでの実際のbrowserでの印刷は未検証 |
 
 詳しい記録は [docs/implementation-status.md](docs/implementation-status.md)、性能の実測は [docs/performance.ja.md](docs/performance.ja.md)、設計は [docs/architecture.ja.md](docs/architecture.ja.md) と [docs/security-model.ja.md](docs/security-model.ja.md) にあります。
 

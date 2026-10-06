@@ -23,6 +23,7 @@ export const ERROR_SPECS = {
   E_LINK_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   E_SECTION_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   E_REQUEST_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
+  E_BROWSER_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   // Conflicts, revision mismatches
   E_KEY_CONFLICT: { exit: ExitCode.conflict, retryable: false },
   E_REVISION_UNAVAILABLE: { exit: ExitCode.conflict, retryable: false },
@@ -60,6 +61,7 @@ export const ERROR_SPECS = {
   E_INDEX_NOT_READY: { exit: ExitCode.daemon, retryable: true },
   // I/O, state corruption, internal
   E_IO: { exit: ExitCode.internal, retryable: false },
+  E_EXPORT_FAILED: { exit: ExitCode.internal, retryable: false },
   E_STORAGE_WRITE_FAILED: { exit: ExitCode.internal, retryable: true },
   E_COMMIT_INDETERMINATE: { exit: ExitCode.internal, retryable: true },
   E_STATE_CORRUPT: { exit: ExitCode.internal, retryable: false },

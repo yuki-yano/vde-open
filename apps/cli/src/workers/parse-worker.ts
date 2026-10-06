@@ -2,6 +2,7 @@
 import { parentPort } from 'node:worker_threads';
 
 import { analyzeDocument, ParseLimitError } from '@vde-open/document';
+import type { PrintInput } from '@vde-open/document/print';
 import {
   renderDocument,
   scanReferences,
@@ -15,10 +16,14 @@ export type ParseRequest =
   | { id: number; op: 'analyze'; format: 'markdown' | 'html'; text: string }
   | { id: number; op: 'scan'; kind: ScanKind; text: string }
   | { id: number; op: 'render'; input: RenderInput }
+  | { id: number; op: 'print'; input: PrintInput }
   | { id: number; op: 'diagnostics'; collectGarbage: boolean }
   | { id: number; op: 'collect' };
 
-function run(request: ParseRequest): unknown {
+// The print document is needed only for a PDF export, so its renderer is loaded on first use.
+let printModule: Promise<typeof import('@vde-open/document/print')> | null = null;
+
+async function run(request: ParseRequest): Promise<unknown> {
   // The parse worker keeps no state between requests. Returns only the heap.
   if (request.op === 'diagnostics') {
     return { heapUsedBytes: measureHeap(request.collectGarbage), retained: {} };
@@ -30,12 +35,16 @@ function run(request: ParseRequest): unknown {
   }
   if (request.op === 'analyze') return analyzeDocument(request.text, request.format);
   if (request.op === 'scan') return scanReferences(request.kind, request.text);
+  if (request.op === 'print') {
+    printModule ??= import('@vde-open/document/print');
+    return (await printModule).renderPrintDocument(request.input);
+  }
   return renderDocument(request.input);
 }
 
-parentPort?.on('message', (request: ParseRequest) => {
+parentPort?.on('message', async (request: ParseRequest) => {
   try {
-    parentPort?.postMessage({ id: request.id, ok: true, result: run(request) });
+    parentPort?.postMessage({ id: request.id, ok: true, result: await run(request) });
   } catch (error) {
     parentPort?.postMessage({
       id: request.id,

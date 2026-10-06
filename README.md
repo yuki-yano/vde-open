@@ -115,6 +115,17 @@ Markdown is rendered with TanStack Markdown 1.0.0. It is not fully compatible wi
 - Code is highlighted only for JS, JSX, TS, TSX, JSON, YAML, HTML, CSS, Bash, and Markdown. Code larger than 256 KiB and other languages are not highlighted.
 - Documents that cannot be parsed within 2 seconds, or that have more than 100,000 elements or more than 64 levels of nesting, are shown as source.
 
+## Exporting Markdown to PDF
+
+"Export PDF" in the header of a Markdown document saves the shown revision as a PDF, without a print dialog.
+
+- The PDF is an A4 document on a white background (the color theme of the management UI is not used). Every page has the document title in the header and the page number ("3 / 12") in the footer, and the headings become the PDF bookmarks.
+- The daemon prints it with the Google Chrome or Microsoft Edge (131 or later) installed on the machine, run headless with a temporary profile that is removed afterwards. Nothing is downloaded. To use another Chromium-based browser, or one in another location, set `VDE_OPEN_BROWSER` to the absolute path of its executable for the daemon (after changing it, run `vo daemon restart`).
+- The rules of the view apply: raw HTML is shown as text, only images registered for the document are included (others show their alternative text), and links to other local documents become plain text.
+- The file name is the document's file name with `.pdf` (`README.md` → `README.pdf`). A document read from stdin uses its title.
+- Fonts are the ones installed on the machine (San Francisco with Hiragino Sans on macOS, Segoe UI with Yu Gothic on Windows, Noto Sans CJK on Linux), so the PDF looks slightly different on each OS.
+- HTML documents cannot be exported. Printing must finish within 60 seconds.
+
 ## Where the state is stored, and stopping
 
 - The state (open documents, revisions, questions and answers) is stored here. Change it with `VDE_OPEN_HOME`.
@@ -143,6 +154,7 @@ The person answers in the answer panel of the management UI. The answers are sub
 | Exit code 8 (cannot connect to or start the daemon) | Check with `vo daemon status`, and look for leftover files with `vo doctor` |
 | Images or CSS are not shown | Open "Differences from the original document" and register them with `--assets-root` or `--asset` |
 | Search does not find a document | Check with `vo list --json` that the document is open and its `searchState` is `ready` |
+| Export PDF says Google Chrome or Microsoft Edge is needed | Install Chrome or Edge 131 or later, or set `VDE_OPEN_BROWSER` to the absolute path of a Chromium-based browser and run `vo daemon restart` |
 
 ## Verified scope
 
@@ -154,6 +166,7 @@ The person answers in the answer panel of the management UI. The answers are sub
 | Browsers (macOS) | Chromium (Playwright's Chrome Headless Shell): the full suite is verified. Firefox 155 and WebKit 26.6 (Playwright 1.63.0): the view isolation, CSP, HTML bridge, and authentication tests (`pnpm test:e2e:cross`) are verified |
 | Browsers (not verified) | Other UI interactions in Firefox and WebKit (search, answer panel, narrow screens, a list of 1,000 documents) are not verified |
 | Markdown syntax | As described in "Markdown display limits" above. Full CommonMark and GFM are not verified |
+| PDF export | macOS (locally): verified with Google Chrome 154 and Microsoft Edge 154. On Linux and Windows, printing with a real browser is not verified |
 
 More details: [docs/performance.md](docs/performance.md) (measurements), [docs/architecture.md](docs/architecture.md) and [docs/security-model.md](docs/security-model.md) (design). Development records (in Japanese): [docs/implementation-status.md](docs/implementation-status.md), [docs/dependency-validation.md](docs/dependency-validation.md), and [docs/adr/](docs/adr/).
 

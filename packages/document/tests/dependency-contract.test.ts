@@ -14,7 +14,7 @@ import {
   yaml,
 } from '@tanstack/highlight/languages';
 import { createTanStackMarkdownHighlighter } from '@tanstack/highlight/markdown';
-import { renderHtml } from '@tanstack/markdown/html';
+import { renderBlock, renderHtml } from '@tanstack/markdown/html';
 import { parseMarkdown } from '@tanstack/markdown/parser';
 import * as csstree from 'css-tree';
 import { parse, serialize } from 'parse5';
@@ -44,6 +44,32 @@ describe('@tanstack/markdown 1.0.0', () => {
   it('does not output a javascript: URL as a link', () => {
     const output = renderHtml('[x](javascript:alert(1))\n', { allowHtml: false });
     expect(output).not.toMatch(/href="javascript:/i);
+  });
+
+  it('an extension renderHtml hook replaces the output of image, link and code nodes, nested ones too', () => {
+    const options = {
+      allowHtml: false,
+      extensions: [
+        {
+          name: 'contract',
+          renderHtml: (node: { type: string }) =>
+            node.type === 'image' || node.type === 'link' || node.type === 'code'
+              ? `[${node.type}]`
+              : undefined,
+        },
+      ],
+    };
+    const output = renderHtml(
+      '![a](a.png) [b](https://example.com)\n\n- ![c](c.png)\n\n> ```ts\n> x\n> ```\n',
+      options,
+    );
+    expect(output).toBe(
+      '<p>[image] [link]</p>\n<ul>\n<li>[image]</li>\n</ul>\n<blockquote>\n[code]\n</blockquote>',
+    );
+    // Rendering a node without the extension gives the default output.
+    expect(renderBlock({ type: 'code', lang: 'ts', value: 'x' }, { allowHtml: false })).toBe(
+      '<pre class="tm-code" data-lang="ts"><code class="language-ts">x</code></pre>',
+    );
   });
 });
 

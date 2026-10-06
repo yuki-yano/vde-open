@@ -2,11 +2,19 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { rmdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { IPC_PROTOCOL_VERSION, VdeError, type DaemonStatus, type Warning } from '@vde-open/shared';
+import {
+  IPC_PROTOCOL_VERSION,
+  LIMITS,
+  VdeError,
+  type DaemonStatus,
+  type Warning,
+} from '@vde-open/shared';
 import { z, ZodError } from 'zod';
 
 import { createCursorCodec } from '../documents/cursor.ts';
 import { DocumentService, type DocumentEvent } from '../documents/service.ts';
+import { findBrowser } from '../export/browser.ts';
+import { createPdfService, type PdfService } from '../export/pdf-service.ts';
 import { FeedbackService } from '../feedback/service.ts';
 import { isSourceRun, webRootPath } from '../entry-paths.ts';
 import {
@@ -110,8 +118,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   let preview: PreviewServer | null = null;
   let watcher: WatchService | null = null;
   let parse: ParseService | null = null;
+  // A worker of its own for print documents (PDF export), so a long print never fails a parse by its time limit.
+  let printer: ParseService | null = null;
   let search: SearchService | null = null;
   let feedback: FeedbackService | null = null;
+  let pdf: PdfService | null = null;
   let announceStopping: () => void = () => undefined;
   let lockTimer: NodeJS.Timeout | null = null;
   let heapWatch: { stop(): void } | null = null;
@@ -171,9 +182,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     await step('drain', () => ipc?.drain());
     announceStopping();
     await step('management', () => management?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
+    // Stop a browser printing a PDF and remove its temporary directory.
+    await step('pdf', () => pdf?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
     await step('preview', () => preview?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
     await step('store', () => store?.close());
     await step('parse', () => parse?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
+    await step('print', () => printer?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
     await step('search', () => search?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
     await step('ipc', () => ipc?.close());
     // When the lock is lost, do not touch runtime files that may belong to a successor daemon.
@@ -289,6 +303,16 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       onMissing: (documentId) => emit({ type: 'render-diagnostics', documentId }),
     });
     pruneGrants = () => render.pruneClosed();
+    printer = createParseService({ timeoutMs: LIMITS.printRenderTimeoutMs });
+    const exporting = createPdfService({
+      store: openedStore,
+      documents,
+      printer,
+      findBrowser: () => findBrowser(environment),
+      platform: environment.platform,
+      onEvent: (event, fields) => logger.log(event, fields),
+    });
+    pdf = exporting;
     preview = await startPreviewServer(
       {
         render,
@@ -311,6 +335,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         render,
         search: searching,
         feedback: answering,
+        pdf: exporting,
         previewOrigin,
         webRoot: webRootPath(),
         devOrigin,
@@ -354,6 +379,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         const workers = {
           search: (await search?.diagnostics(collectGarbage, stopRequested.signal)) ?? null,
           parse: (await parse?.diagnostics(collectGarbage, stopRequested.signal)) ?? null,
+          print: (await printer?.diagnostics(collectGarbage, stopRequested.signal)) ?? null,
         };
         const heapUsedBytes = measureHeap(collectGarbage);
         const activeResources: Record<string, number> = {};

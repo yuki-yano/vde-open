@@ -22,6 +22,9 @@ export const LIMITS = {
   retainedRevisions: 2,
   revisionGraceMs: 5 * 60 * 1000,
   parseTimeoutMs: 2000,
+  // Rendering the print document for a PDF export (parse and HTML), and the whole run of the browser that prints it.
+  printRenderTimeoutMs: 10_000,
+  pdfExportTimeoutMs: 60_000,
   watchDebounceMs: 200,
   bootstrapTicketTtlMs: 60 * 1000,
   sessionIdleMs: 12 * 60 * 60 * 1000,
