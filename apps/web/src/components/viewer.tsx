@@ -2,7 +2,16 @@ import { encodeLogicalPath, fragmentOfAnchor, localImagePath } from '@vde-open/d
 import { codeOfBlock, MarkdownView } from '@vde-open/document/react';
 import type { DocumentSummary, FeedbackForUi, OutlineItem } from '@vde-open/shared';
 import { Copy, FileDown, Hash, Pause, Play, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+} from 'react';
 
 import {
   AlertDialog,
@@ -28,6 +37,15 @@ import { useCopy } from '@/lib/use-copy';
 import { useMarkdown } from '@/lib/use-markdown';
 import { useMissingAssets } from '@/lib/use-missing-assets';
 import { useRenderGrant } from '@/lib/use-render-grant';
+
+const OUTLINE_MIN = 160;
+const OUTLINE_MAX = 480;
+const OUTLINE_DEFAULT = 240;
+const isOutlineWidth = (value: unknown): value is number =>
+  typeof value === 'number' &&
+  Number.isInteger(value) &&
+  value >= OUTLINE_MIN &&
+  value <= OUTLINE_MAX;
 
 const PARSE_FAILURE: Record<string, string> = {
   timeout: 'Parsing did not finish within 2 seconds, so the source is shown.',
@@ -141,6 +159,48 @@ export function Viewer({
   onReady,
 }: ViewerProps) {
   const [mode, setMode] = usePreference<ViewMode>('view-mode', 'preview', isViewMode);
+  const [preferredOutlineWidth, setOutlineWidth] = usePreference<number>(
+    'outline-width',
+    OUTLINE_DEFAULT,
+    isOutlineWidth,
+  );
+  const outlineId = useId();
+  const panes = useRef<HTMLDivElement>(null);
+  const [paneWidth, setPaneWidth] = useState(0);
+  const outlineDrag = useRef<{ pointerId: number; x: number; width: number } | null>(null);
+  // Reserve 240px for the document and 8px for the handle, including when the answer panel is open.
+  const maxOutlineWidth = Math.max(OUTLINE_MIN, Math.min(OUTLINE_MAX, paneWidth - 248));
+  const outlineWidth = Math.min(preferredOutlineWidth, maxOutlineWidth);
+  useLayoutEffect(() => {
+    const element = panes.current;
+    if (!element) return undefined;
+    const measure = () => setPaneWidth(element.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const resizeOutline = (next: number) => {
+    setOutlineWidth(Math.round(Math.min(maxOutlineWidth, Math.max(OUTLINE_MIN, next))));
+  };
+  const startOutlineResize = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    event.preventDefault();
+    event.currentTarget.focus();
+    outlineDrag.current = { pointerId: event.pointerId, x: event.clientX, width: outlineWidth };
+    // Keep receiving moves over the document iframe until pointerup or pointercancel.
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const moveOutlineResize = (event: PointerEvent<HTMLDivElement>) => {
+    const drag = outlineDrag.current;
+    if (
+      !drag ||
+      drag.pointerId !== event.pointerId ||
+      !event.currentTarget.hasPointerCapture(event.pointerId)
+    )
+      return;
+    resizeOutline(drag.width + drag.x - event.clientX);
+  };
   // The revision at the time updates were paused. While paused, do not replace it with newer revisions.
   const [pinnedRevision, setPinnedRevision] = useState<string | null>(null);
   const paused = pinnedRevision !== null;
@@ -733,7 +793,7 @@ export function Viewer({
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
+      <div ref={panes} className="flex min-h-0 min-w-0 flex-1">
         {frameUrl ? (
           <div className="flex min-w-0 flex-1 flex-col">
             {/* Inside the frame is the content of the opened document. Always make clear that it is not this product's UI. */}
@@ -794,46 +854,81 @@ export function Viewer({
           </div>
         )}
         {(outline.length > 0 || outlineError !== null) && (
-          <aside
-            className="hidden w-60 shrink-0 overflow-y-auto border-l px-3 py-4 lg:block"
-            aria-label="Outline"
-          >
-            <h2 className="mb-2 text-xs font-medium text-muted-foreground">Outline</h2>
-            {outlineError !== null && (
-              <p className="text-xs text-destructive" role="alert">
-                Could not fetch the outline ({outlineError}).
-              </p>
-            )}
-            <ul className="flex flex-col gap-0.5 text-sm">
-              {outline.map((item) => {
-                const jumpable = canJump(item);
-                return (
-                  <li
-                    key={item.sectionId}
-                    style={{ paddingLeft: `${String((item.level - 1) * 0.75)}rem` }}
-                  >
-                    <button
-                      type="button"
-                      className="w-full truncate rounded px-2 py-1 text-left hover:bg-muted disabled:opacity-50"
-                      disabled={!jumpable}
-                      title={
-                        jumpable
-                          ? item.title
-                          : (outlineUnavailable ??
-                            'This heading is not in the view (removed from the display, or an earlier element has the same id)')
-                      }
-                      onClick={() => {
-                        jumpTo(item);
-                        onHeadingShown?.({ sectionId: item.sectionId, title: item.title });
-                      }}
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize outline"
+              aria-controls={outlineId}
+              aria-valuemin={OUTLINE_MIN}
+              aria-valuemax={maxOutlineWidth}
+              aria-valuenow={outlineWidth}
+              tabIndex={0}
+              className="hidden w-2 shrink-0 touch-none cursor-col-resize bg-border/50 hover:bg-border focus-visible:bg-primary focus-visible:outline-none lg:block"
+              onPointerDown={startOutlineResize}
+              onPointerMove={moveOutlineResize}
+              onLostPointerCapture={() => {
+                outlineDrag.current = null;
+              }}
+              onKeyDown={(event) => {
+                const next =
+                  event.key === 'ArrowLeft'
+                    ? outlineWidth + 16
+                    : event.key === 'ArrowRight'
+                      ? outlineWidth - 16
+                      : event.key === 'Home'
+                        ? OUTLINE_MIN
+                        : event.key === 'End'
+                          ? maxOutlineWidth
+                          : null;
+                if (next === null) return;
+                event.preventDefault();
+                resizeOutline(next);
+              }}
+            />
+            <aside
+              id={outlineId}
+              style={{ width: outlineWidth }}
+              className="hidden shrink-0 overflow-y-auto px-3 py-4 lg:block"
+              aria-label="Outline"
+            >
+              <h2 className="mb-2 text-xs font-medium text-muted-foreground">Outline</h2>
+              {outlineError !== null && (
+                <p className="text-xs text-destructive" role="alert">
+                  Could not fetch the outline ({outlineError}).
+                </p>
+              )}
+              <ul className="flex flex-col gap-0.5 text-sm">
+                {outline.map((item) => {
+                  const jumpable = canJump(item);
+                  return (
+                    <li
+                      key={item.sectionId}
+                      style={{ paddingLeft: `${String((item.level - 1) * 0.75)}rem` }}
                     >
-                      {item.title}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </aside>
+                      <button
+                        type="button"
+                        className="w-full truncate rounded px-2 py-1 text-left hover:bg-muted disabled:opacity-50"
+                        disabled={!jumpable}
+                        title={
+                          jumpable
+                            ? item.title
+                            : (outlineUnavailable ??
+                              'This heading is not in the view (removed from the display, or an earlier element has the same id)')
+                        }
+                        onClick={() => {
+                          jumpTo(item);
+                          onHeadingShown?.({ sectionId: item.sectionId, title: item.title });
+                        }}
+                      >
+                        {item.title}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </aside>
+          </>
         )}
       </div>
 

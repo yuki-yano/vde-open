@@ -12,6 +12,87 @@ test.afterEach(async () => {
   await t.cleanup();
 });
 
+test('outline resizing captures drags across the HTML iframe, stops on release, and persists after reload', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  t.write(
+    'outline.html',
+    '<!doctype html><html><head><title>Resizable outline</title></head><body><h1>Resizable outline</h1><p>Document content</p></body></html>',
+  );
+  await t.json(['open', 'outline.html']);
+  await page.goto(await t.bootstrapUrl());
+  const outline = page.getByRole('complementary', { name: 'Outline', exact: true });
+  const handle = page.getByRole('separator', { name: 'Resize outline', exact: true });
+  await expect(handle).toBeVisible();
+  await expect(outline).toHaveCSS('width', '240px');
+  const frame = page.getByTestId('document-frame');
+  await expect(
+    page.frameLocator('[data-testid="document-frame"]').getByText('Document content'),
+  ).toBeVisible();
+  const frameUrl = await frame.getAttribute('src');
+  const box = (await handle.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 100, y, { steps: 5 });
+  await expect(outline).toHaveCSS('width', '340px');
+  await page.mouse.up();
+  await page.mouse.move(x - 180, y);
+  await expect(outline).toHaveCSS('width', '340px');
+  await expect(frame).toHaveAttribute('src', frameUrl!);
+  await page.reload();
+  await expect(outline).toHaveCSS('width', '340px');
+});
+
+test('outline resizing supports keys, protects the document beside an answer panel, and hides on narrow screens', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  t.write('outline.md', '# Resizable outline\n\nDocument content\n');
+  t.write(
+    'question.json',
+    JSON.stringify({
+      schemaVersion: 1,
+      title: 'Review',
+      fieldOrder: ['answer'],
+      answerSchema: {
+        type: 'object',
+        properties: { answer: { type: 'string', title: 'Answer', enum: ['Yes', 'No'] } },
+        required: ['answer'],
+        additionalProperties: false,
+      },
+    }),
+  );
+  await t.json(['ask', 'question.json', '--view', 'outline.md']);
+  await page.goto(await t.bootstrapUrl());
+  const outline = page.getByRole('complementary', { name: 'Outline', exact: true });
+  const handle = page.getByRole('separator', { name: 'Resize outline', exact: true });
+  await expect(handle).toBeVisible();
+  await handle.press('Home');
+  await expect(outline).toHaveCSS('width', '160px');
+  await handle.press('ArrowLeft');
+  await expect(outline).toHaveCSS('width', '176px');
+  await handle.press('ArrowRight');
+  await expect(outline).toHaveCSS('width', '160px');
+  await handle.press('End');
+  await expect(outline).toHaveCSS('width', '480px');
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect.poll(async () => (await outline.boundingBox())?.width ?? 0).toBeLessThan(480);
+  expect((await page.getByTestId('document-body').boundingBox())!.width).toBeGreaterThanOrEqual(
+    240,
+  );
+  await expect(page.getByRole('complementary', { name: 'Answer the question' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(1100);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(outline).toHaveCSS('width', '480px');
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect(handle).toBeHidden();
+  await expect(outline).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(900);
+});
+
 test('switching Markdown keeps the current preview until the next one is ready, without showing source or loading placeholders', async ({
   page,
 }) => {
