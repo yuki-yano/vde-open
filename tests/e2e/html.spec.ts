@@ -149,9 +149,9 @@ test('P3 gate / SEC-005: in the Static view, the document scripts, event attribu
   );
   // Always show that the frame holds the document content, and which view mode is in use.
   await expect(
-    page.getByText('Below this line is the content of the opened document'),
+    page.getByTestId('html-view-bar').getByText('Document content', { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText('Static view', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('html-mode')).toBeVisible();
 });
 
 test('SEC-004 (partial): the render response has a sandbox and a policy that forbids scripts', async ({

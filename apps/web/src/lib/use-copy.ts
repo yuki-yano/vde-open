@@ -5,24 +5,31 @@ export interface CopyResult {
   message: string;
 }
 
-// Show success briefly; keep failures long enough to read.
+// Success is brief. Failures stay available until dismissed or retried.
 const SUCCESS_MS = 3000;
-const FAILURE_MS = 10_000;
 
 // Copy a string to the clipboard and report the result (spec 13.2). label names what was copied.
 export function useCopy(): {
   result: CopyResult | null;
   copy: (label: string, text: string) => Promise<void>;
+  pending: boolean;
+  dismiss: () => void;
 } {
   const [result, setResult] = useState<CopyResult | null>(null);
+  const [pending, setPending] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sequence = useRef(0);
   useEffect(
     () => () => {
+      sequence.current += 1;
       if (timer.current) clearTimeout(timer.current);
     },
     [],
   );
   const copy = useCallback(async (label: string, text: string) => {
+    const started = ++sequence.current;
+    if (timer.current) clearTimeout(timer.current);
+    setPending(true);
     let next: CopyResult;
     try {
       // The clipboard is available only on a secure connection (including 127.0.0.1).
@@ -35,9 +42,10 @@ export function useCopy(): {
       const detail = reason instanceof Error ? reason.message : 'unknown reason';
       next = { ok: false, message: `Could not copy the ${label} (${detail}).` };
     }
+    if (started !== sequence.current) return;
+    setPending(false);
     setResult(next);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setResult(null), next.ok ? SUCCESS_MS : FAILURE_MS);
+    if (next.ok) timer.current = setTimeout(() => setResult(null), SUCCESS_MS);
   }, []);
-  return { result, copy };
+  return { result, copy, pending, dismiss: () => setResult(null) };
 }

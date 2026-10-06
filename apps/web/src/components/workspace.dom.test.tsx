@@ -139,7 +139,7 @@ async function until(condition: () => boolean, timeoutMs = 3000): Promise<void> 
 const shownText = () => container.querySelector('pre')?.textContent ?? '';
 function button(text: string): HTMLButtonElement {
   // Icon-only buttons are found by aria-label.
-  const found = [...container.querySelectorAll('button')].find(
+  const found = [...document.querySelectorAll('button')].find(
     (item) => item.textContent?.includes(text) || item.getAttribute('aria-label') === text,
   );
   if (!found) throw new Error(`Button "${text}" not found`);
@@ -230,7 +230,10 @@ describe('SYS-013 notification reconnect and question refetch', () => {
 
 describe("UX-002 the search result's revision and the shown revision", () => {
   const notice = () =>
-    container.querySelector('[data-testid="section-target-notice"]')?.textContent ?? '';
+    container.querySelector('[data-testid="section-target-notice"]')
+      ? (container.querySelector('[data-testid="document-notices"] [role="status"]')?.textContent ??
+        '')
+      : '';
   const target = (revision: string, nonce = 1) => ({ sectionId: 'sec_0001', revision, nonce });
 
   it("while showing the question's revision, does not jump to a newer revision's result, explains why, and keeps the question's revision", async () => {
@@ -273,6 +276,8 @@ describe("UX-002 the search result's revision and the shown revision", () => {
     root.render(<Viewer api={api} document={documentOf()} sectionTarget={target(REV1)} />);
     await until(() => notice() !== '');
     expect(notice()).toContain('This view does not jump to sections');
+    button('Section not reached').click();
+    await until(() => document.querySelector('[role="dialog"]') !== null);
     button('Dismiss').click();
     await until(() => notice() === '');
     expect(notice()).toBe('');
@@ -284,7 +289,10 @@ describe("UX-002 the search result's revision and the shown revision", () => {
 
 describe('copying the document path and ID (spec 13.2)', () => {
   const copyResult = () =>
-    container.querySelector('[data-testid="copy-result"]')?.textContent ?? '';
+    [...container.querySelectorAll('[data-testid="copy-result"]')]
+      .map((item) => item.textContent)
+      .filter(Boolean)
+      .at(-1) ?? '';
   function mockClipboard(writeText: (text: string) => Promise<void>): void {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   }

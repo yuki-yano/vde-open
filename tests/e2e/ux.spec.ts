@@ -110,11 +110,16 @@ test("UX-002: jumps to the section of a search result, and while the revision to
     }),
   );
   t.write('a.md', `# 文書\n\n${filler}\n\n## NewHit heading\n\n新しい本文\n`);
-  await expect(page.getByText('Failure for testing')).toBeVisible({ timeout: 10_000 });
+  await page
+    .getByRole('button', { name: 'Could not load document', exact: true })
+    .click({ timeout: 10_000 });
+  await expect(page.getByText('Failure for testing', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Close details' }).click();
 
   // Choosing a result from the new revision does not jump to the previous revision's section with the same number (Old heading).
   await search('NewHit');
-  await expect(page.getByTestId('section-target-notice')).toContainText(
+  await page.getByTestId('section-target-notice').click();
+  await expect(page.getByRole('dialog')).toContainText(
     'The revision to show could not be loaded, so the view did not jump to the section',
   );
   await expect(oldHeading).not.toBeInViewport();
@@ -296,17 +301,24 @@ test('code and the document path and ID can be copied (spec 13.2)', async ({ pag
   await page.goto(await t.bootstrapUrl());
   await expect(heading(page)).toHaveText('コードの例');
   const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
-  const result = page.getByTestId('copy-result');
+  const result = page.getByTestId('copy-result').filter({ hasText: /.+/ });
+  const bodyTop = (await page.getByTestId('document-body').boundingBox())!.y;
 
   await page.getByRole('button', { name: 'Copy code' }).click();
-  await expect(result).toHaveText('Copied the code.');
+  await expect(result.filter({ hasText: 'Copied the code.' })).toHaveCount(1);
   expect(await clipboard()).toBe(code);
+  expect((await page.getByTestId('document-body').boundingBox())!.y).toBe(bodyTop);
+  await expect(page.getByRole('button', { name: 'Copy code' })).toHaveAttribute(
+    'data-copy-state',
+    'copied',
+  );
 
   await page.getByRole('button', { name: 'Copy document path' }).click();
-  await expect(result).toHaveText('Copied the document path.');
+  await expect(result.filter({ hasText: 'Copied the document path.' })).toHaveCount(1);
   expect(await clipboard()).toBe(document.displayPath);
 
   await page.getByRole('button', { name: 'Copy document ID' }).click();
-  await expect(result).toHaveText('Copied the document ID.');
+  await expect(result.filter({ hasText: 'Copied the document ID.' })).toHaveCount(1);
   expect(await clipboard()).toBe(document.documentId);
+  expect((await page.getByTestId('document-body').boundingBox())!.y).toBe(bodyTop);
 });

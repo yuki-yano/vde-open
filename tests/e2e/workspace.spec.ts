@@ -75,7 +75,7 @@ test('DOC-013: Source and Preview can be switched, and the view does not change 
   await page.getByRole('button', { name: 'Pause updates' }).click();
   await expect(page.getByText('Updates paused')).toBeVisible();
   t.atomicWrite('a.md', '# 見出し\n\n**更新後**の本文\n');
-  await expect(page.getByText('A newer revision is available')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Update available' })).toBeVisible();
   await expect(body.locator('strong')).toHaveText('最初');
 
   // Resuming shows the latest content.

@@ -85,9 +85,9 @@ test('FB-007: a draft saved with updateDraft from the HTML is submitted from the
   );
   await ui.goto(await t.bootstrapUrl());
   const frame = frameOf(ui);
-  await expect(ui.getByTestId('html-mode')).toHaveText('Interactive view (scripts run)');
+  await expect(ui.getByTestId('html-mode')).toHaveText('Scripts running');
   await expect(frame.locator('#state')).toHaveText('ready 0 ログイン画面の確認');
-  await expect(ui.getByTestId('bridge-status')).toContainText('Accepting draft answers');
+  await expect(ui.getByTestId('bridge-status')).toContainText('Drafts linked (not sent)');
 
   await frame.locator('#apply').click();
   await expect(frame.locator('#state')).toHaveText('saved 1');
@@ -212,7 +212,7 @@ test('FB-009: the port is handed to the shown iframe only once; requests from an
 
   // When the document reloads itself, the communication ends. The reloaded document gets no port.
   await frame.locator('body').click();
-  await expect(ui.getByTestId('bridge-status')).toContainText('was reloaded');
+  await expect(ui.getByTestId('bridge-status')).toContainText('View reloaded');
   await expect(frame.locator('#state')).toHaveText('error E_BRIDGE_UNAVAILABLE', {
     timeout: 15_000,
   });
@@ -249,7 +249,7 @@ for (const [name, attack] of [
       ),
     );
     await ui.goto(await t.bootstrapUrl());
-    await expect(ui.getByTestId('bridge-status')).toContainText('breaks the rules');
+    await expect(ui.getByTestId('bridge-status')).toContainText('Invalid draft message');
     await expect(frameOf(ui).locator('#state')).toHaveText('closed E_BRIDGE_CLOSED');
     // Answering from the management UI still works. The daemon still responds.
     const panel = panelOf(ui);
@@ -372,15 +372,15 @@ test('FB-022: after a daemon restart, scripts stay off until allowed again, and 
 
   await ui.goto(await t.bootstrapUrl());
   await expect(panelOf(ui).getByTestId('feedback-status')).toHaveText('Not answered');
-  await expect(ui.getByTestId('html-mode')).toHaveText('Static view');
+  await expect(ui.getByTestId('html-mode')).toHaveText('Scripts off');
   await expect(ui.getByTestId('document-frame')).toHaveAttribute('sandbox', '');
   // Scripts do not run in the Static view.
   await expect(frameOf(ui).locator('#state')).toHaveText('waiting');
   expect((await t.json<Request>(['feedback', 'get', request.requestId])).status).toBe('pending');
 
-  await ui.getByRole('button', { name: 'Enable Interactive view' }).click();
+  await ui.getByRole('button', { name: 'Run scripts…' }).click();
   await ui.getByRole('button', { name: 'Run scripts', exact: true }).click();
-  await expect(ui.getByTestId('html-mode')).toHaveText('Interactive view (scripts run)');
+  await expect(ui.getByTestId('html-mode')).toHaveText('Scripts running');
   await expect(frameOf(ui).locator('#state')).toHaveText(`ready ${request.requestId}`);
 });
 
@@ -640,7 +640,7 @@ test('FB-009: once the render grant expires, drafts from the HTML are not accept
   await expect(frame.locator('#state')).toHaveText(
     /^error E_(RENDER_GRANT_INVALID|BRIDGE_CLOSED)$/,
   );
-  await expect(ui.getByTestId('bridge-status')).toContainText('The render grant expired');
+  await expect(ui.getByTestId('bridge-status')).toContainText('Render permission expired');
   await expect(panelOf(ui).getByTestId('feedback-status')).toHaveText('Not answered');
 });
 
@@ -659,7 +659,7 @@ test('FB-009: returning from Source to Preview ends the previous communication a
   await ui.getByRole('button', { name: 'Preview' }).click();
   await expect(frame.locator('#state')).toHaveText('ready 0');
   expect(await ui.getByTestId('document-frame').getAttribute('src')).not.toBe(before);
-  await expect(ui.getByTestId('bridge-status')).toContainText('Accepting draft answers');
+  await expect(ui.getByTestId('bridge-status')).toContainText('Drafts linked (not sent)');
   await frame.locator('#apply').click();
   await expect(frame.locator('#state')).toHaveText('saved 1');
   await expect(panelOf(ui).getByTestId('feedback-status')).toHaveText('Draft answer saved');
@@ -678,14 +678,18 @@ test('FB-015: a question created in static mode stays in the Static view until a
   ]);
   await t.json(['open', 'review.html', '--html-mode', 'interactive']);
   await ui.goto(await t.bootstrapUrl());
-  await expect(ui.getByTestId('html-mode')).toHaveText('Static view');
+  await expect(ui.getByTestId('html-mode')).toHaveText('Scripts off for this question');
   await expect(ui.getByTestId('document-frame')).toHaveAttribute('sandbox', '');
-  await expect(ui.getByText('This question was created in the Static view')).toBeVisible();
+  await ui.getByRole('button', { name: 'Details', exact: true }).click();
+  await expect(
+    ui.getByText('This question was created in the Static view', { exact: false }),
+  ).toBeVisible();
+  await ui.getByRole('button', { name: 'Close details' }).click();
   await expect(frameOf(ui).locator('#state')).toHaveText('waiting');
 
   // Once the question ends, the document's own view mode (interactive, already allowed) is used.
   await t.json(['feedback', 'cancel', request.requestId]);
-  await expect(ui.getByTestId('html-mode')).toHaveText('Interactive view (scripts run)');
+  await expect(ui.getByTestId('html-mode')).toHaveText('Scripts running');
   await expect(frameOf(ui).locator('#state')).toHaveText('ran');
 });
 
@@ -722,7 +726,7 @@ test('FB-009: after the render grant expires, the communication ends without rep
   const panel = panelOf(ui);
   await panel.getByRole('radio', { name: 'A', exact: true }).click();
   await expect(panel.getByTestId('feedback-status')).toHaveText('Draft answer saved');
-  await expect(ui.getByTestId('bridge-status')).toContainText('The render grant expired');
+  await expect(ui.getByTestId('bridge-status')).toContainText('Render permission expired');
   await ui.waitForTimeout(500);
   await expect(frame.locator('#changes')).toHaveText('');
 });

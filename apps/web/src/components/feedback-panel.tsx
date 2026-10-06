@@ -6,6 +6,7 @@ import {
   type QuestionField,
 } from '@vde-open/shared';
 import { useEffect, useRef, useState } from 'react';
+import { CircleAlert } from 'lucide-react';
 
 import {
   AlertDialog,
@@ -18,6 +19,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { DetailsPopover } from '@/components/details-popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -433,14 +435,29 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
             ))}
           </ul>
         )}
-        <p role="status" className="mt-2 text-xs" data-testid="feedback-status">
-          {statusText}
-        </p>
-        {message && (
-          <p role="alert" className="mt-1 text-xs text-destructive">
-            {message}
+        <div className="mt-2 flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1">
+          <p role="status" className="text-xs" data-testid="feedback-status">
+            {statusText}
           </p>
-        )}
+          {message && (
+            <DetailsPopover
+              title="Answer needs attention"
+              trigger={
+                <Button variant="ghost" size="xs" className="text-destructive">
+                  <CircleAlert aria-hidden="true" />
+                  Details
+                </Button>
+              }
+            >
+              <p>{message}</p>
+            </DetailsPopover>
+          )}
+          {message && (
+            <span role="alert" className="sr-only">
+              {message}
+            </span>
+          )}
+        </div>
         {pending && (
           <div className="mt-3 flex gap-2">
             <Button type="button" className="flex-1" disabled={blocked} onClick={submit}>

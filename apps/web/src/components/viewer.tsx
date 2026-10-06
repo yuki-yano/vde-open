@@ -1,7 +1,7 @@
 import { encodeLogicalPath, fragmentOfAnchor, localImagePath } from '@vde-open/document';
 import { codeOfBlock, MarkdownView } from '@vde-open/document/react';
 import type { DocumentSummary, FeedbackForUi, OutlineItem } from '@vde-open/shared';
-import { Copy, FileDown, Hash, Pause, Play, RefreshCw } from 'lucide-react';
+import { CircleAlert, FileDown, Hash, Pause, Play, RefreshCw } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -24,6 +24,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { DocumentLocation } from '@/components/document-location';
+import { CopyButton } from '@/components/copy-button';
+import { DetailsPopover } from '@/components/details-popover';
+import { HtmlViewBar, ScriptLimits } from '@/components/html-view-bar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -32,8 +35,7 @@ import { describeDiagnostic } from '@/lib/diagnostics';
 import type { HeadingInUrl, HeadingRestore } from '@/lib/location';
 import { pdfExports, usePdfExport } from '@/lib/pdf-export';
 import { isViewMode, usePreference, type ViewMode } from '@/lib/preferences';
-import { useBridge, type BridgeStatus } from '@/lib/use-bridge';
-import { useCopy } from '@/lib/use-copy';
+import { useBridge } from '@/lib/use-bridge';
 import { useMarkdown } from '@/lib/use-markdown';
 import { useMissingAssets } from '@/lib/use-missing-assets';
 import { useRenderGrant } from '@/lib/use-render-grant';
@@ -88,27 +90,6 @@ export interface SectionTarget {
   sectionId: string;
   revision: string;
   nonce: number;
-}
-
-// Explanations for why communication with the HTML ended.
-const BRIDGE_CLOSED: Record<string, string> = {
-  navigated:
-    'The document view was reloaded, so draft answers from this document are no longer accepted.',
-  'request-closed':
-    'The question is closed, so draft answers from this document are no longer accepted.',
-  expired: 'The render grant expired, so draft answers from this document are no longer accepted.',
-  replaced: 'Draft answers from this document are no longer accepted.',
-};
-
-function bridgeNotice(status: BridgeStatus): string | null {
-  if (status.status === 'connected') {
-    return 'Accepting draft answers from the scripts in this document. Answers are submitted only with "Send answers to the agent" on the right.';
-  }
-  if (status.status !== 'closed') return null;
-  return (
-    BRIDGE_CLOSED[status.reason] ??
-    'The scripts in this document sent a message that breaks the rules (too large, too many, malformed, or similar), so draft answers are no longer accepted.'
-  );
 }
 
 // The content being shown. The body and the outline are kept with the revision they were fetched for.
@@ -213,7 +194,11 @@ export function Viewer({
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [failure, setFailure] = useState<LoadFailure | null>(null);
   const [pendingLink, setPendingLink] = useState<PendingLink | null>(null);
-  const [linkError, setLinkError] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<{
+    linkId: string;
+    revision: string;
+    message: string;
+  } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const savedScroll = useRef(0);
 
@@ -372,7 +357,11 @@ export function Viewer({
           return;
         }
         setPendingLink(null);
-        setLinkError(reason instanceof Error ? reason.message : 'Could not open the link.');
+        setLinkError({
+          linkId,
+          revision,
+          message: reason instanceof Error ? reason.message : 'Could not open the link.',
+        });
       }
     },
     [api, document.documentId],
@@ -385,21 +374,8 @@ export function Viewer({
     [grant, openLink],
   );
 
-  // Copy the document path, ID, and code (spec 13.2). The result is shown in the status row.
-  const { result: copied, copy } = useCopy();
-  const codeActions = useMemo(
-    () => (
-      <Button
-        variant="outline"
-        size="xs"
-        onClick={(event) => void copy('code', codeOfBlock(event.currentTarget))}
-      >
-        <Copy aria-hidden="true" />
-        Copy code
-      </Button>
-    ),
-    [copy],
-  );
+  // Each code block reports its own copy result where the action was performed.
+  const codeActions = useMemo(() => <CopyButton code label="code" text={codeOfBlock} />, []);
 
   const stale = paused && !fixed && document.revision !== shownRevision;
   // Outline items the HTML view can be moved to (sectionId to anchor). Two headings can share an anchor, so items are
@@ -509,11 +485,59 @@ export function Viewer({
     ...(grant?.diagnostics ?? []),
     ...missing.map((path) => ({ code: 'asset-requested', target: path, count: 1 })),
   ];
-  const notice = bridgeNotice(bridge);
   // Show the view mode exactly as the render grant issued by the daemon says.
   const frameMode = grant?.mode ?? 'static';
   // HTML links cannot be clicked inside the view, so they are opened from the list. Markdown links can be opened from the body.
   const links = isMarkdown ? [] : (grant?.links ?? []);
+  const contentNotices = [
+    ...(targetNotice
+      ? [
+          {
+            label: 'Section not reached',
+            message: targetNotice,
+            dismiss: () => setDismissedNonce(targetNonce),
+            testId: 'section-target-notice',
+          },
+        ]
+      : []),
+    ...(document.sourceState !== 'ready' && SOURCE_STATE[document.sourceState]
+      ? [
+          {
+            label: document.sourceState === 'missing' ? 'File missing' : 'File unreadable',
+            message: SOURCE_STATE[document.sourceState],
+          },
+        ]
+      : []),
+    ...(!isMarkdown && wantsPreview && grantState.status === 'failed'
+      ? [
+          {
+            label: 'Showing source',
+            message: `The HTML could not be converted for display, so the source is shown (${grantState.message}).`,
+          },
+        ]
+      : []),
+    ...(isMarkdown && wantsPreview && markdown.status === 'failed'
+      ? [
+          {
+            label: 'Showing source',
+            message: PARSE_FAILURE[markdown.reason] ?? PARSE_FAILURE['parse-error'],
+          },
+        ]
+      : []),
+    ...(error ? [{ label: 'Could not load document', message: error }] : []),
+    ...(isMarkdown && linkError
+      ? [
+          {
+            label: 'Could not open link',
+            message: linkError.message,
+            dismiss: () => setLinkError(null),
+          },
+        ]
+      : []),
+    ...(frameUrl === null && modeError
+      ? [{ label: 'Script change failed', message: modeError, dismiss: () => setModeError(null) }]
+      : []),
+  ];
 
   return (
     <section
@@ -538,36 +562,38 @@ export function Viewer({
         </div>
         <div className="flex items-center gap-1">
           {document.displayPath !== null && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Copy document path"
-              title="Copy document path"
-              onClick={() => void copy('document path', document.displayPath ?? '')}
-            >
-              <Copy aria-hidden="true" />
-            </Button>
+            <CopyButton label="document path" text={document.displayPath} />
           )}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Copy document ID"
+          <CopyButton
+            label="document ID"
+            text={document.documentId}
+            icon={Hash}
             title={`Copy document ID (${document.documentId})`}
-            onClick={() => void copy('document ID', document.documentId)}
-          >
-            <Hash aria-hidden="true" />
-          </Button>
+          />
         </div>
         <Badge variant="outline">{isMarkdown ? 'Markdown' : 'HTML'}</Badge>
-        {!isMarkdown && (
-          <Badge variant="outline" data-testid="html-mode">
-            {frameMode === 'interactive' ? 'Interactive view (scripts run)' : 'Static view'}
-          </Badge>
-        )}
         {fixed ? (
           <Badge variant="secondary">Showing the question's revision</Badge>
         ) : (
-          paused && <Badge variant="secondary">Updates paused</Badge>
+          paused &&
+          (stale ? (
+            <DetailsPopover
+              title="A newer revision is available"
+              trigger={
+                <Button variant="ghost" size="xs">
+                  <CircleAlert aria-hidden="true" />
+                  Update available
+                </Button>
+              }
+            >
+              <p>Updates are paused. The view stays on the revision from when they were paused.</p>
+              <Button size="sm" variant="outline" onClick={() => setPinnedRevision(null)}>
+                Resume updates
+              </Button>
+            </DetailsPopover>
+          ) : (
+            <Badge variant="secondary">Updates paused</Badge>
+          ))
         )}
         <ToggleGroup
           value={[mode]}
@@ -610,131 +636,102 @@ export function Viewer({
           Refresh
         </Button>
         {isMarkdown && (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={pdfExport.exporting || loaded === null}
-            onClick={() => {
-              // The shown revision. The daemon prints it with a headless browser; no print dialog is shown.
-              if (loaded !== null) pdfExports.start(api, document, loaded.revision);
-            }}
-          >
-            <FileDown aria-hidden="true" />
-            {pdfExport.exporting ? 'Exporting…' : 'Export PDF'}
-          </Button>
-        )}
-      </header>
-
-      <div role="status" aria-live="polite" className="empty:hidden">
-        {copied !== null && (
-          <p
-            className={`border-b px-4 py-2 text-sm ${copied.ok ? 'bg-muted' : 'bg-destructive/10'}`}
-            data-testid="copy-result"
-          >
-            {copied.message}
-          </p>
-        )}
-        {targetNotice !== null && (
-          <div
-            className="flex flex-wrap items-center gap-2 border-b bg-muted px-4 py-2 text-sm"
-            data-testid="section-target-notice"
-          >
-            <p className="min-w-0 flex-1">{targetNotice}</p>
-            <Button variant="outline" size="sm" onClick={() => setDismissedNonce(targetNonce)}>
-              Dismiss
-            </Button>
-          </div>
-        )}
-        {stale && (
-          <p className="border-b bg-muted px-4 py-2 text-sm">
-            A newer revision is available. Updates are paused, so the view stays on the revision
-            from when they were paused.
-          </p>
-        )}
-        {document.sourceState !== 'ready' && SOURCE_STATE[document.sourceState] && (
-          <p className="border-b bg-muted px-4 py-2 text-sm">
-            {SOURCE_STATE[document.sourceState]}
-          </p>
-        )}
-        {!isMarkdown && wantsPreview && grantState.status === 'failed' && (
-          <p className="border-b bg-muted px-4 py-2 text-sm">
-            The HTML could not be converted for display, so the source is shown (
-            {grantState.message})
-          </p>
-        )}
-        {isMarkdown && wantsPreview && markdown.status === 'failed' && (
-          <p className="border-b bg-muted px-4 py-2 text-sm">
-            {PARSE_FAILURE[markdown.reason] ?? PARSE_FAILURE['parse-error']}
-          </p>
-        )}
-        {pinnedStatic && document.interactiveAllowed && (
-          <p className="border-b bg-muted px-4 py-2 text-sm">
-            This question was created in the Static view, so scripts stay off until it is answered.
-          </p>
-        )}
-        {!isMarkdown &&
-          document.htmlMode === 'interactive' &&
-          !document.interactiveAllowed &&
-          !pinnedStatic && (
-            <div className="flex flex-wrap items-center gap-2 border-b bg-muted px-4 py-2 text-sm">
-              <p className="min-w-0 flex-1">
-                This HTML was opened in the Interactive view. The permission to run scripts was
-                cleared (for example, by a daemon restart), so it is now in the Static view.
-              </p>
-              <Button size="sm" variant="outline" onClick={() => setConfirmingInteractive(true)}>
-                Enable Interactive view
+          <DetailsPopover
+            title="PDF export failed"
+            enabled={pdfExport.error !== null}
+            trigger={
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={pdfExport.exporting || loaded === null}
+                onClick={() => {
+                  // The shown revision. The daemon prints it with a headless browser; no print dialog is shown.
+                  if (pdfExport.error === null && loaded !== null)
+                    pdfExports.start(api, document, loaded.revision);
+                }}
+              >
+                {pdfExport.error ? (
+                  <CircleAlert aria-hidden="true" className="text-destructive" />
+                ) : (
+                  <FileDown aria-hidden="true" />
+                )}
+                <span className="inline-grid">
+                  <span className="invisible col-start-1 row-start-1" aria-hidden="true">
+                    Export PDF
+                  </span>
+                  <span className="invisible col-start-1 row-start-1" aria-hidden="true">
+                    Exporting…
+                  </span>
+                  <span className="col-start-1 row-start-1">
+                    {pdfExport.exporting ? 'Exporting…' : 'Export PDF'}
+                  </span>
+                </span>
               </Button>
-            </div>
-          )}
-        {frameMode === 'interactive' && (
-          <div className="flex flex-wrap items-center gap-2 border-b bg-muted px-4 py-2 text-sm">
-            <p className="min-w-0 flex-1">
-              The scripts in this document are running. Scripts can load only the files registered
-              for this document and cannot reach the management UI, the management API, or your
-              files. This does not block every outbound request, including page navigation inside
-              the view.
-            </p>
-            <Button size="sm" variant="outline" onClick={() => changeMode('static')}>
-              Switch to Static view
-            </Button>
-          </div>
-        )}
-        {notice !== null && (
-          <div
-            className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm"
-            data-testid="bridge-status"
+            }
           >
-            <p className="min-w-0 flex-1">{notice}</p>
-            {bridge.status === 'closed' && (
+            <p>{pdfExport.error}</p>
+            <div className="flex gap-2">
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => setFrameNonce((value) => value + 1)}
+                onClick={() => {
+                  if (loaded) pdfExports.start(api, document, loaded.revision);
+                }}
               >
-                Reload view
+                Try again
               </Button>
-            )}
-          </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => pdfExports.dismiss(document.documentId)}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </DetailsPopover>
         )}
-        {modeError && <p className="border-b bg-destructive/10 px-4 py-2 text-sm">{modeError}</p>}
-        {pdfExport.error && (
-          <div
-            role="alert"
-            className="flex flex-wrap items-center gap-2 border-b bg-destructive/10 px-4 py-2 text-sm"
-          >
-            <p className="min-w-0 flex-1">{pdfExport.error}</p>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => pdfExports.dismiss(document.documentId)}
+      </header>
+
+      {(pdfExport.error || linkError) && (
+        <span role="alert" className="sr-only">
+          {pdfExport.error}
+          {linkError?.message}
+        </span>
+      )}
+      {contentNotices.length > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-1 border-b px-3 py-1"
+          data-testid="document-notices"
+        >
+          {contentNotices.map((item) => (
+            <DetailsPopover
+              key={item.label}
+              title={item.label}
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="text-destructive"
+                  data-testid={'testId' in item ? item.testId : undefined}
+                >
+                  <CircleAlert aria-hidden="true" />
+                  {item.label}
+                </Button>
+              }
             >
-              Dismiss
-            </Button>
-          </div>
-        )}
-        {error && <p className="border-b bg-destructive/10 px-4 py-2 text-sm">{error}</p>}
-        {linkError && <p className="border-b bg-destructive/10 px-4 py-2 text-sm">{linkError}</p>}
-      </div>
+              <p>{item.message}</p>
+              {'dismiss' in item && (
+                <Button variant="outline" size="sm" onClick={item.dismiss}>
+                  Dismiss
+                </Button>
+              )}
+            </DetailsPopover>
+          ))}
+          <span role="status" className="sr-only">
+            {contentNotices.map((item) => item.message).join(' ')}
+          </span>
+        </div>
+      )}
 
       {(diagnostics.length > 0 || links.length > 0) && (
         <div className="flex flex-col border-b text-sm">
@@ -770,15 +767,42 @@ export function Viewer({
                       </a>
                     )}
                     {link.kind === 'document' && (
-                      <button
-                        type="button"
-                        className="underline underline-offset-2"
-                        onClick={() => {
-                          if (grant) void openLink(link.linkId, grant.revision);
-                        }}
+                      <DetailsPopover
+                        title="Could not open link"
+                        enabled={linkError?.linkId === link.linkId}
+                        trigger={
+                          <Button
+                            variant="link"
+                            size="xs"
+                            className="h-auto p-0"
+                            onClick={() => {
+                              if (grant && linkError?.linkId !== link.linkId)
+                                void openLink(link.linkId, grant.revision);
+                            }}
+                          >
+                            {linkError?.linkId === link.linkId && (
+                              <CircleAlert aria-hidden="true" className="text-destructive" />
+                            )}
+                            {link.text || link.href}
+                          </Button>
+                        }
                       >
-                        {link.text || link.href}
-                      </button>
+                        <p>{linkError?.message}</p>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              if (linkError) void openLink(linkError.linkId, linkError.revision);
+                            }}
+                          >
+                            Try again
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setLinkError(null)}>
+                            Dismiss
+                          </Button>
+                        </div>
+                      </DetailsPopover>
                     )}
                     {link.kind === 'other' && <span>{link.text || link.href}</span>}
                     <span className="text-xs break-all text-muted-foreground">
@@ -797,11 +821,18 @@ export function Viewer({
         {frameUrl ? (
           <div className="flex min-w-0 flex-1 flex-col">
             {/* Inside the frame is the content of the opened document. Always make clear that it is not this product's UI. */}
-            <p className="border-b bg-muted px-4 py-1 text-xs text-muted-foreground">
-              {frameMode === 'interactive'
-                ? 'Below this line is the content of the opened document (Interactive view: these are not controls of this UI, and links and form submission are disabled).'
-                : 'Below this line is the content of the opened document (Static view: scripts do not run, and links and form submission are disabled).'}
-            </p>
+            <HtmlViewBar
+              mode={frameMode}
+              bridge={bridge}
+              pinnedStatic={pinnedStatic}
+              needsPermission={
+                document.htmlMode === 'interactive' && !document.interactiveAllowed && !pinnedStatic
+              }
+              modeError={modeError}
+              onRunScripts={() => setConfirmingInteractive(true)}
+              onStopScripts={() => changeMode('static')}
+              onReload={() => setFrameNonce((value) => value + 1)}
+            />
             <iframe
               // Recreated for every view. The previous view is not kept.
               key={frameUrl}
@@ -864,7 +895,7 @@ export function Viewer({
               aria-valuemax={maxOutlineWidth}
               aria-valuenow={outlineWidth}
               tabIndex={0}
-              className="hidden w-2 shrink-0 touch-none cursor-col-resize bg-border/50 hover:bg-border focus-visible:bg-primary focus-visible:outline-none lg:block"
+              className="relative hidden w-2 shrink-0 touch-none cursor-col-resize before:absolute before:inset-y-0 before:left-1/2 before:w-px before:bg-border hover:bg-muted hover:before:bg-primary/60 focus-visible:bg-primary/10 focus-visible:before:bg-primary focus-visible:outline-none active:bg-primary/10 active:before:bg-primary lg:block"
               onPointerDown={startOutlineResize}
               onPointerMove={moveOutlineResize}
               onLostPointerCapture={() => {
@@ -937,11 +968,9 @@ export function Viewer({
           <AlertDialogHeader>
             <AlertDialogTitle>Run the scripts in this document?</AlertDialogTitle>
             <AlertDialogDescription>
-              This runs the scripts in this HTML inside your browser. Scripts can load only the
-              files registered for this document and cannot reach the management UI, the management
-              API, or your files. However, this does not block every outbound request, including
-              page navigation inside the view, and it is not a mechanism for running arbitrary
-              scripts safely. Enable it only for trusted HTML that you or your agent prepared.
+              This runs the scripts in this HTML inside your browser. <ScriptLimits /> This is not a
+              mechanism for running arbitrary scripts safely. Enable it only for trusted HTML that
+              you or your agent prepared.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
