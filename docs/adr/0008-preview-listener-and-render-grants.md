@@ -23,4 +23,4 @@
 
 - 版が変わるたびに、UIは新しい権限を取得して表示を作り直す。前の版の権限は、UIが返すまで前の版を表示し続ける。
 - 権限と変換結果はmemoryにあるので、daemonの再起動後は、UIが権限を取り直す。
-- scriptを動かす表示（interactive）は、P6で、同じlistenerに別のpolicyを足して実装する。P3の`--html-mode`は`static`だけを受け付ける。
+- scriptを動かす表示（interactive）は、P6で、同じlistenerに別のpolicyを足して実装した（ADR-0012）。P3の時点の`--html-mode`は`static`だけを受け付けた。

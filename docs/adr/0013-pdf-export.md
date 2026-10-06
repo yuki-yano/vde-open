@@ -1,13 +1,13 @@
 # ADR-0013: MarkdownのPDF出力は、利用者の環境のChrome・Edgeをdaemonから印刷に使う
 
-状態: 採用（利用者の依頼、2026-10-06）
+状態: 採用（2026-10-06）
 
 ## 背景
 
-利用者から、管理画面で開いているMarkdownを、白背景の資料としてPDFへ出力したいとの依頼があった。条件は次のとおり。
+管理画面で開いているMarkdownを、白背景の資料としてPDFへ出力できるようにする。要件は次のとおり。
 
 - 印刷のdialogを挟まず、ボタンからPDFを直接保存する。
-- 見た目を保証するbrowserはChrome・Edgeでよい。
+- 見た目を保証するbrowserはChrome・Edgeとする。
 - 余白に文書名とpage番号を入れる。
 - 管理画面の配色（Catppuccin）に合わせる必要はない。
 
@@ -32,7 +32,7 @@
 - 書体を同梱しないため、OSごとにPDFの字面が変わる。
 - daemonが外部のprocessを起動する経路が増える。起動するのは人が「Export PDF」を押したときだけで、印刷するpageは何も読み込まない。browser自身の通信は、background networkingなどを無効にして起動するが、保証の外に置く（`docs/security-model.md`）。
 - calloutは、現在の解析の設定（表示と同じ）では生成されないため、印刷でも普通の引用として出る。
-- CLIからの出力（`vo export`など）は今回の範囲外。daemonの経路はそのまま使える。
+- CLIからの出力（`vo export`など）は、このADRの範囲外。daemonの経路はそのまま使える。
 - Windowsでは、実際のbrowserでの印刷を検証しないまま提供する（WindowsのCIはe2eを実行しない）。READMEの検証範囲に未検証と書き、印刷用の文書の描画までの経路はpack smokeで確かめる。
 
 ## DoD

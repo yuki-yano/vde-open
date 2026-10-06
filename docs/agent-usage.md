@@ -18,10 +18,10 @@ Do not read every document in full each time. Fetch only what you need, in this 
 ## Search
 
 ```bash
-vo search '認証 セッション' --limit 5 --json
+vo search 'authentication session' --limit 5 --json
 vo search 'refresh_token' --mode exact --json
 vo search 'users.md' --mode path --json
-vo search '有効期限' --document <documentId> --json
+vo search 'expiration' --document <documentId> --json
 ```
 
 - `--mode text` (the default) finds sections that contain every term. `exact` matches only a contiguous string, and `path` searches only file names and paths.

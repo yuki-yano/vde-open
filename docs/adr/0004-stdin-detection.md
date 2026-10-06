@@ -17,4 +17,4 @@ stdinを「内容が渡されている」とみなすのは、FIFO（shellの`|`
 ## 影響
 
 - socketで内容を渡す起動方法では、`-`を明示しないとstdinを読まない。
-- 実行環境が意図せずFIFOをstdinに渡している場合は、pathを指定してもerrorになる。その場合は`< /dev/null`を付けて実行する。READMEとAgent向けガイドに書く（P7）。
+- 実行環境が意図せずFIFOをstdinに渡している場合は、pathを指定してもerrorになる。その場合は`< /dev/null`を付けて実行する。

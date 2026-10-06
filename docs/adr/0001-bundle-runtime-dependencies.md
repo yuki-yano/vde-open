@@ -17,5 +17,5 @@
 
 ## 影響
 
-- bundleした依存のlicense noticeを配布物へ含める必要がある。P7で生成する。
+- bundleした依存のlicense noticeを配布物へ含める必要がある。buildが`THIRD_PARTY_NOTICES.md`を生成する（`scripts/notices.ts`）。
 - native addonを持つ依存は、この方式では採用できない。現時点の依存にnative addonはない。

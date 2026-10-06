@@ -71,8 +71,10 @@ shadcnのCLIが`package.json`へ書くrange指定（`^`）は、導入後に完�
 - Playwright（Chromium）は、空のsandbox（scriptなし）のiframeの中の要素も、`frameLocator`で読める。
 - Chokidarは、監視を始めた直後の変更を通知しないことがある。macOSで、`ready`の直後に作ったfileの`add`が届かない例を約35回に1回観測した。後続の変更があれば検知できる。P2の監視は通知だけに頼らず、登録時と再走査時にstatを照合して回復する（仕様8.5）。
 
-## 未検証のこと
+## 確認日の時点で未検証だったこと
 
-- Windows、Linuxでの導入とビルド。手元はmacOSのみ。
-- scriptを動かす表示（interactive）のsandboxとCSP（P6）。静的な表示は、Chromiumで確認した（`tests/e2e/html.spec.ts`）。
+現在の検証範囲は、READMEの「Verified scope」にある。
+
+- Windows、Linuxでの導入とビルド。確認はmacOSだけで行った。
+- scriptを動かす表示（interactive）のsandboxとCSP（P6で実装）。静的な表示は、Chromiumで確認した（`tests/e2e/html.spec.ts`）。
 - FirefoxとWebKitでのe2e。

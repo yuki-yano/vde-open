@@ -4,7 +4,7 @@
 
 A local document viewer for agents and people who work from the same material. Open Markdown and HTML documents, read them in a management UI in the browser, and let an agent search and read the same documents from the CLI. An agent can also ask a person questions, and the person submits the answers from the management UI.
 
-- Agents can search and read only the documents you opened (closed documents and whole directories are never searched).
+- Agents can search and read only the documents you opened.
 - When you save a document, the management UI updates automatically.
 - HTML is shown on a separate origin from the management UI, without running scripts (by default).
 - The state is kept by a local daemon and is never sent to an external service.
@@ -14,56 +14,31 @@ A local document viewer for agents and people who work from the same material. O
 Node.js 24 or later is required.
 
 ```bash
-bun add -g vde-open      # recommended: user-level install into ~/.bun/bin
+bun add -g vde-open      # recommended
 npm install -g vde-open  # also works
 ```
 
-- We recommend installing it once per user with Bun. `~/.bun/bin` does not depend on which Node.js version is active, so switching Node.js versions (with mise and similar tools) does not remove `vo`. Bun is only used to install; the commands run on Node.js (`#!/usr/bin/env node`), so Node.js 24 or later must be on your `PATH`. Running it on the Bun runtime (`bun --bun`) is not tested.
-- `npm install -g` installs into the prefix of the active Node.js version.
-- Installing it per project is not recommended. There is one daemon per user, so different versions in different projects would talk to the same daemon.
+- Bun installs `vo` into `~/.bun/bin`, so it stays available when you switch Node.js versions (with mise and similar tools). `npm install -g` installs it for the active Node.js version only. Either way, the commands run on the Node.js found on your `PATH`.
+- Do not install it per project. There is one daemon per user, so projects with different versions would talk to the same daemon.
+- Installing does not change shell files such as `.zshrc` and runs no build or install scripts (every dependency is bundled).
 
-Installing does not change shell files such as `.zshrc`, and runs no build or install scripts (the package bundles every dependency). Releases are published from GitHub Actions with provenance (see "Releasing").
-
-To install from a clone of this repository (pins Node.js 24.21.0 in `mise.toml`):
+To install from a clone of this repository (Node.js 24.21.0 is pinned in `mise.toml`):
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm build
-pnpm test:pack                              # builds artifacts/vde-open-<version>.tgz and verifies an install in a separate directory
-bun add -g "$PWD/artifacts/vde-open-0.1.5.tgz"   # use an absolute path: bun add -g resolves relative paths from its global install directory, not the current one
+pnpm test:pack                                   # builds artifacts/vde-open-<version>.tgz and verifies an install in a separate directory
+bun add -g "$PWD/artifacts/vde-open-0.1.5.tgz"   # bun add -g needs an absolute path
 ```
-
-## Developing with a linked CLI
-
-From the repository root, build once and link the CLI package globally:
-
-```bash
-pnpm install --frozen-lockfile
-pnpm build
-cd apps/cli
-bun link
-bun link -g vde-open
-cd ../..
-pnpm build:watch
-```
-
-`build:watch` builds immediately, then watches the CLI, UI, shared sources, build configuration, and packaged files. Saves are coalesced and builds run one at a time. Both apps and the package files are prepared in a temporary directory before replacing the distribution; a failed build leaves the last successful output in place. The next linked CLI invocation uses the updated build.
-
-The watcher does not start or restart your daemon. After a successful build, run `vo daemon restart`, then `vo ui` to open the updated UI. Restarting preserves registered documents and saved answers, but changes the UI address and invalidates earlier browser sessions and interactive HTML permissions. Stop the watcher with Ctrl+C; it stops an active build and removes its temporary output.
-
-For frequent UI changes, use `pnpm dev` instead. It runs the source daemon with a separate `.dev-home` and serves the UI through Vite HMR. It does not rebuild the linked CLI or automatically restart the backend when its source changes. CLI commands for that environment need the same absolute `VDE_OPEN_HOME` (for example, `VDE_OPEN_HOME="$PWD/.dev-home" vo list` from the repository root).
 
 ## `vde-open` and `vo`
 
-The same CLI is installed under two names. Both use the same state and daemon.
+The same CLI is installed as `vde-open` and as the short name `vo`. Both use the same state and daemon.
 
-- `vde-open`: the full name.
-- `vo`: the short name.
+Installing never overwrites or removes an existing `vo` (another tool's command, an alias, and so on):
 
-If you already have a different `vo` (another tool's command, an alias, and so on), installing never overwrites or deletes it.
-
-- If the install target's bin directory (for `npm install -g`, npm's global bin) already has another `vo` file, npm stops with `EEXIST`. Do not use `--force`; it replaces the existing `vo`. Install with Bun instead, or into another prefix (for example `npm install -g --prefix ~/.local/vde-open ./artifacts/vde-open-0.1.5.tgz`) and use `vde-open` from that bin directory.
-- For a `vo` or alias elsewhere, whichever comes first on `PATH` runs. In that case, use `vde-open`. If you want a short name, define an alias in your shell (for example `alias vdo=vde-open`).
+- If npm's global bin already has another `vo`, `npm install -g` stops with `EEXIST`. Do not add `--force`, which replaces it. Install with Bun, or into another prefix (`npm install -g --prefix ~/.local/vde-open vde-open`) and run `vde-open` from that bin directory.
+- If another `vo` comes first on `PATH`, use `vde-open`, or define your own alias (for example `alias vdo=vde-open`).
 
 ## Basic usage
 
@@ -72,17 +47,17 @@ vo open README.md docs/design.md        # open documents (starts the daemon if n
 vo open docs -w                          # open a directory and follow new documents
 vo ui                                    # open the management UI (one-time URL)
 vo list --json                           # list open documents
-vo search "認証の設計" --json            # search open documents
+vo search "authentication design" --json # search open documents
 vo read <documentId> --section sec_0003 --json   # read a section
 vo close docs/design.md                  # remove from the list (the file is not deleted)
 vo daemon stop                           # stop the daemon
 ```
 
-How agents should use it is described in [docs/agent-usage.md](docs/agent-usage.md): read in the order search, outline, then sections; ask questions and get answers; receive draft answers from HTML.
+For how agents search, read, and ask questions, see [docs/agent-usage.md](docs/agent-usage.md).
 
 ## Agent skill
 
-[`skills/vde-open/SKILL.md`](skills/vde-open/SKILL.md) is a skill that teaches an agent (Claude Code, Codex, and others that read `SKILL.md`) when and how to use `vo`. It is also included in the package. To use it, link or copy the directory into your agent's skill directory:
+[`skills/vde-open/SKILL.md`](skills/vde-open/SKILL.md) teaches an agent (Claude Code, Codex, and others that read `SKILL.md`) when and how to use `vo`. It is included in the package. Link or copy the directory into your agent's skill directory:
 
 ```bash
 # Installed with Bun: the skill is in the global package directory.
@@ -95,16 +70,15 @@ ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skill
 ## Search scope
 
 - Search covers **only the documents that are open right now**. Closed documents, files that are not open, and whole directories are never searched.
-- Results come from the revision that was published when you searched. Reading with the `revision` from a result returns the same content that was searched.
-- Japanese text is split into words with `Intl.Segmenter`. Search uses exact matches, prefix matches, and fuzzy matches of alphanumeric words with up to one character of difference.
+- Japanese text is split into words with `Intl.Segmenter`. Words match exactly, by prefix, or, for alphanumeric words, with up to one character of difference.
 - In the management UI, press `Cmd/Ctrl+K` to search.
 
 ## HTML display limits
 
 - By default (static), scripts do not run. Scripts, event attributes, iframe/object/embed, base, automatic navigation (meta refresh), form targets, and external images, CSS, and fonts are removed. Links cannot be clicked inside the view; open them from "Links in this document".
 - Only files that the document references, inside the assets root (by default the document's directory), can be loaded. Files whose names start with "." such as `.env` and `.git` are never loaded. Set the scope with `--assets-root` and individual files with `--asset`.
-- Scripts run only in HTML opened with `--html-mode interactive`. Scripts can load only registered files and cannot reach the management UI, the management API, or other files. This does not block every outbound request, including navigation inside the view. Use it only with HTML that you or the agent prepared and trust. After the daemon restarts, the HTML shows as a static view until you allow scripts again in the management UI.
-- Differences between the original document and the view are listed under "Differences from the original document" in the management UI, with what is affected, why, and what to do.
+- Scripts run only in HTML opened with `--html-mode interactive`. Use it only with HTML that you or the agent prepared and trust: scripts can load only registered files and cannot reach the management UI, the management API, or other files, but this does not block every outbound request (navigation inside the view, for example). After the daemon restarts, the HTML is static until you allow scripts again in the management UI.
+- "Differences from the original document" in the management UI lists what the view changed, why, and what to do.
 
 ## Markdown display limits
 
@@ -119,11 +93,11 @@ Markdown is rendered with TanStack Markdown 1.0.0. It is not fully compatible wi
 
 "Export PDF" in the header of a Markdown document saves the shown revision as a PDF, without a print dialog.
 
-- The PDF is an A4 document on a white background (the color theme of the management UI is not used). Every page has the document title in the header and the page number ("3 / 12") in the footer, and the headings become the PDF bookmarks.
-- The daemon prints it with the Google Chrome or Microsoft Edge (131 or later) installed on the machine, run headless with a temporary profile that is removed afterwards. Nothing is downloaded. To use another Chromium-based browser, or one in another location, set `VDE_OPEN_BROWSER` to the absolute path of its executable for the daemon (after changing it, run `vo daemon restart`).
+- The PDF is A4 on a white background. Every page has the document title in the header and the page number ("3 / 12") in the footer, and the headings become PDF bookmarks.
+- The daemon prints it with the Google Chrome or Microsoft Edge (131 or later) installed on the machine; nothing is downloaded. To use another Chromium-based browser or another location, set `VDE_OPEN_BROWSER` for the daemon to the absolute path of the executable, then run `vo daemon restart`.
 - The rules of the view apply: raw HTML is shown as text, only images registered for the document are included (others show their alternative text), and links to other local documents become plain text.
-- The file name is the document's file name with `.pdf` (`README.md` → `README.pdf`). A document read from stdin uses its title.
-- Fonts are the ones installed on the machine (San Francisco with Hiragino Sans on macOS, Segoe UI with Yu Gothic on Windows, Noto Sans CJK on Linux), so the PDF looks slightly different on each OS.
+- The file name is the document's file name with `.pdf` (`README.md` → `README.pdf`); a document read from stdin uses its title.
+- The PDF uses the fonts installed on the machine, so it looks slightly different on each OS.
 - HTML documents cannot be exported. Printing must finish within 60 seconds.
 
 ## Where the state is stored, and stopping
@@ -132,8 +106,8 @@ Markdown is rendered with TanStack Markdown 1.0.0. It is not fully compatible wi
   - macOS: `~/Library/Application Support/vde-open`
   - Linux: `$XDG_STATE_HOME/vde-open` (or `~/.local/state/vde-open` if unset)
   - Windows: `%LOCALAPPDATA%\vde-open`
-- Stop the daemon with `vo daemon stop`. It stops the daemon no matter which name started it. Check its status with `vo daemon status`.
-- Management UI preferences such as the color theme and the view mode are stored in the browser. The open documents follow the daemon's state.
+- Stop the daemon with `vo daemon stop`, and check it with `vo daemon status`.
+- Management UI preferences such as the color theme and the view mode are stored in the browser.
 
 ## Asking a person and getting answers
 
@@ -143,7 +117,7 @@ vo feedback wait <requestId> --timeout 120 --json
 vo feedback ack <requestId> --submission-id <id> --json
 ```
 
-The person answers in the answer panel of the management UI. The answers are submitted only when they press "Send answers to the agent". Input before submission (the draft answer) is never returned to the agent. Do not use this to collect secrets such as passwords or API keys.
+The person answers in the answer panel of the management UI. The answers are submitted only when they press "Send answers to the agent"; draft answers are never returned to the agent. Do not use this to collect secrets such as passwords or API keys.
 
 ## Troubleshooting
 
@@ -160,23 +134,38 @@ The person answers in the answer panel of the management UI. The answers are sub
 
 | Scope | Status |
 |---|---|
-| macOS (Darwin 25.6.0, arm64), Node.js 24.21.0, locally | Verified (format, lint, typecheck, unit/integration, build, pack, e2e) |
-| Linux and macOS on CI (GitHub Actions `ubuntu-latest` and `macos-latest`, Node.js 24.21.0) | Verified (format, lint, typecheck, unit/integration, build, pack, and e2e in Chromium, Firefox, and WebKit; `.github/workflows/ci.yml`) |
+| Linux and macOS on CI (GitHub Actions `ubuntu-latest` and `macos-latest`, Node.js 24.21.0) | Verified (format, lint, typecheck, unit/integration, build, pack, e2e; `.github/workflows/ci.yml`) |
 | Windows on CI (`windows-latest`, Node.js 24.21.0) | Verified: build, pack smoke (install, both bins, IPC, starting and stopping the daemon, JSON output, the UI and workers), and the daemon and document integration tests. The other unit and integration tests and the e2e tests are not run on Windows |
-| Browsers (macOS) | Chromium (Playwright's Chrome Headless Shell): the full suite is verified. Firefox 155 and WebKit 26.6 (Playwright 1.63.0): the view isolation, CSP, HTML bridge, and authentication tests (`pnpm test:e2e:cross`) are verified |
-| Browsers (not verified) | Other UI interactions in Firefox and WebKit (search, answer panel, narrow screens, a list of 1,000 documents) are not verified |
-| Markdown syntax | As described in "Markdown display limits" above. Full CommonMark and GFM are not verified |
-| PDF export | macOS (locally): verified with Google Chrome 154 and Microsoft Edge 154. Linux on CI (`ubuntu-latest`): verified with the runner's Google Chrome (e2e). Windows: printing with a real browser is not verified (the pack smoke test checks rendering the print document) |
+| Browsers | Chromium (Playwright's Chrome Headless Shell): the full suite is verified. Firefox and WebKit (Playwright 1.63.0): the view isolation, CSP, HTML bridge, and authentication tests (`pnpm test:e2e:cross`) are verified. Other UI interactions in Firefox and WebKit (search, answer panel, narrow screens, a list of 1,000 documents) are not verified |
+| PDF export | macOS (development machine): verified with Google Chrome 154 and Microsoft Edge 154. Linux on CI: verified with the runner's Google Chrome (e2e). Windows: printing with a real browser is not verified (the pack smoke test checks rendering the print document) |
 
 More details: [docs/performance.md](docs/performance.md) (measurements), [docs/architecture.md](docs/architecture.md) and [docs/security-model.md](docs/security-model.md) (design). Development records (in Japanese): [docs/implementation-status.md](docs/implementation-status.md), [docs/dependency-validation.md](docs/dependency-validation.md), and [docs/adr/](docs/adr/).
 
+## Developing with a linked CLI
+
+From the repository root, build once, link the CLI package globally, and start the watcher:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+cd apps/cli
+bun link
+bun link -g vde-open
+cd ../..
+pnpm build:watch
+```
+
+`build:watch` rebuilds when the sources, the build configuration, or the packaged files change; a failed build keeps the last successful output. The next linked CLI invocation uses the new build, but the watcher does not restart your daemon: run `vo daemon restart`, then `vo ui`. Restarting keeps registered documents and saved answers, but changes the UI address and invalidates earlier browser sessions and interactive HTML permissions.
+
+For frequent UI changes, use `pnpm dev` instead. It runs the daemon from source with a separate `.dev-home` and serves the UI with Vite HMR. It does not rebuild the linked CLI or restart the backend when its source changes. To run CLI commands against it, set `VDE_OPEN_HOME` to the absolute path of `.dev-home` (for example, `VDE_OPEN_HOME="$PWD/.dev-home" vo list` from the repository root).
+
 ## Releasing
 
-Releases are published to npm by GitHub Actions with trusted publishing (OIDC), so no npm token is stored anywhere. The trusted publisher on npmjs.com is set to this repository and the workflow file `publish.yml`, and publishing with tokens is disallowed.
+Releases are published to npm from GitHub Actions with trusted publishing (OIDC) and provenance. No npm token is stored: the trusted publisher on npmjs.com is this repository's `publish.yml`, and publishing with tokens is disallowed.
 
 1. Update `version` in `apps/cli/package.json` and commit it to `main`.
-2. Push a tag for that version: `git tag v0.1.0 && git push origin v0.1.0`.
-3. `.github/workflows/publish.yml` checks that the tag matches the version, runs the checks and the pack smoke test, and publishes the tarball with provenance.
+2. Push a tag for that version: `git tag v<version> && git push origin v<version>`.
+3. `.github/workflows/publish.yml` checks that the tag matches the version, runs the checks and the pack smoke test, and publishes the tarball.
 
 ## License
 

@@ -1,25 +1,24 @@
 # 実装状況
 
-仕様は`tmp/vde-open-handoff/`の引き継ぎ一式 1.1.0（`IMPLEMENTATION_SPEC.md`、`ACCEPTANCE_TESTS.md`）。この文書は、フェーズの状態、受け入れテスト125 IDの対応、次のフェーズへの引継ぎを記録する。
+初期の実装（0.1.0）は、実装仕様と受け入れテスト（125 ID）の一式 1.1.0にもとづく。この一式はrepositoryに含めていない。本文の「仕様N.N」はその節、CLI-001などのIDは受け入れテストを指す。この文書は、フェーズごとの記録、0.1.0の公開とその後の変更、受け入れテストと試験の対応、現状と開発の注意点を記録する。
 
 ## 進め方
 
-- 実装はP0〜P7の順。フェーズごとにDoD（仕様17.2）を確認し、別Agentのレビューを受けてからcommitする。
-- commitはフェーズごとに行う。pushはしない。`origin`は公開リポジトリのため。
-- GitHub ActionsのCI定義は作るが実行しない。LinuxとWindowsのCI項目はNOT RUNとする。
+- 実装はP0〜P7の順に進めた。フェーズごとにDoD（仕様17.2）を確かめ、レビューを受けてからcommitした。各フェーズの「レビュー」には、指摘（must-fix・should-fix）と対応を、レビューの回（往復）ごとに記録する。
+- P0〜P7の間はpushせず、GitHub ActionsのCIも実行していない（LinuxとWindowsのCIは未実行として記録）。CIは0.1.0の公開の前に初めて実行した（「0.1.0の公開とその後の変更」）。
 
 ## フェーズの状態
 
 | Phase | 状態 | 完了ゲート（仕様15章） |
 |---|---|---|
-| P0 | 完了報告済み | clean buildと両help/version。依存版記録。125 IDの担当フェーズ割当 |
-| P1 | 完了報告済み | restart復元、crash/disk error、同時起動テスト |
-| P2 | 完了報告済み | 文書追加とatomic saveが実UIへ反映。raw HTMLが動かない。未認証では管理APIを読めない |
-| P3 | 完了報告済み | security fixture、path traversal、他文書/API遮断 |
-| P4 | 完了報告済み | Agent検索benchmark fixtureと閉じた文書除外 |
-| P5 | 完了報告済み | 保存前成功なし、タイムアウト・restart・二重送信テスト |
-| P6 | 完了報告済み | HTML回答案→本体確認→CLI取得、偽submit拒否 |
-| P7 | 完了報告済み | 全必須受け入れ項目、最終実行結果、制約の説明 |
+| P0 | 完了 | clean buildと両help/version。依存版記録。125 IDの担当フェーズ割当 |
+| P1 | 完了 | restart復元、crash/disk error、同時起動テスト |
+| P2 | 完了 | 文書追加とatomic saveが実UIへ反映。raw HTMLが動かない。未認証では管理APIを読めない |
+| P3 | 完了 | security fixture、path traversal、他文書/API遮断 |
+| P4 | 完了 | Agent検索benchmark fixtureと閉じた文書除外 |
+| P5 | 完了 | 保存前成功なし、タイムアウト・restart・二重送信テスト |
+| P6 | 完了 | HTML回答案→本体確認→CLI取得、偽submit拒否 |
+| P7 | 完了 | 全必須受け入れ項目、最終実行結果、制約の説明 |
 
 ## P0の記録
 
@@ -156,7 +155,7 @@ P2時点の制約:
 
 ## P3の記録
 
-レビュー: 1往復目でmust-fix 5件とshould-fix 3件、2往復目でmust-fix 2件とshould-fix 2件、3〜5往復目でmust-fix各1件。すべて修正した。5往復目の指摘への対応は、往復の上限（5回）に達した後、P3のcommit（`9cf2aab`）の後に再レビューを受け、指摘なしだった（StrictMode、版の切り替え後の取得失敗、表示する版の消失、差し替えの反映前のunmountも、レビュー側で確かめた）。以下は1往復目から順に、各往復の内容。
+レビュー: 1往復目でmust-fix 5件とshould-fix 3件、2往復目でmust-fix 2件とshould-fix 2件、3〜5往復目でmust-fix各1件。すべて修正した。5往復目の指摘への対応は、P3のcommit（`9cf2aab`）の後に再レビューを受け、指摘なしだった（StrictMode、版の切り替え後の取得失敗、表示する版の消失、差し替えの反映前のunmountも、レビューで確かめた）。以下は1往復目から順に、各往復の内容。
 
 - 画像などの名前を付けたsymlinkで、assets-rootの中の秘密のfile（`.env`など）を登録できた → 登録できるかの検査を、symlinkを解決した後の実体にも適用した。
 - 表示用の変換を待つ間に文書が閉じられると、閉じた後から表示の権限が発行された → 権限を、発行時点の「文書を閉じた回数」に結び付け、変換の後に確かめ直すようにした。
@@ -381,9 +380,9 @@ P6時点の制約:
 検証中に見つけて直したもの:
 
 - 900px以上の画面で、一覧の枠を横並び（flex）にしたため、一覧が枠の幅を超えて表示の領域に重なり、文書中のlinkを押せなかった（SEC-019のe2eで検出） → 一覧の枠を以前と同じblockに戻した。
-- 1回目の全体の試験で、`tests/integration/watch.test.ts`の「--watchを付けたdirectoryに現れた文書だけを登録する」が1回だけ失敗した（9.3秒で時間切れ）。単独では成功し、2回目の全体の試験でも成功した。原因は未確認（Chokidarが監視の開始直後の変更を通知しないことがある、という既知の事象（`docs/dependency-validation.md`）と同じかは Not verified）。
+- 1回目の全体の試験で、`tests/integration/watch.test.ts`の「--watchを付けたdirectoryに現れた文書だけを登録する」が1回だけ失敗した（9.3秒で時間切れ）。単独では成功し、2回目の全体の試験でも成功した。原因は未確認（Chokidarが監視の開始直後の変更を通知しないことがある、という既知の事象（`docs/dependency-validation.md`）と同じかは未確認）。
 
-レビュー: 1往復目でmust-fix 6件とshould-fix 4件、2往復目でmust-fix 4件とshould-fix 2件、3往復目でshould-fix 1件、4往復目でshould-fix 1件、5往復目（往復の上限）でshould-fix 2件。すべて修正した。5往復目の指摘への対応は、往復の上限のため、別Agentの再レビューを受けていない（修正を外すと試験が失敗することは確かめた）。以下は1往復目から順に、各往復の内容。
+レビュー: 1往復目でmust-fix 6件とshould-fix 4件、2往復目でmust-fix 4件とshould-fix 2件、3往復目でshould-fix 1件、4往復目でshould-fix 1件、5往復目でshould-fix 2件。すべて修正した。5往復目の指摘への対応は、再レビューを受けていない（修正を外すと試験が失敗することは確かめた）。以下は1往復目から順に、各往復の内容。
 
 - 読まない通知の接続で、書き込み待ちの通知が上限なく増えた → 接続ごとに256件までにし、超えた通知は捨てて取り直しの合図（`resync-required`）1つにまとめる。書き込みが`LIMITS.sseStallMs`（60秒）進まない接続は切り、socketも閉じる。heartbeatも同じ待ち行列に並べる。試験は`management.test.ts`の「PERF-004 通知を読まない接続」（受け手のsocketが埋まるまで出した後に5万件。上限を外すと50002件まで増えて失敗、切断を外すと失敗）。
 - 検索の結果の版を捨て、表示中の版の同じ番号の節へ移動した → 移動先を版と組で持ち、表示中の版と違えば移動せずに理由を示す（質問の版、更新の停止、検索の後の更新）。移動しない表示（HTML・原文）でもその旨を示す（`workspace.dom.test.tsx`の3件）。
@@ -429,7 +428,7 @@ P7時点の制約:
 - Firefox・WebKitは、macOSで表示の隔離・CSP・HTMLとの通信・認証の試験だけを実行した。それ以外の画面操作は未検証。
 - daemonのRSSが大きい（`docs/performance.md`）。原因は未調査。
 
-## P7の後の変更（利用者の依頼）
+## 0.1.0の公開とその後の変更
 
 - 公開: `origin`（github.com/yuki-yano/vde-open、public）へpushした。CIの1回目は、3つのjobとも`corepack enable`の後で`pnpm: command not found`になった（corepackが作ったpnpmの入口が、mise-actionの通すPATHに入らない）。`pnpm/action-setup@v4`（`packageManager`の版を使う）に替えた。
 - CI（GitHub Actions）を通すまでの対応:
@@ -440,8 +439,8 @@ P7時点の制約:
   - POSIXを前提にした試験のWindows向けの調整: 残ったsocketのfileはPOSIXだけ、前面のdaemonはWindowsでは`vo daemon stop`で止める、制御文字の試験はWindowsではfile名を普通の名前にする。
   - pack smoke: 各commandに2分の上限、手順ごとの表示、失敗時にcommandの出力とdaemonのlogの末尾を出す。同時に起動したCLIは、終了の1秒後に結果を返す（daemonが出力のpipeを持ち続けても待ち続けない）。CIのjobは30分で打ち切る。
   - 結果: `ubuntu-latest`と`macos-latest`は、format・lint・typecheck・単体と結合の試験・build・pack・Chromium・Firefox・WebKitのe2eがすべて成功。`windows-latest`は、build・pack smoke・daemonと文書の結合試験が成功。READMEの「Verified scope」に、この範囲を書いた。
-- npmへの公開: trusted publishing（GitHub ActionsのOIDC）。`setup-npm-trusted-publish@2.1.0`で仮の版を公開してpackageを作り（npmのstaged publishingにより`0.0.0-stage`と`0.0.0`の2つ）、npmjs.comでtrusted publisher（`yuki-yano`／`vde-open`／`publish.yml`、environmentなし、npm publishだけ許可）と、2FAを必須にしてbypass 2fa tokenを禁止する公開の権限を設定した（npmjs.comの操作は別のAgentが利用者のChromeで行い、OTPは利用者が入力）。tag `v0.1.0`のpushで`.github/workflows/publish.yml`が0.1.0をprovenance（SLSA v1）付きで公開した。`bun add -g vde-open@0.1.0`で導入し、両bin、skillの配置、開く・検索・停止を一時directoryで確かめた。READMEの導入はnpmから（`bun add -g vde-open`）に変えた。
-- license: 利用者の決定でMITにした（`LICENSE`、Copyright (c) 2026 Yuki Yano）。仕様16.3の「依頼者が未指定のためprivate/UNLICENSED」は、この決定で置き換える。各package.jsonの`license`、READMEの記載、`THIRD_PARTY_NOTICES.md`の生成文もMITにした。配布物には`LICENSE`を含める。
+- npmへの公開: trusted publishing（GitHub ActionsのOIDC）。`setup-npm-trusted-publish@2.1.0`で仮の版を公開してpackageを作り（npmのstaged publishingにより`0.0.0-stage`と`0.0.0`の2つ）、npmjs.comでtrusted publisher（`yuki-yano`／`vde-open`／`publish.yml`、environmentなし、npm publishだけ許可）と、2FAを必須にしてbypass 2fa tokenを禁止する公開の権限を設定した。tag `v0.1.0`のpushで`.github/workflows/publish.yml`が0.1.0をprovenance（SLSA v1）付きで公開した。`bun add -g vde-open@0.1.0`で導入し、両bin、skillの配置、開く・検索・停止を一時directoryで確かめた。READMEの導入はnpmから（`bun add -g vde-open`）に変えた。
+- license: MITにした（`LICENSE`、Copyright (c) 2026 Yuki Yano）。仕様16.3のlicenseの扱い（private／UNLICENSED）は、この決定で置き換える。各package.jsonの`license`、READMEの記載、`THIRD_PARTY_NOTICES.md`の生成文もMITにした。配布物には`LICENSE`を含める。
 - 英語化: code内の日本語（comment、CLIとerrorの文言、管理画面の文言、試験の名前）を英語にした。日本語の処理を確かめる試験データ（検索・分かち書き・日本語のtitleや本文・UTF-8の長さ）、`tests/fixtures/`、pack smokeと性能測定の日本語の入力は日本語のまま。管理画面の`<html lang>`は`en`。一覧の回答待ちのbadgeは、英語で長くなり文書名が切れたため「Question」（titleで説明）にした。
 - 文書: `README.md`、`docs/agent-usage.md`・`architecture.md`・`security-model.md`・`performance.md`を英語にし、日本語版を`README.ja.md`、`docs/*.ja.md`として残した（互いにlinkする）。日本語版の中の画面の文言は英語の表記にした。このfile、`docs/dependency-validation.md`、`docs/adr/`は日本語のまま。
 - 導入: READMEで、Bunでのuserごとのglobal導入（`bun add -g ./artifacts/vde-open-0.1.0.tgz`）をすすめる。`~/.bun/bin`はNode.jsの版の切り替えに左右されない。commandはNode.jsで動く（shebang）。一時の`BUN_INSTALL`で、導入・両bin・開く・一覧・停止を確かめた。Node 26.10.0でもpack smokeが通る。projectごとの導入はすすめない（daemonはuserごとに1つ）。
@@ -452,43 +451,43 @@ P7時点の制約:
   - 待機中のごみは検索workerだけが回収していて、解析workerとdaemonの本体のごみが残った（実際のMarkdown 452件で、60秒後もfootprint 445MiB）→ 解析workerも依頼が2秒途切れた後に、本体はheapが8MiB以上増えて2秒の間ほぼ何もしていなかったときに、1回GCを行う（`apps/cli/src/diagnostics/idle-collect.ts`）。同じ測定でfootprint 191MiB。
   - レビューの指摘: workerのGCを通常の依頼と同じ期限で扱っていたため、GCが長いと、その間に届いた解析まで期限切れで失敗した。また、GCの時期に診断が処理中だと、そのGCが捨てられた → GCの間に届いた依頼は、GCの終わりを待ってから送り、期限はそこから数える（10秒を過ぎたら待たずに送る）。処理中ならGCを次の空きへ回す（`createWorkerCollect`）。GCを800msにした試験workerで、解析の期限500msでも、GC中に送った解析が成功する試験（待たせる処理を外すと失敗）。
   - 検索は、強い段階で見つかった節と対象外の項目をMiniSearchの中で除き（`boostDocument`で0）、抜粋に正規化済みの本文を使う。結果が同じことは、56件のqueryの全hitを記録した`search-ranking.test.ts`と、変更前後の索引を220件のqueryで比べた結果（実際のMarkdownと10MiBのfixtureで差なし）で確かめた。
-  - レビューの指摘: 除外で一致する節がなくなると、残りの語の問い合わせを省いていた。MiniSearchは、置き換え・削除した項目のpostingを問い合わせのときに片付け、それまではscoreに数えるので、片付けの順が変わってscoreが変わった（3件の文書の1件を消した後の初回の検索で0.735→0.481）→ 強い段階で見つかった節がある間は、すべての語を問い合わせる。当初は、前の段階と同じ問い合わせになる段階（どの語にもoptionが当たらない前方一致・綴りの違いの段階）を省いていたが、MiniSearchは語をたどりながら片付けるため1回で片付け残すことがあり、片付け前の索引との比較（実際のMarkdown 452件の一部を置き換え・削除）で13件のqueryのscoreが変わった → 省略もやめ、MiniSearchへの問い合わせを変更前と同じ並びにした（問い合わせの記録で一致を確認）。`search-ranking.test.ts`に、片付け前の索引での1回目と2回目の検索を加え、変更前のcodeで記録し直した（早期終了の修正前の実装では失敗）。比較scriptでは、片付け前・後の索引の両方で、実際のMarkdownと10MiBのfixtureの220件のqueryに差がない。弱い段階を件数で打ち切る案は、literalの一致がscoreを引き継ぐため結果が変わる（別のAgentとの相談で、反例を確認）ので採らなかった。
+  - レビューの指摘: 除外で一致する節がなくなると、残りの語の問い合わせを省いていた。MiniSearchは、置き換え・削除した項目のpostingを問い合わせのときに片付け、それまではscoreに数えるので、片付けの順が変わってscoreが変わった（3件の文書の1件を消した後の初回の検索で0.735→0.481）→ 強い段階で見つかった節がある間は、すべての語を問い合わせる。当初は、前の段階と同じ問い合わせになる段階（どの語にもoptionが当たらない前方一致・綴りの違いの段階）を省いていたが、MiniSearchは語をたどりながら片付けるため1回で片付け残すことがあり、片付け前の索引との比較（実際のMarkdown 452件の一部を置き換え・削除）で13件のqueryのscoreが変わった → 省略もやめ、MiniSearchへの問い合わせを変更前と同じ並びにした（問い合わせの記録で一致を確認）。`search-ranking.test.ts`に、片付け前の索引での1回目と2回目の検索を加え、変更前のcodeで記録し直した（早期終了の修正前の実装では失敗）。比較scriptでは、片付け前・後の索引の両方で、実際のMarkdownと10MiBのfixtureの220件のqueryに差がない。弱い段階を件数で打ち切る案は、literalの一致がscoreを引き継ぐため結果が変わる（反例を確認した）ので採らなかった。
   - 索引そのものの縮小（MiniSearchの置き換え）と、workerのheapの上限は行っていない。
-  - 別のAgent（Codex）のレビュー2往復: 1回目 must-fix 2・should-fix 1・nit 1（上の2件の指摘と、文書の内訳の書き分け）、2回目 nit 1（GCの待ちを期限に数えないのは最大10秒までと明記）でマージ可。
+  - レビュー2往復: 1回目 must-fix 2・should-fix 1・nit 1（上の2件の指摘と、文書の内訳の書き分け）、2回目 nit 1（GCの待ちを期限に数えないのは最大10秒までと明記）でマージ可。
 - 0.1.1: 0.1.0の後の変更（検索workerと全threadの操作の後のGC、結果を変えない検索の削減、CIのactionの更新、文書）を、tag `v0.1.1`から`publish.yml`で公開した。
-- READMEのcloneからの導入の手順を直した: Bun 1.4.2の`bun add -g`は相対pathを今のdirectoryではなくglobalの導入先（`$BUN_INSTALL/install/global`）から解決するので、`./artifacts/...`は`ENOENT`になる（利用者の環境で発生。一時の`BUN_INSTALL`で再現し、globalの導入先に同じ相対pathのfileを置くと入ることで確認）→ `"$PWD/artifacts/vde-open-<版>.tgz"`の絶対pathにした。
-- 表示中の文書をURLに持つ（利用者の報告: reloadすると最初に開いた文書に戻る。選んだ文書はReactのstateだけにあり、reloadではdaemonの`activeDocumentId`（最初に開いた文書か、CLIでfocusした文書）を表示していた）→ `?document=<documentId>`。一覧・検索結果・focusの要求での切り替えはhistoryに積み（戻る・進むで文書を移る）、初回の決定・表示中の文書を閉じた後の移動・戻る進むで開いていない文書を指したときはreplace。表示中の文書を選び直してもhistoryは増えない。初回は、URLの文書（開いていれば）、daemonの`activeDocumentId`、一覧の先頭の順。一覧を取得する前はURLを判定・変更しない。focusの要求で選んだ文書は、要求の`catalogVersion`より古い一覧では取り消さない（CLIで開いた直後の文書へのfocusが、開く前に取得を始めた一覧で先頭の文書に戻されていた）。表示中の文書への要求（閉じて開き直した同じ文書など）も、historyは変えずに`catalogVersion`だけを更新する。bootstrapのfragmentだけを消し、queryは残す（`apps/web/src/lib/location.ts`、`apps/web/src/App.tsx`）。daemonには選択を保存しない（`focus-requested`が全tabを切り替えるため）。
-- 移動した見出しもURLに持つ（利用者の依頼）: `&section=<sectionId>&heading=<見出しの文言>`。見出しへの移動（Outline、検索結果）はreplaceで書き、historyは増やさない。文書が変わると消す（その文書の見出しなので）。URLから文書を開いたとき（reload、戻る・進む。表示中の文書の中での戻る・進むも含む）だけ、表示が移動できる状態になってから、その要求ごとに1回だけ移す。移動を待っている間に検索結果を選んだら、その要求は取り消す（後から選んだ見出しを優先する）。見出しを上に足すとsectionIdがずれるので、同じsectionIdで文言も同じ見出し、なければ同じ文言の最初の見出しへ移す。どちらもないか、その表示で届かない見出しなら、移さずにURLから消す。移動できない表示（Source、interactive）の間は待つ。手で読み進めた位置はURLに反映しない（HTMLは別originのiframeでscrollを読めない）。表示から離れた文書の書き込みは、URLが別の文書を指していれば行わない（`apps/web/src/lib/location.ts`）。
-- 見出しの一覧（Outline）からの移動（利用者の報告: 右の見出しを押しても移動しない）: Markdownのpreviewでは動いていた（利用者が開いていたMarkdown 3件の全見出しで、Chromium・WebKit・Firefoxとも確認）。HTMLは、buttonが常に無効、管理画面のDOMだけを探していた、表示用のHTMLの見出しにidがない、の3点で動かなかった → staticの表示だけ対応した。
+- READMEのcloneからの導入の手順を直した: Bun 1.4.2の`bun add -g`は相対pathを今のdirectoryではなくglobalの導入先（`$BUN_INSTALL/install/global`）から解決するので、`./artifacts/...`は`ENOENT`になる（一時の`BUN_INSTALL`で再現し、globalの導入先に同じ相対pathのfileを置くと入ることで確認）→ `"$PWD/artifacts/vde-open-<版>.tgz"`の絶対pathにした。
+- 表示中の文書をURLに持つ（不具合: reloadすると最初に開いた文書に戻る。選んだ文書はReactのstateだけにあり、reloadではdaemonの`activeDocumentId`（最初に開いた文書か、CLIでfocusした文書）を表示していた）→ `?document=<documentId>`。一覧・検索結果・focusの要求での切り替えはhistoryに積み（戻る・進むで文書を移る）、初回の決定・表示中の文書を閉じた後の移動・戻る進むで開いていない文書を指したときはreplace。表示中の文書を選び直してもhistoryは増えない。初回は、URLの文書（開いていれば）、daemonの`activeDocumentId`、一覧の先頭の順。一覧を取得する前はURLを判定・変更しない。focusの要求で選んだ文書は、要求の`catalogVersion`より古い一覧では取り消さない（CLIで開いた直後の文書へのfocusが、開く前に取得を始めた一覧で先頭の文書に戻されていた）。表示中の文書への要求（閉じて開き直した同じ文書など）も、historyは変えずに`catalogVersion`だけを更新する。bootstrapのfragmentだけを消し、queryは残す（`apps/web/src/lib/location.ts`、`apps/web/src/App.tsx`）。daemonには選択を保存しない（`focus-requested`が全tabを切り替えるため）。
+- 移動した見出しもURLに持つ: `&section=<sectionId>&heading=<見出しの文言>`。見出しへの移動（Outline、検索結果）はreplaceで書き、historyは増やさない。文書が変わると消す（その文書の見出しなので）。URLから文書を開いたとき（reload、戻る・進む。表示中の文書の中での戻る・進むも含む）だけ、表示が移動できる状態になってから、その要求ごとに1回だけ移す。移動を待っている間に検索結果を選んだら、その要求は取り消す（後から選んだ見出しを優先する）。見出しを上に足すとsectionIdがずれるので、同じsectionIdで文言も同じ見出し、なければ同じ文言の最初の見出しへ移す。どちらもないか、その表示で届かない見出しなら、移さずにURLから消す。移動できない表示（Source、interactive）の間は待つ。手で読み進めた位置はURLに反映しない（HTMLは別originのiframeでscrollを読めない）。表示から離れた文書の書き込みは、URLが別の文書を指していれば行わない（`apps/web/src/lib/location.ts`）。
+- 見出しの一覧（Outline）からの移動（不具合: 右の見出しを押しても移動しない）: Markdownのpreviewでは動いていた（Markdown 3件の全見出しで、Chromium・WebKit・Firefoxとも確認）。HTMLは、buttonが常に無効、管理画面のDOMだけを探していた、表示用のHTMLの見出しにidがない、の3点で動かなかった → staticの表示だけ対応した。
   - 見出しのanchorは`htmlHeadings`（`packages/document/src/analysis.ts`）で決め、解析（outline）とstaticの変換で共有する。書かれたidはそのまま。idがない・`id=""`の見出しは`h{n}`、文書のどこかの要素（templateの中、表示で消える要素を含む）が同じidを持てば`h{n}-2`、`h{n}-3`…。
   - staticの変換は、要素を消す前に見出しへそのidを付ける。変換後に表示に残り、かつそのidを持つ最初の要素である見出しだけを、`headingTargets`（sectionIdとanchor）としてrender grantで返す（`<object>`・SVGの`foreignObject`の中の見出しや、手前の要素とidが重なる見出しは入らない）。fragmentは`encodeURIComponent`した形で送り、browserはdecodeする前の形で先にidと`a`の`name`を探すので、その形に当たる要素がある見出し（`id="%E7%AF%80"`と`id="節"`の共存など）も入れない（`fragmentOfAnchor`をUIと判定で共有）。interactiveの出力は変えない。
   - UIは、iframeの表示がstaticで、Outlineとiframeの版が同じで、sectionIdとanchorが`headingTargets`と一致する項目だけを押せる。iframeの`location.replace(documentUrl#anchor)`で移す（Chromium・WebKitは文書を読み直し、Firefoxはscrollだけ。どちらもhistoryは増えない）。押せない項目はtitleで理由を示す。interactiveは、読み直すとscriptの状態を失うので対象外。Markdownの移動は本文の中だけを探す（管理画面のidに当たらない）。
   - 解析の結果が変わるので`HTML_STATIC_PARSER_PROFILE`を`html-static-v2`に上げた。daemonの起動時の確認（watcherの`checkDocuments()`）で、開いているfileの文書は新しい版になる。stdinの文書と、質問が固定した古い版は、版のまま今のcodeで解析・変換する。`tests/fixtures/handoff/feedback-response.json`の版を更新した。
 - 0.1.2: 0.1.1の後の変更（Catppuccinの配色、HTMLの上での一覧の幅の変更、Static表示のHTMLのoutlineからの移動、表示中の文書と見出しのURLへの保持、一覧のrepo・worktree・形式の表示（下の節））を、tag `v0.1.2`から`publish.yml`で公開した。
 
-## 一覧のrepo表示と形式の色（利用者の依頼、2026-10-05）
+## 一覧のrepo表示と形式の色（2026-10-05）
 
-- 目的: Flat・Treeのどちらでも、各文書がどのGitのrepo（worktreeならどのworktree）に属するかを読めるようにする。HTMLとMarkdownを見た目で見分けられるようにする。方式は、別のAgent（Codex、Claude）による設計のレビュー5往復でmust-fixが0になった案（全項目を利用者が承認）。
+- 目的: Flat・Treeのどちらでも、各文書がどのGitのrepo（worktreeならどのworktree）に属するかを読めるようにする。HTMLとMarkdownを見た目で見分けられるようにする。方式は、設計のレビュー5往復でmust-fixが0になった案。
 - daemon: `apps/cli/src/documents/repository.ts`（判定）、`repository-tracker.ts`（memoryでの保持と反映の規則）。`DocumentSummary`に`repository`と`canonicalPath`を足した（`vo list --json`にも出る）。stateには保存しない（`STATE_FORMAT_VERSION`は1のまま）。判定の手順・検証・更新の契機は`docs/architecture.md`、信頼できないmetadataの扱いは`docs/security-model.md`、項目の意味は`docs/agent-usage.md`。
 - 管理画面: Flatの行は2行（2行目にrepo・worktree・checkout内のpath。dirは直近の1つで、同じ名前のfileが重なるときだけ段を足す）。縮む順はworktree名、dir、file名の語幹で、repo名（行幅の6割まで）と拡張子は縮めない。読み上げの名前は1行目のまま、2行目と形式は`aria-describedby`。keyboardのfocusでは全文を折り返して出す。Treeは最上位をrepo、その下にworktree（1つだけならrepoの行に並べる）。repoとworktreeの行は上に貼り付く。一覧の更新でfocusと位置を保つ（作り直された行だけにfocusを戻す。見えていた行が押し出されたときだけscrollする）。viewerのheaderにrepo・worktree（名前も）・checkout内のpathを省略せずに出す。Markdownは青の`FileText`、HTMLはオレンジの`FileCode`（lightは`#c44a00`）。
 - 180pxの対策: badgeは一覧の内側が13rem未満のときと、行のhover・focusのときにiconだけにする（文字は読み上げ用に残す。`Question`と並ぶ状態badgeは常にicon）。上下移動のbuttonは13rem未満で出さず、Alt+↑／↓で並べ替える。行のbuttonはhover・focus中とタッチの画面でだけクリックを受ける。
 - 性能: 一覧の行が重くなり、1,000文書で最初の表示が変更前より約29%遅かった（CPUのprofileでは、base UIのtoolbarの切り替えが表示状態を確かめるときに強制されるstyleの再計算）→ 一覧の行に`content-visibility: auto`を付け、画面外の行のstyleとlayoutを省いた（focusの枠は行の内側に描く）。変更前より少し速い。数値は`docs/performance.md`。
-- 試験の環境: このworktreeは`.git/wt/feature/sidebar-repository`にあり、Viteの既定の`server.fs.deny`（`**/.git/**`）でhappy-domのDOM試験が「Cannot find module」になる。無視対象の`tmp/vitest.worktree.config.ts`（`server.fs.deny`を空にする）で実行した。codeの問題ではない。
-- 実装のレビュー（別のAgent、Codex・Claude）1回目の指摘への対応: 見えない行のボタンがbadgeの上でtapを受けて文書を外す（ボタンはhover・focus中とタッチの画面でだけクリックを受ける）、遅れた判定が回の全部を待つ（届いたものから反映）、checkoutの共有がrepoの鍵と名前に及ばない（checkoutの項目に移した）、Windowsで終端のsymlinkをたどる（開く前の`lstat`と、開いた後の`ino`・`dev`の照合）、閉じて開き直した文書がfocusとscrollを奪う、上下移動とbadgeの文字のしきい値、同じ名前のfileが多いときの短い表示の計算（件数の2乗→ほぼ比例）、同じ場所の通常のrepoとbare repoの名前、viewerのheaderの区別済みの名前、Alt+↓を続けて押すと2回目の並べ替えが失われる（1件ずつ、前の結果の版で保存）。
+- 試験の環境: `.git`の下に置いたworktree（`.git/wt/<branch>`など）では、Viteの既定の`server.fs.deny`（`**/.git/**`）により、happy-domのDOM試験が「Cannot find module」になる。この変更の試験は、`server.fs.deny`を空にしたvitestの設定（無視対象の`tmp/`に置いた）で実行した。codeの問題ではない。
+- 実装のレビュー1回目の指摘への対応: 見えない行のボタンがbadgeの上でtapを受けて文書を外す（ボタンはhover・focus中とタッチの画面でだけクリックを受ける）、遅れた判定が回の全部を待つ（届いたものから反映）、checkoutの共有がrepoの鍵と名前に及ばない（checkoutの項目に移した）、Windowsで終端のsymlinkをたどる（開く前の`lstat`と、開いた後の`ino`・`dev`の照合）、閉じて開き直した文書がfocusとscrollを奪う、上下移動とbadgeの文字のしきい値、同じ名前のfileが多いときの短い表示の計算（件数の2乗→ほぼ比例）、同じ場所の通常のrepoとbare repoの名前、viewerのheaderの区別済みの名前、Alt+↓を続けて押すと2回目の並べ替えが失われる（1件ずつ、前の結果の版で保存）。
 - 実装のレビュー2回目の指摘への対応: マウスのあるタッチパネルの画面で、tapの直前のhoverで現れたボタンがclickを受ける（タッチのできる画面ではボタンを常に出し、pointerのclickは押し始めが同じボタンのときだけ受ける。CDPでタッチを送るe2eで確認）、並べ替えの保存待ちの間に取り直した一覧が順を戻す・保存の応答が版を戻す（保存待ちの順をstateに持ち、版は戻さない。DOM試験）、短い表示の計算に残っていた配列の複写（pushに）、遅れた判定の反映の間隔（250msから1秒まで延ばす）。
 - 実装のレビュー3回目の指摘への対応: 保存の後の一覧の取り直しの間に押した並べ替えが、取り直しの完了で消える・取り直しの失敗でも保存待ちの順を消す（取り直しが成功し、始めたときに保存待ちがなく、その後も増えていないときだけ消す。DOM試験）。
-- 未実施（利用者の判断待ち）: 応答しないnetwork mountの上に文書を置いた手動確認（CIでは再現できない。並行数の上限と、2つの処理を止めたままでも`vo open`・`vo refresh`が3秒以内に応答することはunit試験で確認）。Windowsでの手動確認（Windows CIで実行される`tests/integration/documents.test.ts`に、通常のrepo・worktree・repoの外・再起動・symlinkの`HEAD`の試験を足した）。
+- 未実施: 応答しないnetwork mountの上に文書を置いた手動確認（CIでは再現できない。並行数の上限と、2つの処理を止めたままでも`vo open`・`vo refresh`が3秒以内に応答することはunit試験で確認）。Windowsでの手動確認（Windows CIで実行される`tests/integration/documents.test.ts`に、通常のrepo・worktree・repoの外・再起動・symlinkの`HEAD`の試験を足した）。
 - 既知の制限: 判定のfilesystem処理が応答しないmountで止まっている間にdaemonを止めると、lockは解放され`vo daemon stop`は返るが、processはその処理がOSから返るまで残る（文書そのものの読み込みが止まった場合と同じ）。
-- 見つけた既存の問題（今回は直していない）: 幅180pxで、一覧の見出しの「Tree」の切り替えが一部見切れる。
+- 既知の問題（この変更の前からあり、直していない）: 幅180pxで、一覧の見出しの「Tree」の切り替えが一部見切れる。
 
-## MarkdownのPDF出力（利用者の依頼、2026-10-06）
+## MarkdownのPDF出力（2026-10-06）
 
-- 目的: 管理画面で開いているMarkdownを、印刷のdialogなしに、白背景の資料としてPDFへ保存する。余白に文書名とpage番号を入れる。品質の保証はChrome・Edgeでよい（利用者の回答）。方式の決定はADR-0013。
-- 方式の検討: 別のAgent（Codex、Claude）と調査し、ブラウザの印刷・headless Chromium・JSのPDF library・外部commandを比べた。daemonが利用者の環境のChrome・Edgeを`--remote-debugging-pipe`で操作し、`Page.printToPDF`で印刷する。設計のレビュー（Claude）で、解析のworkerとの時間上限の共有、測定できないDoD、`--print-to-pdf`が文書化されていない一時profileの挙動に頼る点などの指摘を受け、専用のworker、画像のbyteをworkerへ通さない書き出し、CDPのpipe、e2eでのPDFの検査に改めた。Codexの設計レビューの本文は、応答の回収で受け取れなかった。
+- 目的: 管理画面で開いているMarkdownを、印刷のdialogなしに、白背景の資料としてPDFへ保存する。余白に文書名とpage番号を入れる。見た目を保証するbrowserはChrome・Edgeとする。方式の決定はADR-0013。
+- 方式の検討: ブラウザの印刷・headless Chromium・JSのPDF library・外部commandを比べた。daemonが利用者の環境のChrome・Edgeを`--remote-debugging-pipe`で操作し、`Page.printToPDF`で印刷する。設計のレビューで、解析のworkerとの時間上限の共有、測定できないDoD、`--print-to-pdf`が文書化されていない一時profileの挙動に頼る点などの指摘を受け、専用のworker、画像のbyteをworkerへ通さない書き出し、CDPのpipe、e2eでのPDFの検査に改めた。
 - 実装: `packages/document/src/print.ts`・`print-style.ts`（印刷用の文書と紙のstyle）、`rendering-rules.ts`（linkと画像の判定。表示の`MarkdownView`も使う）、`highlight.ts`（色付けを表示と共有）。`apps/cli/src/export/`の`browser.ts`（探索）・`cdp.ts`（pipeのclient）・`pdf-service.ts`（出力）。管理APIの`POST /documents/:id/pdf`、viewerの「Export PDF」。
 - 確認: macOS（Chrome 154・Edge 154）で、日本語・表・コード・画像・脚注・タスクリストを含む文書を出力し、header・footer・改ページ・配色を目で確かめた。e2eでは、PDFから文字を取り出し（`tests/e2e/pdf-text.ts`。ChromeはToUnicodeが康熙部首になる漢字を`ActualText`で正しい字にしている）、全pageのheaderとfooterを確かめる。
-- 設計レビュー（Codex）: 応答の回収が遅れ、実装の後に受け取った。指摘のうち、Windowsでのprocess treeの停止（`taskkill /T /F`）、page書き出し中の停止でbrowserを起動しないこと、一時directoryの削除の失敗で結果を変えないことを反映した。ほかは対応済みだった。
-- 実装レビュー（Claude）1回目の指摘への対応: browserからの読めないmessageでdaemonが落ちる（捕まえてその出力だけを失敗に。messageは16MiBまで）、about:blankの読み込みのeventを取り違える余地（`loaderId`で照合）、同じ画像の繰り返しで一時fileが肥大する（pageは256MiBまで）、文書を切り替えると出力の状態と失敗が消える（文書ごとのstoreに）、本体の終了後に残る補助process・強制終了で残る一時directory（終了後もprocess groupを止める。1時間より古いものを起動時に消す）、daemonのlocaleを文書の言語にしていた（本文の仮名・ハングルから決める）、接続の切断・描画中の停止・掃除の失敗・header/footerのテストの不足、文書の事実との食い違い。
+- 実装の後に受けたもう1件の設計レビュー: 指摘のうち、Windowsでのprocess treeの停止（`taskkill /T /F`）、page書き出し中の停止でbrowserを起動しないこと、一時directoryの削除の失敗で結果を変えないことを反映した。ほかは対応済みだった。
+- 実装レビュー1回目の指摘への対応: browserからの読めないmessageでdaemonが落ちる（捕まえてその出力だけを失敗に。messageは16MiBまで）、about:blankの読み込みのeventを取り違える余地（`loaderId`で照合）、同じ画像の繰り返しで一時fileが肥大する（pageは256MiBまで）、文書を切り替えると出力の状態と失敗が消える（文書ごとのstoreに）、本体の終了後に残る補助process・強制終了で残る一時directory（終了後もprocess groupを止める。1時間より古いものを起動時に消す）、daemonのlocaleを文書の言語にしていた（本文の仮名・ハングルから決める）、接続の切断・描画中の停止・掃除の失敗・header/footerのテストの不足、文書の事実との食い違い。
 - CI（run 37423651940）: `ubuntu-latest`のe2eで、runnerのGoogle Chromeによる出力が成功した（header・footerの文字の検査を含む）。Windowsは、pack smokeで印刷用の文書の描画までを確かめた。
 - 未確認: Windowsでの、実際のbrowserでの印刷（WindowsのCIはe2eを実行しない）。
 
@@ -496,7 +495,7 @@ P7時点の制約:
 
 機能完了条件:
 
-- [x] P0〜P7のすべてが17.2を満たし、このfileで完了報告済み。
+- [x] P0〜P7のすべてが17.2を満たす（各フェーズの記録）。
 - [x] tarballから導入した`vde-open`と`vo`が、同じstateとdaemonを操作する（CLI-001〜004がPASS）。
 - [x] 0.1の対象外機能と、削除済みoptionが露出していない（CLI-010、UX-007がPASS）。
 
@@ -512,11 +511,11 @@ P7時点の制約:
 - [x] `pnpm pack`で作ったtarball（`artifacts/vde-open-0.1.0.tgz`）で、`pnpm test:pack`がPASS。
 - [x] 仕様16.3の文書（README、agent-usage、architecture、security-model、dependency-validation、implementation-status、ADR）とCI定義がある。
 - [x] Node 24（`mise.toml`）と直接依存が完全版番号で固定され、lockfileがある。
-- [x] npm publish、push、利用者のshell設定の変更、既存`vo`の上書きをしていない。commitは利用者の指示の範囲（フェーズごと）だけ。
+- [x] 導入で、利用者のshellの設定を変えず、既存の`vo`を上書きしない（CLI-014）。P7の完了までnpm publishとpushをしていない（公開はその後。「0.1.0の公開とその後の変更」）。
 
 ## 受け入れテストの対応
 
-状態は「未着手／PASS／FAIL／NOT RUN」。担当は、そのIDが最後に必要とする機能がそろうフェーズ。IDをPASSにするのは担当フェーズで全条件を検証したときだけで、先行フェーズで一部だけ検証したものは備考に部分検証として書く。
+状態は「未着手／PASS／FAIL／NOT RUN」。担当は、そのIDが最後に必要とする機能がそろうフェーズ。IDをPASSにするのは担当フェーズで全条件を検証したときだけで、先行フェーズで一部だけ検証したものは備考に部分検証として書く。担当の「追加」は、受け入れテストの一式の後に足したID。
 
 | ID | 担当 | 状態 | test | 備考（部分検証を含む） |
 |---|---|---|---|---|
@@ -648,18 +647,16 @@ P7時点の制約:
 | PERF-004 | P7 | PASS | `tests/integration/resources.test.ts`、`apps/cli/src/server/http/management.test.ts`、`apps/cli/src/workers/parse-service.test.ts`（MD-006） | 通知を読まないclientがいても、50回の連続した更新とほかのclientの操作が終わる。書き込みが詰まった接続の待ち行列は上限で止まり、読む接続には届き、詰まった接続は期限の後とsessionの失効のときにsocketまで閉じる。届く連番は逆戻りしない。大きい・深い文書は解析の時間と構造の上限で止まる |
 | PERF-005 | P7 | PASS | `tests/integration/resources.test.ts`、`apps/web/src/components/workspace.dom.test.tsx` | 3秒の待機のCPU時間が150ms未満。通知の接続・切断30回で購読が残らない。欠けた通知は一覧と質問の取り直しで回復する |
 
-## 引継ぎ事項
+## 現状と開発の注意点
 
-- P0〜P7は完了報告済み（全体のDoDは上の節）。未実行は、Linux・WindowsのCIと、Firefox・WebKitでのsecurity・bridge以外の画面操作。既知の制約は、検索の索引のmemory（開いている文書の量に比例し、50MiBで検索workerのheap約489MB）と、一致の多い検索の間の一時的なRSSの増加（`docs/performance.md`）。interactiveとSDKはADR-0012、検索UIは`apps/web/src/components/search-dialog.tsx`、性能の実測は`scripts/perf.ts`、資源の検査は`tests/integration/resources.test.ts`。
-- stateの形式に質問と回答（`feedbackRequests`）を足した。P4までの開発用state（`.dev-home`）は読めないので、消して作り直す。
+- P0〜P7は完了（全体のDoDは上の節）。未検証は、Windowsでの一部の試験と、Firefox・WebKitでのsecurity・bridge以外の画面操作（READMEの「Verified scope」）。既知の制約は、検索の索引のmemory（開いている文書の量に比例し、50MiBで検索workerのheap約489MB）と、一致の多い検索の間の一時的なRSSの増加（`docs/performance.md`）。interactiveとSDKはADR-0012、検索UIは`apps/web/src/components/search-dialog.tsx`、性能の実測は`scripts/perf.ts`、資源の検査は`tests/integration/resources.test.ts`。
 - 管理HTTPは`apps/cli/src/server/http/management.ts`、表示用のlistenerは`apps/cli/src/server/http/preview.ts`、UIは`apps/web/src/`、Markdownの描画は`packages/document/src/react.tsx`、HTMLの静的変換は`packages/document/src/html-static.ts`。
-- stateの形式に項目を足した（版ごとのassetと文書の位置、文書ごとのassets-root）。P2までの開発用state（`.dev-home`）は読めないので、消して作り直す。
 - 画面部品のhookは、happy-domの上で実際のReact DOMを動かしてテストできる（file先頭に`// @vitest-environment happy-dom`）。
-- 未解決の不具合: なし。
-- 未実行のtest: Linux・WindowsのCI。Firefox・WebKitでの、security・bridge以外のe2e。
+- 未解決の不具合: 幅180pxで、一覧の見出しの「Tree」の切り替えが一部見切れる（「一覧のrepo表示と形式の色」）。
+- 未実行のtest: Windowsでの、daemonと文書の結合試験以外の単体・結合試験とe2e。Firefox・WebKitでの、security・bridge以外のe2e。
 - Firefox・WebKitのe2eは`pnpm test:e2e:cross`（先に`pnpm exec playwright install firefox webkit`が必要）。
 - 配布物はruntime依存を持たない方針（ADR-0001）。外部packageを足したら`apps/cli/tsdown.config.ts`の`deps.onlyBundle`へ追加する。
 - stdinを入力として扱うのは、shellのpipeかredirectのときだけ（ADR-0004）。
-- UIはTailwind CSS、shadcn/ui、Base UIで作る（利用者の指定、ADR-0006）。部品は`pnpm dlx shadcn@4.21.1 add <name>`で`apps/web/src/components/ui/`へ追加する。
+- UIはTailwind CSS、shadcn/ui、Base UIで作る（ADR-0006）。部品は`pnpm dlx shadcn@4.21.1 add <name>`で`apps/web/src/components/ui/`へ追加する。
 - 結合テストは`tests/integration/harness.ts`の`createTestHome()`、e2eは`tests/e2e/harness.ts`の`createE2eHome()`で、試験専用のstate rootとruntimeを使う。browserは`BROWSER`環境変数で差し替えられる。
 - e2eは配布物（`apps/cli/dist`）を試す。先に`pnpm build`が必要。
