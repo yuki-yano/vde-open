@@ -58,4 +58,4 @@
 
 - [x] README（日英）、`docs/architecture.md`（日英）、`docs/security-model.md`（日英）、このADR、`docs/implementation-status.md`を更新した。
 - [x] 配布物に実行時の依存を足していない（`@tanstack/highlight`をbundleし、`THIRD_PARTY_NOTICES.md`はbuildが生成する）。
-- [ ] Linuxでの、実際のbrowserでの印刷の確認（CIのLinuxのe2eで、runnerのChromeで行う。branchをpushしてCIで確かめてからmainへ入れる）。
+- [x] Linuxでの、実際のbrowserでの印刷の確認（CIの`ubuntu-latest`のe2eで、runnerのGoogle Chromeによる出力が成功した。run 37423651940）。

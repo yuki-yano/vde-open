@@ -166,7 +166,7 @@ vo feedback ack <requestId> --submission-id <id> --json
 | browser（macOS） | Chromium（PlaywrightのChrome Headless Shell）は全件を検証済み。Firefox 155・WebKit 26.6（Playwright 1.63.0）は、表示の隔離・CSP・HTMLとの通信・認証の試験（`pnpm test:e2e:cross`）を検証済み |
 | browser（未検証） | Firefox・WebKitのそれ以外の画面操作（検索、回答panel、狭い画面、1,000文書の一覧など）は未検証 |
 | Markdownの構文 | 上の「Markdownの表示の制限」のとおり。CommonMark・GFMの全体は検証していない |
-| PDF出力 | macOS（手元）で、Google Chrome 154とMicrosoft Edge 154での出力を検証済み。LinuxとWindowsでの実際のbrowserでの印刷は未検証 |
+| PDF出力 | macOS（手元）で、Google Chrome 154とMicrosoft Edge 154での出力を検証済み。CIのLinux（`ubuntu-latest`）で、runnerのGoogle Chromeでの出力を検証済み（e2e）。Windowsでの実際のbrowserでの印刷は未検証（印刷用の文書の描画はpack smokeで確かめる） |
 
 詳しい記録は [docs/implementation-status.md](docs/implementation-status.md)、性能の実測は [docs/performance.ja.md](docs/performance.ja.md)、設計は [docs/architecture.ja.md](docs/architecture.ja.md) と [docs/security-model.ja.md](docs/security-model.ja.md) にあります。
 

@@ -166,7 +166,7 @@ The person answers in the answer panel of the management UI. The answers are sub
 | Browsers (macOS) | Chromium (Playwright's Chrome Headless Shell): the full suite is verified. Firefox 155 and WebKit 26.6 (Playwright 1.63.0): the view isolation, CSP, HTML bridge, and authentication tests (`pnpm test:e2e:cross`) are verified |
 | Browsers (not verified) | Other UI interactions in Firefox and WebKit (search, answer panel, narrow screens, a list of 1,000 documents) are not verified |
 | Markdown syntax | As described in "Markdown display limits" above. Full CommonMark and GFM are not verified |
-| PDF export | macOS (locally): verified with Google Chrome 154 and Microsoft Edge 154. On Linux and Windows, printing with a real browser is not verified |
+| PDF export | macOS (locally): verified with Google Chrome 154 and Microsoft Edge 154. Linux on CI (`ubuntu-latest`): verified with the runner's Google Chrome (e2e). Windows: printing with a real browser is not verified (the pack smoke test checks rendering the print document) |
 
 More details: [docs/performance.md](docs/performance.md) (measurements), [docs/architecture.md](docs/architecture.md) and [docs/security-model.md](docs/security-model.md) (design). Development records (in Japanese): [docs/implementation-status.md](docs/implementation-status.md), [docs/dependency-validation.md](docs/dependency-validation.md), and [docs/adr/](docs/adr/).
 

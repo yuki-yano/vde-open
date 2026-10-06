@@ -489,7 +489,8 @@ P7時点の制約:
 - 確認: macOS（Chrome 154・Edge 154）で、日本語・表・コード・画像・脚注・タスクリストを含む文書を出力し、header・footer・改ページ・配色を目で確かめた。e2eでは、PDFから文字を取り出し（`tests/e2e/pdf-text.ts`。ChromeはToUnicodeが康熙部首になる漢字を`ActualText`で正しい字にしている）、全pageのheaderとfooterを確かめる。
 - 設計レビュー（Codex）: 応答の回収が遅れ、実装の後に受け取った。指摘のうち、Windowsでのprocess treeの停止（`taskkill /T /F`）、page書き出し中の停止でbrowserを起動しないこと、一時directoryの削除の失敗で結果を変えないことを反映した。ほかは対応済みだった。
 - 実装レビュー（Claude）1回目の指摘への対応: browserからの読めないmessageでdaemonが落ちる（捕まえてその出力だけを失敗に。messageは16MiBまで）、about:blankの読み込みのeventを取り違える余地（`loaderId`で照合）、同じ画像の繰り返しで一時fileが肥大する（pageは256MiBまで）、文書を切り替えると出力の状態と失敗が消える（文書ごとのstoreに）、本体の終了後に残る補助process・強制終了で残る一時directory（終了後もprocess groupを止める。1時間より古いものを起動時に消す）、daemonのlocaleを文書の言語にしていた（本文の仮名・ハングルから決める）、接続の切断・描画中の停止・掃除の失敗・header/footerのテストの不足、文書の事実との食い違い。
-- 未確認: LinuxとWindowsでの、実際のbrowserでの印刷（CIのLinuxのe2eは、runnerのChromeで行う。pushの後に確認する）。
+- CI（run 37423651940）: `ubuntu-latest`のe2eで、runnerのGoogle Chromeによる出力が成功した（header・footerの文字の検査を含む）。Windowsは、pack smokeで印刷用の文書の描画までを確かめた。
+- 未確認: Windowsでの、実際のbrowserでの印刷（WindowsのCIはe2eを実行しない）。
 
 ## 全体のDoD（仕様17.1）
 
