@@ -2,7 +2,7 @@
 import { parentPort } from 'node:worker_threads';
 
 import { analyzeDocument, ParseLimitError } from '@vde-open/document';
-import type { PrintInput } from '@vde-open/document/print';
+import type { HtmlPrintInput, PrintInput } from '@vde-open/document/print';
 import {
   renderDocument,
   scanReferences,
@@ -17,6 +17,7 @@ export type ParseRequest =
   | { id: number; op: 'scan'; kind: ScanKind; text: string }
   | { id: number; op: 'render'; input: RenderInput }
   | { id: number; op: 'print'; input: PrintInput }
+  | { id: number; op: 'printHtml'; input: HtmlPrintInput }
   | { id: number; op: 'diagnostics'; collectGarbage: boolean }
   | { id: number; op: 'collect' };
 
@@ -35,9 +36,12 @@ async function run(request: ParseRequest): Promise<unknown> {
   }
   if (request.op === 'analyze') return analyzeDocument(request.text, request.format);
   if (request.op === 'scan') return scanReferences(request.kind, request.text);
-  if (request.op === 'print') {
+  if (request.op === 'print' || request.op === 'printHtml') {
     printModule ??= import('@vde-open/document/print');
-    return (await printModule).renderPrintDocument(request.input);
+    const printer = await printModule;
+    return request.op === 'print'
+      ? printer.renderPrintDocument(request.input)
+      : printer.renderHtmlPrintDocument(request.input);
   }
   return renderDocument(request.input);
 }

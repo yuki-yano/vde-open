@@ -89,16 +89,17 @@ Markdown is rendered with TanStack Markdown 1.0.0. It is not fully compatible wi
 - Code is highlighted only for JS, JSX, TS, TSX, JSON, YAML, HTML, CSS, Bash, and Markdown. Code larger than 256 KiB and other languages are not highlighted.
 - Documents that cannot be parsed within 2 seconds, or that have more than 100,000 elements or more than 64 levels of nesting, are shown as source.
 
-## Exporting Markdown to PDF
+## Exporting to PDF
 
-"Export PDF" in the header of a Markdown document saves the shown revision as a PDF, without a print dialog.
+"Export PDF" in the header of a document saves the shown revision as a PDF, without a print dialog.
 
-- The PDF is A4 on a white background. Every page has the document title in the header and the page number ("3 / 12") in the footer, and the headings become PDF bookmarks.
+- Markdown PDFs are A4 on a white background. Every page has the document title in the header and the page number ("3 / 12") in the footer, and the headings become PDF bookmarks.
 - The daemon prints it with the Google Chrome or Microsoft Edge (131 or later) installed on the machine; nothing is downloaded. To use another Chromium-based browser or another location, set `VDE_OPEN_BROWSER` for the daemon to the absolute path of the executable, then run `vo daemon restart`.
-- The rules of the view apply: raw HTML is shown as text, only images registered for the document are included (others show their alternative text), and links to other local documents become plain text.
+- For Markdown, the rules of the view apply: raw HTML is shown as text, only images registered for the document are included (others show their alternative text), and links to other local documents become plain text.
 - The file name is the document's file name with `.pdf` (`README.md` → `README.pdf`); a document read from stdin uses its title.
-- The PDF uses the fonts installed on the machine, so it looks slightly different on each OS.
-- HTML documents cannot be exported. Printing must finish within 60 seconds.
+- Markdown and any HTML text without a registered font use the fonts installed on the machine, so they look slightly different on each OS.
+- HTML is exported using the static view rules, its own CSS (including `@media print` and `@page`), and registered CSS, images, and fonts. Without a page rule, it uses A4 with 20 mm margins. Markdown typography, headers, and footers are not added. Even an interactive document is exported from the saved HTML without running scripts; changes made by interacting with it are not included.
+- Printing must finish within 60 seconds.
 
 ## Where the state is stored, and stopping
 

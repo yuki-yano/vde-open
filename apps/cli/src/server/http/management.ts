@@ -413,11 +413,11 @@ export async function startManagementServer(
     ok(c, 'documents.refresh', await deps.documents.refresh({ documentId: c.req.param('id') })),
   );
 
-  // PDF of the shown revision of a Markdown document. The body is the PDF itself; failures use the JSON envelope.
+  // PDF of the shown revision of a document. The body is the PDF itself; failures use the JSON envelope.
   api.post('/documents/:id/pdf', async (c) => {
     const body = z.strictObject({ revision: revisionSchema }).parse(await c.req.json());
     // When the UI goes away (the request is aborted), the browser is stopped.
-    const pdf = await deps.pdf.exportMarkdown(c.req.param('id'), body.revision, c.req.raw.signal);
+    const pdf = await deps.pdf.exportPdf(c.req.param('id'), body.revision, c.req.raw.signal);
     return c.body(new Uint8Array(pdf), 200, {
       'Content-Type': 'application/pdf',
       'Content-Disposition': 'attachment',

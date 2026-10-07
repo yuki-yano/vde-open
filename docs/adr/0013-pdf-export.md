@@ -1,4 +1,4 @@
-# ADR-0013: MarkdownのPDF出力は、利用者の環境のChrome・Edgeをdaemonから印刷に使う
+# ADR-0013: 文書のPDF出力は、利用者の環境のChrome・Edgeをdaemonから印刷に使う
 
 状態: 採用（2026-10-06）
 
@@ -30,7 +30,7 @@
 
 - PDF出力には、Chrome・Edge（131以降）の導入が必要になる。ない環境では、案内のエラーを出す。
 - 書体を同梱しないため、OSごとにPDFの字面が変わる。
-- daemonが外部のprocessを起動する経路が増える。起動するのは人が「Export PDF」を押したときだけで、印刷するpageは何も読み込まない。browser自身の通信は、background networkingなどを無効にして起動するが、保証の外に置く（`docs/security-model.md`）。
+- daemonが外部のprocessを起動する経路が増える。起動するのは人が「Export PDF」を押したときだけで、印刷するpageは外部へ通信しない。browser自身の通信は、background networkingなどを無効にして起動するが、保証の外に置く（`docs/security-model.md`）。
 - calloutは、現在の解析の設定（表示と同じ）では生成されないため、印刷でも普通の引用として出る。
 - CLIからの出力（`vo export`など）は、このADRの範囲外。daemonの経路はそのまま使える。
 - Windowsでは、実際のbrowserでの印刷を検証しないまま提供する（WindowsのCIはe2eを実行しない）。READMEの検証範囲に未検証と書き、印刷用の文書の描画までの経路はpack smokeで確かめる。
@@ -40,16 +40,16 @@
 機能完了条件:
 
 - [x] Markdown文書の「Export PDF」で、印刷のdialogなしに、表示中の版のPDFが`<文書名>.pdf`で保存される。
-- [x] PDFは白背景のA4で、全pageのheaderに文書名、footerに「n / N」が出て、見出しのしおりが付く。
+- [x] MarkdownのPDFは白背景のA4で、全pageのheaderに文書名、footerに「n / N」が出て、見出しのしおりが付く。
 - [x] 登録済みの画像はPDFに入り、未登録の画像は`[image: …]`、外部の画像は代替textになる。ローカル文書へのlinkは文字だけになる。
 - [x] Chrome・Edgeが見つからない、131より古い、`VDE_OPEN_BROWSER`が使えないときは`E_BROWSER_NOT_FOUND`になり、管理画面に案内が出る。
-- [x] HTML文書では、ボタンが出ず、APIは`E_UNSUPPORTED_FORMAT`を返す。
+- [x] HTML文書でもボタンとAPIから静的HTMLのPDFを出力できる。CSS・画像・fontは登録済みのものだけを使い、元の印刷CSSを保つ。
 
 テスト完了条件:
 
 - [x] unit: 印刷用の文書（CSP、文書名のescapeと切り詰め、画像とlinkの判定、表示との一致、敵対的な入力、短いコードの改ページ、`lang`）、browserの探索（OSごと、`VDE_OPEN_BROWSER`）、file名、PDFの出力（偽のbrowserでの成功・起動の失敗・古い版・時間切れ・異常終了・PDFでない出力・古い読み込みのevent・読めないmessage・閉じない・掃除の失敗・pageの上限・描画中の停止・中断・直列・待ちの上限と中断した待ち・停止・古い一時directoryの掃除）、管理画面のエラーの文言と文書ごとの出力の状態、TanStack Markdownの描画のhookの契約。
 - [x] 結合: daemonの管理APIで、200と`application/pdf`、HTML文書・不正なbody・保持していない版・認証なし・別のOriginの拒否、使えないbrowserの`E_BROWSER_NOT_FOUND`、接続が切れたときにbrowserが止まること。
-- [x] e2e（Chromium、実際のChrome）: ボタンからdownloadし、`%PDF-`〜`%%EOF`、A4、2page以上、しおり、文書名のtitle、画像、全pageのheaderの文書名とfooterの「n / N」（PDFの文字を取り出して確かめる）、本文の文字を確かめる。HTML文書にボタンがない。
+- [x] e2e（Chromium、実際のChrome）: ボタンからdownloadし、`%PDF-`〜`%%EOF`、A4、2page以上、しおり、文書名のtitle、画像、全pageのheaderの文書名とfooterの「n / N」（PDFの文字を取り出して確かめる）、本文の文字を確かめる。Markdownの出力を確認する。
 - [x] pack smoke: 導入したtarballだけで、印刷用の文書の描画（遅延読み込みのchunk）まで動く（browserがないので`E_BROWSER_NOT_FOUND`になることで確かめる）。
 - [x] `pnpm check`、`pnpm build`、`pnpm test:pack`、`pnpm test:e2e`がexit 0（macOS）。
 - [x] 代表的な文書（日本語・表・コード・画像・脚注・タスクリスト）のPDFを、header・footer・改ページ・配色について目で確かめた（macOS、Chrome 154・Edge 154）。
@@ -59,3 +59,24 @@
 - [x] README（日英）、`docs/architecture.md`（日英）、`docs/security-model.md`（日英）、このADR、`docs/implementation-status.md`を更新した。
 - [x] 配布物に実行時の依存を足していない（`@tanstack/highlight`をbundleし、`THIRD_PARTY_NOTICES.md`はbuildが生成する）。
 - [x] Linuxでの、実際のbrowserでの印刷の確認（CIの`ubuntu-latest`のe2eで、runnerのGoogle Chromeによる出力が成功した。run 37423651940）。
+
+## 静的HTMLへの拡張（2026-10-07）
+
+HTMLも同じAPIとbrowserで出力する。印刷workerの`html-print.ts`は、表示と同じ静的HTML・CSSの安全化を使う。登録済みのCSSは一時fileにし、参照をそのfile名へ付け直す。画像とfontはdaemonがdata URLとして埋め、HTMLとCSSを合わせて256MiBに制限する。CSSの`@import`は一時file間の参照として保つため、循環importでも展開して肥大させない。印刷用のmediaに切り替え、fontの読み込みを待ってから印刷する。
+
+HTML自身の`@media print`と`@page`を優先する。用紙の指定がなければA4・余白20mmにし、Markdownの組版・header・footerは付けない。interactiveで表示していても、保存された版を静的に出力する。scriptによる描画や操作後の状態は対象外。HTMLのCSPは`default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline' file:; base-uri 'none'; form-action 'none'`とし、未登録fileや外部URLの参照は静的変換で取り除く。
+
+機能完了条件:
+
+- [x] HTMLの「Export PDF」で表示中の版が`<file名>.pdf`としてdownloadされる。
+- [x] 元HTMLの印刷CSS、登録済みのCSS・画像・fontが反映され、scriptは動かない。
+
+テスト完了条件:
+
+- [x] unit・結合で旧版の出力、安全化、CSSを含む容量制限、APIの成功と認証を確かめる。
+- [x] 実Chromeのe2eでHTMLのdownload、印刷時だけの本文、画像、font、指定した用紙サイズと改ページを確かめ、Markdownの既存e2eも通る。
+- [x] `pnpm check`・`pnpm build`・`pnpm test:pack`がexit 0。tarballからHTMLの印刷workerも読み込める。
+
+運用反映条件:
+
+- [x] README・architecture・security-model（日英）と実装記録を更新し、配布buildへ反映する。

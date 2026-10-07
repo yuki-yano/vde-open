@@ -1,7 +1,7 @@
 import { Worker } from 'node:worker_threads';
 
 import type { DocumentAnalysis } from '@vde-open/document';
-import type { PrintInput } from '@vde-open/document/print';
+import type { HtmlPrintInput, HtmlPrintOutput, PrintInput } from '@vde-open/document/print';
 import type {
   RenderInput,
   RenderOutput,
@@ -45,6 +45,7 @@ export interface ParseService {
   // The print document (one HTML document) of a Markdown revision, for the PDF export.
   // The daemon runs it on a worker of its own, so a long print never shares a time limit with parsing.
   print(input: PrintInput): Promise<string>;
+  printHtml(input: HtmlPrintInput): Promise<HtmlPrintOutput>;
   close(): Promise<void>;
 }
 
@@ -153,6 +154,7 @@ export function createParseService(options: ParseServiceOptions = {}): ParseServ
     scan: (kind, text) => request({ op: 'scan', kind, text }),
     render: (input) => request({ op: 'render', input }),
     print: (input) => request({ op: 'print', input }),
+    printHtml: (input) => request({ op: 'printHtml', input }),
     async close() {
       closed = true;
       collector.close(new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));

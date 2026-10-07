@@ -491,6 +491,27 @@ P7時点の制約:
 - CI（run 37423651940）: `ubuntu-latest`のe2eで、runnerのGoogle Chromeによる出力が成功した（header・footerの文字の検査を含む）。Windowsは、pack smokeで印刷用の文書の描画までを確かめた。
 - 未確認: Windowsでの、実際のbrowserでの印刷（WindowsのCIはe2eを実行しない）。
 
+## 静的HTMLのPDF出力（2026-10-07）
+
+HTML文書にも「Export PDF」を追加した。印刷専用workerの`html-print.ts`が表示と同じ静的HTML・CSSの変換を使い、登録済みのCSSは一時file、画像とfontはdata URLにする。CSSの`@import`・`@media print`・`@page`を保ち、印刷用fontの読み込みを待つ。指定がなければA4・余白20mm。interactiveの操作後の状態は出力せず、保存された版を静的に印刷する。
+
+機能完了条件:
+
+- [x] HTMLのボタンと管理APIから、表示中の版をPDFでdownloadできる。
+- [x] 登録済みのCSS・画像・font、元HTMLの印刷CSS・改ページを反映し、script・外部URL・未登録fileの参照を静的変換で取り除く。
+
+テスト完了条件:
+
+- [x] `pnpm check`がexit 0（772件）。HTMLの安全化・旧版の出力・CSSを含む容量制限と管理APIを確認する。
+- [x] macOSの実Chrome（155）で、PDF・HTML・interactiveの関連e2e 29件がPASS。HTMLの本文・画像・font・用紙サイズ・改ページ、interactiveの静的出力と既存Markdown出力を確認した。
+- [x] `pnpm test:pack`がPASS。tarballだけの環境でMarkdownとHTMLの印刷workerが動く。
+
+運用反映条件:
+
+- [x] README・architecture・security-model（日英）とADR-0013を更新し、`pnpm build`で配布物へ反映した。
+
+HTMLの実browserでの印刷はmacOSのみ確認した。Linux・Windowsでの実印刷は、この変更では未確認。
+
 ## 全体のDoD（仕様17.1）
 
 機能完了条件:

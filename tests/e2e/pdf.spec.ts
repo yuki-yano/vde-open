@@ -69,10 +69,70 @@ test('Export PDF saves the shown Markdown as a PDF without a print dialog', asyn
   await expect(page.getByRole('button', { name: 'Export PDF' })).toBeEnabled();
 });
 
-test('Export PDF is offered only for Markdown documents', async ({ page }) => {
-  t.write('page.html', '<!doctype html><title>HTML</title><h1>HTML文書</h1>');
-  await t.json(['open', 'page.html']);
+test('Export PDF prints static HTML with its CSS, images, registered font and page rules', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  t.write('docs/images/chart.png', PNG);
+  t.write(
+    'docs/fonts/text.woff2',
+    readFileSync(
+      new URL(
+        '../../apps/web/node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2',
+        import.meta.url,
+      ),
+    ),
+  );
+  t.write(
+    'docs/css/main.css',
+    '@import "print.css" print; @media screen { .print-only { display: none; } }',
+  );
+  t.write(
+    'docs/css/print.css',
+    '@font-face { font-family: saved; src: url(../fonts/text.woff2); } @page { size: 120mm 100mm; margin: 8mm; } @media print { .screen-only { display: none; } .print-only { display: block; font-family: saved; } .second { break-before: page; } }',
+  );
+  t.write(
+    'docs/page.html',
+    '<!doctype html><html lang="ja"><title>HTML資料</title><link rel="stylesheet" href="css/main.css"><h1>HTML文書</h1><p class="screen-only">SCREENONLY</p><p class="print-only">PRINTONLY</p><img src="images/chart.png"><p class="second">2ページ目の本文</p><script>document.body.innerHTML="SCRIPTCONTENT";</script></html>',
+  );
+  await t.json(['open', 'docs/page.html']);
   await page.goto(await t.bootstrapUrl());
   await expect(page.getByTestId('html-mode')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Export PDF' })).toHaveCount(0);
+  const downloading = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export PDF' }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe('page.pdf');
+  const pdf = readFileSync(await download.path());
+  const text = pdf.toString('latin1');
+  expect(text.startsWith('%PDF-')).toBe(true);
+  expect(text.trimEnd().endsWith('%%EOF')).toBe(true);
+  expect(text).toMatch(/\/MediaBox\s*\[\s*0\s+0\s+340\.\d+\s+282\.\d+\s*\]/);
+  expect(text).toMatch(/\/Subtype\s*\/Image/);
+  const fontNames = [...text.matchAll(/\/FontName\s*\/([^\s]+)/g)].map((match) => match[1]);
+  expect(fontNames).toContainEqual(expect.stringMatching(/Geist/));
+  const pages = pdfPageTexts(pdf);
+  expect(pages).toHaveLength(2);
+  expect(pages[0]).toContain('PRINTONLY');
+  expect(pages[1]?.replace(/\s/g, '')).toContain('2ページ目の本文');
+  expect(pages.join('')).not.toMatch(/SCREENONLY|SCRIPTCONTENT/);
+  await expect(page.getByRole('button', { name: 'Export PDF' })).toBeEnabled();
+});
+
+test('an interactive HTML document exports its saved source as static HTML', async ({ page }) => {
+  test.setTimeout(60_000);
+  t.write(
+    'interactive.html',
+    '<title>Interactive</title><h1>STATICCONTENT</h1><script>document.querySelector("h1").textContent="DYNAMICCONTENT";</script>',
+  );
+  await t.json(['open', 'interactive.html', '--html-mode', 'interactive']);
+  await page.goto(await t.bootstrapUrl());
+  await expect(page.frameLocator('[data-testid="document-frame"]').locator('h1')).toHaveText(
+    'DYNAMICCONTENT',
+  );
+  const downloading = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export PDF' }).click();
+  const download = await downloading;
+  const text = pdfPageTexts(readFileSync(await download.path())).join('');
+  expect(text).toContain('STATICCONTENT');
+  expect(text).not.toContain('DYNAMICCONTENT');
 });

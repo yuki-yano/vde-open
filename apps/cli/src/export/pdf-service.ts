@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 
-import type { PrintInput } from '@vde-open/document/print';
+import type { HtmlPrintInput, HtmlPrintOutput, PrintInput } from '@vde-open/document/print';
 import { LIMITS, VdeError } from '@vde-open/shared';
 
 import type { DocumentService } from '../documents/service.ts';
@@ -35,7 +35,7 @@ const EXIT_GRACE_MS = 5000;
 // Exports waiting for the running one. More are refused.
 const MAX_WAITING = 4;
 const READ_CHUNK_BYTES = 1024 * 1024;
-// Images are written into the page once per reference, so a document could repeat one image to fill the disk.
+// Embedded assets are written once per reference. HTML and CSS together must stay within this budget.
 const MAX_PAGE_BYTES = 256 * 1024 * 1024;
 const TEMP_PREFIX = 'vde-open-pdf-';
 // A temporary directory left this long (by a daemon that was killed) is removed. Exports finish well within it.
@@ -44,9 +44,9 @@ const PDF_HEAD = Buffer.from('%PDF-');
 const PDF_TAIL = Buffer.from('%%EOF');
 
 export interface PdfService {
-  // A PDF of one revision of a Markdown document, printed by a headless Chromium-based browser.
+  // A PDF of one revision, printed by a headless Chromium-based browser. HTML is always static.
   // Aborting the signal (the client went away) stops the browser.
-  exportMarkdown(documentId: string, revision: string, signal?: AbortSignal): Promise<Buffer>;
+  exportPdf(documentId: string, revision: string, signal?: AbortSignal): Promise<Buffer>;
   // Stops a running browser and refuses later exports.
   close(): Promise<void>;
 }
@@ -55,18 +55,21 @@ export interface PdfServiceOptions {
   store: StateStore;
   documents: DocumentService;
   // Renders the print document. The daemon gives it a worker of its own.
-  printer: { print(input: PrintInput): Promise<string> };
+  printer: {
+    print(input: PrintInput): Promise<string>;
+    printHtml(input: HtmlPrintInput): Promise<HtmlPrintOutput>;
+  };
   // Path of the browser. Throws E_BROWSER_NOT_FOUND when there is none.
   findBrowser: () => string;
   platform?: NodeJS.Platform;
   timeoutMs?: number;
-  // Upper bound of the page written for the browser (images are written once per reference).
+  // Upper bound of HTML and CSS written for the browser, including embedded images and fonts.
   maxPageBytes?: number;
   tempRoot?: string;
   onEvent?: (event: string, fields: Record<string, string | number>) => void;
 }
 
-interface ImageAsset {
+interface EmbeddedAsset {
   mime: string;
   sha256: string;
 }
@@ -141,6 +144,19 @@ async function printPage(cdp: CdpConnection, url: string): Promise<PrintResult> 
   }
   loaderId = navigation.loaderId;
   if (!seen.has(loaderId)) await loaded;
+  await cdp.send('Emulation.setEmulatedMedia', { media: 'print' }, sessionId);
+  // A font used only by print CSS must be loaded before printing. The expression is ours, not document code.
+  const ready = await cdp.send<{ exceptionDetails?: unknown }>(
+    'Runtime.evaluate',
+    {
+      expression:
+        '(async () => { document.body.getBoundingClientRect(); await document.fonts.ready; })()',
+      awaitPromise: true,
+      returnByValue: true,
+    },
+    sessionId,
+  );
+  if (ready.exceptionDetails !== undefined) throw exportFailed('load');
   const { stream } = await cdp.send<{ stream: string }>(
     'Page.printToPDF',
     {
@@ -212,13 +228,18 @@ export function createPdfService(options: PdfServiceOptions): PdfService {
     }
   };
 
-  // The page with each image slot replaced by a data URL. Image bytes are read one image at a time.
-  const writePage = async (path: string, html: string, slot: string, images: ImageAsset[]) => {
+  // Embed images and fonts one at a time. HTML and CSS share the size budget of this export.
+  const writePage = async (
+    path: string,
+    html: string,
+    slot: string,
+    assets: EmbeddedAsset[],
+    budget: { written: number },
+  ) => {
     const file = await open(path, 'wx', 0o600);
-    let written = 0;
     const write = async (text: string) => {
-      written += Buffer.byteLength(text);
-      if (written > maxPageBytes) {
+      budget.written += Buffer.byteLength(text);
+      if (budget.written > maxPageBytes) {
         throw new VdeError('E_LIMIT_EXCEEDED', 'The document is too large to print.', {
           reason: 'page-size',
           limit: maxPageBytes,
@@ -230,10 +251,10 @@ export function createPdfService(options: PdfServiceOptions): PdfService {
       let last = 0;
       for (const match of html.matchAll(new RegExp(`${slot}-(\\d+)`, 'g'))) {
         await write(html.slice(last, match.index));
-        const image = images[Number(match[1])];
-        if (image !== undefined) {
-          await write(`data:${image.mime};base64,`);
-          await write((await store.readBlob(image.sha256)).toString('base64'));
+        const asset = assets[Number(match[1])];
+        if (asset !== undefined) {
+          await write(`data:${asset.mime};base64,`);
+          await write((await store.readBlob(asset.sha256)).toString('base64'));
         }
         last = match.index + match[0].length;
       }
@@ -323,32 +344,62 @@ export function createPdfService(options: PdfServiceOptions): PdfService {
   const run = async (documentId: string, revision: string, signal: AbortSignal | undefined) => {
     const started = Date.now();
     const { record, entry } = documents.describeRevision(documentId, revision);
-    if (entry.format !== 'markdown') {
-      throw new VdeError(
-        'E_UNSUPPORTED_FORMAT',
-        'Only Markdown documents can be exported as PDF.',
-        {
-          format: entry.format,
-        },
-      );
-    }
     const source = (await store.readBlob(entry.sourceSha256)).toString('utf8');
-    const images = entry.assets.filter((asset) => asset.role === 'image' || asset.role === 'svg');
     const slot = randomBytes(16).toString('hex');
-    const html = await printer.print({
-      source,
-      title: record.title,
-      documentLogicalPath: entry.documentLogicalPath,
-      images: images.map((asset) => asset.logicalPath),
-      imageSlot: slot,
-    });
+    let assets = entry.assets.filter((asset) => asset.role === 'image' || asset.role === 'svg');
+    let html: string;
+    let stylesheets: HtmlPrintOutput['stylesheets'] = [];
+    if (entry.format === 'markdown') {
+      html = await printer.print({
+        source,
+        title: record.title,
+        documentLogicalPath: entry.documentLogicalPath,
+        images: assets.map((asset) => asset.logicalPath),
+        imageSlot: slot,
+      });
+    } else {
+      const sheets: HtmlPrintInput['stylesheets'] = [];
+      for (const asset of entry.assets) {
+        if (asset.role !== 'style') continue;
+        const bytes = await store.readBlob(asset.sha256);
+        try {
+          sheets.push({
+            logicalPath: asset.logicalPath,
+            text: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+          });
+        } catch {
+          // As in the static view, CSS whose references cannot be scanned is not served.
+        }
+      }
+      const readable = new Set(sheets.map((sheet) => sheet.logicalPath));
+      assets = entry.assets.filter(
+        (asset) =>
+          asset.role === 'image' ||
+          asset.role === 'svg' ||
+          asset.role === 'font' ||
+          (asset.role === 'style' && readable.has(asset.logicalPath)),
+      );
+      const output = await printer.printHtml({
+        source,
+        title: record.title,
+        documentLogicalPath: entry.documentLogicalPath,
+        assets: assets.map(({ logicalPath, role }) => ({ logicalPath, role })),
+        stylesheets: sheets,
+        assetSlot: slot,
+      });
+      html = output.html;
+      stylesheets = output.stylesheets;
+    }
     // Looked for after rendering, so the pack smoke test (with no browser) still checks the print document.
     const browser = options.findBrowser();
     // A private directory (0700) holds the page, the browser profile and nothing else, only while the browser runs.
     const directory = await mkdtemp(join(tempRoot, TEMP_PREFIX));
     try {
       const page = join(directory, 'document.html');
-      await writePage(page, html, slot, images);
+      const budget = { written: 0 };
+      await writePage(page, html, slot, assets, budget);
+      for (const sheet of stylesheets)
+        await writePage(join(directory, sheet.name), sheet.css, slot, assets, budget);
       const { product, pdf } = await print(browser, directory, pathToFileURL(page).href, signal);
       if (!isPdf(pdf)) throw exportFailed('output');
       options.onEvent?.('pdf.exported', {
@@ -370,7 +421,7 @@ export function createPdfService(options: PdfServiceOptions): PdfService {
   };
 
   return {
-    exportMarkdown(documentId, revision, signal) {
+    exportPdf(documentId, revision, signal) {
       if (closed) return Promise.reject(stopping());
       if (waiting >= MAX_WAITING) {
         return Promise.reject(

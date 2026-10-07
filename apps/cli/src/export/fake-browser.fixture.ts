@@ -4,8 +4,15 @@
 // garbage (returns something that is not a PDF), linger (does not exit on Browser.close),
 // stale (reports the load of the blank page first and the real load later; printing before it gives no PDF),
 // broken (writes a message that is not JSON), locked (leaves a directory in its profile that cannot be removed).
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  appendFileSync,
+  chmodSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
 import { Socket } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
@@ -68,7 +75,16 @@ input.on('data', (chunk: string) => {
         break;
       case 'Page.navigate': {
         const url = String(params['url']);
-        note({ page: readFileSync(fileURLToPath(url), 'utf8') });
+        const path = fileURLToPath(url);
+        const directory = dirname(path);
+        note({
+          page: readFileSync(path, 'utf8'),
+          stylesheets: Object.fromEntries(
+            readdirSync(directory)
+              .filter((name) => name.endsWith('.css'))
+              .map((name) => [name, readFileSync(join(directory, name), 'utf8')]),
+          ),
+        });
         if (mode === 'stale') lifecycle(sessionId, 'blank');
         reply(id, { frameId: 'frame', loaderId: 'document' }, sessionId);
         const load = () => {

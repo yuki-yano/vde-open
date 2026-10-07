@@ -635,61 +635,64 @@ export function Viewer({
           <RefreshCw aria-hidden="true" />
           Refresh
         </Button>
-        {isMarkdown && (
-          <DetailsPopover
-            title="PDF export failed"
-            enabled={pdfExport.error !== null}
-            trigger={
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={pdfExport.exporting || loaded === null}
-                onClick={() => {
-                  // The shown revision. The daemon prints it with a headless browser; no print dialog is shown.
-                  if (pdfExport.error === null && loaded !== null)
-                    pdfExports.start(api, document, loaded.revision);
-                }}
-              >
-                {pdfExport.error ? (
-                  <CircleAlert aria-hidden="true" className="text-destructive" />
-                ) : (
-                  <FileDown aria-hidden="true" />
-                )}
-                <span className="inline-grid">
-                  <span className="invisible col-start-1 row-start-1" aria-hidden="true">
-                    Export PDF
-                  </span>
-                  <span className="invisible col-start-1 row-start-1" aria-hidden="true">
-                    Exporting…
-                  </span>
-                  <span className="col-start-1 row-start-1">
-                    {pdfExport.exporting ? 'Exporting…' : 'Export PDF'}
-                  </span>
+        <DetailsPopover
+          title="PDF export failed"
+          enabled={pdfExport.error !== null}
+          trigger={
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={pdfExport.exporting || loaded === null}
+              title={
+                isMarkdown
+                  ? undefined
+                  : 'Exports static HTML; scripts and interactive changes are not included'
+              }
+              onClick={() => {
+                // The shown revision. The daemon prints it with a headless browser; no print dialog is shown.
+                if (pdfExport.error === null && loaded !== null)
+                  pdfExports.start(api, document, loaded.revision);
+              }}
+            >
+              {pdfExport.error ? (
+                <CircleAlert aria-hidden="true" className="text-destructive" />
+              ) : (
+                <FileDown aria-hidden="true" />
+              )}
+              <span className="inline-grid">
+                <span className="invisible col-start-1 row-start-1" aria-hidden="true">
+                  Export PDF
                 </span>
-              </Button>
-            }
-          >
-            <p>{pdfExport.error}</p>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (loaded) pdfExports.start(api, document, loaded.revision);
-                }}
-              >
-                Try again
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => pdfExports.dismiss(document.documentId)}
-              >
-                Dismiss
-              </Button>
-            </div>
-          </DetailsPopover>
-        )}
+                <span className="invisible col-start-1 row-start-1" aria-hidden="true">
+                  Exporting…
+                </span>
+                <span className="col-start-1 row-start-1">
+                  {pdfExport.exporting ? 'Exporting…' : 'Export PDF'}
+                </span>
+              </span>
+            </Button>
+          }
+        >
+          <p>{pdfExport.error}</p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (loaded) pdfExports.start(api, document, loaded.revision);
+              }}
+            >
+              Try again
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => pdfExports.dismiss(document.documentId)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </DetailsPopover>
       </header>
 
       {(pdfExport.error || linkError) && (

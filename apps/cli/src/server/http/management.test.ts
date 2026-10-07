@@ -65,7 +65,7 @@ async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> 
     }),
     search: createSearchService({ store, cursors }),
     pdf: {
-      exportMarkdown: () => Promise.reject(new Error('Not used in this test.')),
+      exportPdf: () => Promise.reject(new Error('Not used in this test.')),
       close: () => Promise.resolve(),
     },
     feedback: new FeedbackService({ store, documents }),

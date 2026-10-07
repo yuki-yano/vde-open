@@ -89,16 +89,17 @@ Markdownは、TanStack Markdown 1.0.0で表示します。CommonMark・GFMの完
 - コードの色付けは、JS・JSX・TS・TSX・JSON・YAML・HTML・CSS・Bash・Markdownだけです。256KiBを超えるコードと、それ以外の言語は色を付けません。
 - 解析が2秒で終わらない文書や、要素が10万を超える・入れ子が64段を超える文書は、原文で表示します。
 
-## MarkdownのPDF出力
+## PDF出力
 
-Markdown文書のheaderの「Export PDF」で、表示中の版を、印刷のdialogを挟まずにPDFとして保存します。
+文書のheaderの「Export PDF」で、表示中の版を、印刷のdialogを挟まずにPDFとして保存します。
 
-- PDFは白背景のA4です。全pageのheaderに文書名、footerにpage番号（「3 / 12」）を入れ、見出しをPDFのしおりにします。
+- MarkdownのPDFは白背景のA4です。全pageのheaderに文書名、footerにpage番号（「3 / 12」）を入れ、見出しをPDFのしおりにします。
 - daemonが、その環境に入っているGoogle ChromeかMicrosoft Edge（131以降）で印刷します。何もdownloadしません。別のChromium系browserや、別の場所にあるbrowserを使うときは、daemonの環境変数`VDE_OPEN_BROWSER`に実行fileの絶対pathを指定し、`vo daemon restart`を実行します。
-- 表示と同じ規則に従います。生のHTMLは文字として表示し、文書に登録された画像だけを入れ（それ以外は代替textを表示）、他のlocal文書へのlinkは文字だけにします。
+- Markdownは表示と同じ規則に従います。生のHTMLは文字として表示し、文書に登録された画像だけを入れ（それ以外は代替textを表示）、他のlocal文書へのlinkは文字だけにします。
 - file名は、文書のfile名の拡張子を`.pdf`にしたものです（`README.md` → `README.pdf`）。stdinから開いた文書は文書名を使います。
-- 書体はその環境に入っているものを使うため、OSごとに少し見た目が変わります。
-- HTML文書は出力できません。印刷は60秒以内に終わる必要があります。
+- Markdownの書体や、HTMLで登録済みfontを指定していない部分の書体は、その環境に入っているものを使うため、OSごとに少し見た目が変わります。
+- HTMLは静的表示と同じ規則で出力します。HTML自身のCSS（`@media print`・`@page`を含む）と登録済みのCSS・画像・fontを使います。用紙の指定がなければA4、余白20mmです。Markdown用の配色・header・footerは付けません。interactiveで表示している文書も、scriptを動かさず、保存されたHTMLから出力するため、操作後の状態は含みません。
+- 印刷は60秒以内に終わる必要があります。
 
 ## 状態の保存先と停止
 

@@ -85,7 +85,7 @@ async function start(fs: StoreFs): Promise<Started> {
     }),
     search: createSearchService({ store: opened, cursors }),
     pdf: {
-      exportMarkdown: () => Promise.reject(new Error('Not used in this test.')),
+      exportPdf: () => Promise.reject(new Error('Not used in this test.')),
       close: () => Promise.resolve(),
     },
     feedback,
@@ -313,7 +313,7 @@ describe('11.7 saving a draft answer from the HTML, and grant expiry while waiti
       render,
       search: createSearchService({ store: opened, cursors }),
       pdf: {
-        exportMarkdown: () => Promise.reject(new Error('Not used in this test.')),
+        exportPdf: () => Promise.reject(new Error('Not used in this test.')),
         close: () => Promise.resolve(),
       },
       feedback,

@@ -17,7 +17,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { renderPrintDocument, type PrintInput } from '@vde-open/document/print';
+import {
+  renderHtmlPrintDocument,
+  renderPrintDocument,
+  type PrintInput,
+} from '@vde-open/document/print';
 import { scanReferences } from '@vde-open/document/render';
 import { VdeError } from '@vde-open/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -109,7 +113,10 @@ function create(browser: string, options: Partial<PdfServiceOptions> = {}): PdfS
   service = createPdfService({
     store,
     documents,
-    printer: { print: (input) => Promise.resolve(renderPrintDocument(input)) },
+    printer: {
+      print: (input) => Promise.resolve(renderPrintDocument(input)),
+      printHtml: (input) => Promise.resolve(renderHtmlPrintDocument(input)),
+    },
     findBrowser: () => browser,
     tempRoot: temp,
     onEvent: (event, fields) => events.push({ event, fields }),
@@ -122,7 +129,7 @@ describe('PDF export', () => {
   it('prints the revision with the browser driven over a pipe and removes its temporary directory', async () => {
     const { documentId, revision } = await openMarkdown();
     const browser = fakeBrowser('ok');
-    const pdf = await create(browser.path).exportMarkdown(documentId, revision);
+    const pdf = await create(browser.path).exportPdf(documentId, revision);
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
 
     const [start, page, closed] = recorded(browser.record);
@@ -147,18 +154,45 @@ describe('PDF export', () => {
     ]);
   });
 
-  it('refuses HTML documents without starting a browser', async () => {
-    write('page.html', '<h1>見出し</h1>');
-    const opened = await documents.open({ cwd: join(base, 'work'), paths: ['page.html'] });
-    const summary = opened.data.documents[0];
+  it('prints the retained static HTML revision with sanitized CSS, embedded images and fonts', async () => {
+    write('docs/images/flow.png', PNG);
+    write('docs/font.woff2', Buffer.from('saved-font'));
+    write(
+      'docs/styles/print.css',
+      '@font-face { font-family: saved; src: url(../font.woff2); } p { background: url(../images/flow.png); }',
+    );
+    write(
+      'docs/page.html',
+      '<title>旧版</title><link rel="stylesheet" href="styles/print.css"><h1>旧版</h1><img src="images/flow.png"><script>throw 1</script>',
+    );
+    const opened = await documents.open({ cwd: join(base, 'work'), paths: ['docs/page.html'] });
+    const summary = opened.data.documents[0]!;
+    write('docs/page.html', '<title>新版</title><h1>新版</h1>');
+    await documents.refresh({ documentId: summary.documentId });
     const browser = fakeBrowser('ok');
+    await create(browser.path).exportPdf(summary.documentId, summary.revision!);
+    const output = recorded(browser.record)[1]!;
+    expect(output['page']).toContain('<h1 id="h1">旧版</h1>');
+    expect(output['page']).not.toMatch(/<script|新版/);
+    expect(output['page']).toContain(`data:image/png;base64,${PNG.toString('base64')}`);
+    const css = Object.values(output['stylesheets'] as Record<string, string>).join('');
+    expect(css).toContain(`data:font/woff2;base64,${Buffer.from('saved-font').toString('base64')}`);
+    expect(css).toContain(`data:image/png;base64,${PNG.toString('base64')}`);
+    expect(readdirSync(temp)).toEqual([]);
+  });
+
+  it('counts external CSS and its embedded assets against the export size limit', async () => {
+    write('page.html', '<link rel="stylesheet" href="print.css"><p>本文</p>');
+    write('print.css', `p { --text: "${'x'.repeat(1024)}"; }`);
+    const opened = await documents.open({ cwd: join(base, 'work'), paths: ['page.html'] });
+    const summary = opened.data.documents[0]!;
+    const browser = fakeBrowser('ok');
+    // The HTML fits. The sanitized stylesheet takes the export over this budget.
     await expect(
-      create(browser.path).exportMarkdown(
-        summary?.documentId as string,
-        summary?.revision as string,
-      ),
-    ).rejects.toMatchObject({ code: 'E_UNSUPPORTED_FORMAT' });
+      create(browser.path, { maxPageBytes: 510 }).exportPdf(summary.documentId, summary.revision!),
+    ).rejects.toMatchObject({ code: 'E_LIMIT_EXCEEDED', details: { reason: 'page-size' } });
     expect(recorded(browser.record)).toEqual([]);
+    expect(readdirSync(temp)).toEqual([]);
   });
 
   it('reports a missing browser', async () => {
@@ -169,14 +203,14 @@ describe('PDF export', () => {
         findBrowser: () => {
           throw missing;
         },
-      }).exportMarkdown(documentId, revision),
+      }).exportPdf(documentId, revision),
     ).rejects.toBe(missing);
   });
 
   it('fails when the browser cannot be started', async () => {
     const { documentId, revision } = await openMarkdown();
     await expect(
-      create(join(base, 'not-a-browser')).exportMarkdown(documentId, revision),
+      create(join(base, 'not-a-browser')).exportPdf(documentId, revision),
     ).rejects.toMatchObject({ code: 'E_EXPORT_FAILED', details: { reason: 'spawn' } });
     expect(readdirSync(temp)).toEqual([]);
   });
@@ -184,7 +218,7 @@ describe('PDF export', () => {
   it('refuses a browser older than Chrome 131 and stops it', async () => {
     const { documentId, revision } = await openMarkdown();
     const browser = fakeBrowser('old');
-    await expect(create(browser.path).exportMarkdown(documentId, revision)).rejects.toMatchObject({
+    await expect(create(browser.path).exportPdf(documentId, revision)).rejects.toMatchObject({
       code: 'E_BROWSER_NOT_FOUND',
       details: { source: 'version', version: 'HeadlessChrome/120.0.0.0' },
     });
@@ -200,7 +234,7 @@ describe('PDF export', () => {
     const { documentId, revision } = await openMarkdown();
     const browser = fakeBrowser(mode);
     await expect(
-      create(browser.path, { timeoutMs: 1000 }).exportMarkdown(documentId, revision),
+      create(browser.path, { timeoutMs: 1000 }).exportPdf(documentId, revision),
     ).rejects.toMatchObject({ code: 'E_EXPORT_FAILED', details: { reason } });
     expect(alive(recorded(browser.record)[0]?.['pid'] as number)).toBe(false);
     expect(readdirSync(temp)).toEqual([]);
@@ -210,14 +244,14 @@ describe('PDF export', () => {
   it('waits for the load of the page, not of the blank page the target opened with', async () => {
     const { documentId, revision } = await openMarkdown();
     const browser = fakeBrowser('stale');
-    const pdf = await create(browser.path).exportMarkdown(documentId, revision);
+    const pdf = await create(browser.path).exportPdf(documentId, revision);
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
   });
 
   it('ends the export, not the daemon, when the browser writes a message that is not JSON', async () => {
     const { documentId, revision } = await openMarkdown();
     const browser = fakeBrowser('broken');
-    await expect(create(browser.path).exportMarkdown(documentId, revision)).rejects.toMatchObject({
+    await expect(create(browser.path).exportPdf(documentId, revision)).rejects.toMatchObject({
       code: 'E_EXPORT_FAILED',
       details: { reason: 'protocol' },
     });
@@ -227,7 +261,7 @@ describe('PDF export', () => {
   it('returns the PDF when its temporary directory cannot be removed, and records that', async () => {
     const { documentId, revision } = await openMarkdown();
     const browser = fakeBrowser('locked');
-    const pdf = await create(browser.path).exportMarkdown(documentId, revision);
+    const pdf = await create(browser.path).exportPdf(documentId, revision);
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
     expect(events.map((entry) => entry.event)).toEqual(['pdf.exported', 'pdf.cleanup_failed']);
   });
@@ -239,7 +273,7 @@ describe('PDF export', () => {
     const summary = opened.data.documents[0];
     const browser = fakeBrowser('ok');
     await expect(
-      create(browser.path, { maxPageBytes: 20_000 }).exportMarkdown(
+      create(browser.path, { maxPageBytes: 20_000 }).exportPdf(
         summary?.documentId as string,
         summary?.revision as string,
       ),
@@ -261,6 +295,7 @@ describe('PDF export', () => {
     });
     const pdfs = create(browser.path, {
       printer: {
+        printHtml: (input) => Promise.resolve(renderHtmlPrintDocument(input)),
         print: async (input: PrintInput) => {
           printing();
           await rendered;
@@ -268,7 +303,7 @@ describe('PDF export', () => {
         },
       },
     });
-    const result = pdfs.exportMarkdown(documentId, revision);
+    const result = pdfs.exportPdf(documentId, revision);
     await started;
     const closing = pdfs.close();
     release();
@@ -302,7 +337,7 @@ describe('PDF export', () => {
   it('stops a browser that does not exit after closing', { timeout: 20_000 }, async () => {
     const { documentId, revision } = await openMarkdown();
     const browser = fakeBrowser('linger');
-    const pdf = await create(browser.path).exportMarkdown(documentId, revision);
+    const pdf = await create(browser.path).exportPdf(documentId, revision);
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
     expect(alive(recorded(browser.record)[0]?.['pid'] as number)).toBe(false);
     expect(readdirSync(temp)).toEqual([]);
@@ -315,10 +350,10 @@ describe('PDF export', () => {
     let browser = hanging.path;
     const pdfs = create('', { findBrowser: () => browser });
     const abort = new AbortController();
-    const first = pdfs.exportMarkdown(documentId, revision, abort.signal);
+    const first = pdfs.exportPdf(documentId, revision, abort.signal);
     await expect.poll(() => recorded(hanging.record).length).toBe(2);
     browser = working.path;
-    const second = pdfs.exportMarkdown(documentId, revision);
+    const second = pdfs.exportPdf(documentId, revision);
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(recorded(working.record)).toEqual([]);
 
@@ -334,23 +369,23 @@ describe('PDF export', () => {
     const { documentId, revision } = await openMarkdown();
     const browser = fakeBrowser('hang');
     const pdfs = create(browser.path);
-    const running = pdfs.exportMarkdown(documentId, revision);
+    const running = pdfs.exportPdf(documentId, revision);
     await expect.poll(() => recorded(browser.record).length).toBe(2);
     const aborts = Array.from({ length: 4 }, () => new AbortController());
-    const waiting = aborts.map((abort) => pdfs.exportMarkdown(documentId, revision, abort.signal));
-    await expect(pdfs.exportMarkdown(documentId, revision)).rejects.toMatchObject({
+    const waiting = aborts.map((abort) => pdfs.exportPdf(documentId, revision, abort.signal));
+    await expect(pdfs.exportPdf(documentId, revision)).rejects.toMatchObject({
       code: 'E_LIMIT_EXCEEDED',
       details: { reason: 'waiting' },
     });
     // A waiting export whose request was aborted no longer counts.
     aborts[0]?.abort();
-    waiting.push(pdfs.exportMarkdown(documentId, revision));
+    waiting.push(pdfs.exportPdf(documentId, revision));
 
     await pdfs.close();
     await expect(running).rejects.toMatchObject({ code: 'E_DAEMON_STOPPING' });
     for (const result of waiting)
       await expect(result).rejects.toMatchObject({ code: 'E_DAEMON_STOPPING' });
-    await expect(pdfs.exportMarkdown(documentId, revision)).rejects.toMatchObject({
+    await expect(pdfs.exportPdf(documentId, revision)).rejects.toMatchObject({
       code: 'E_DAEMON_STOPPING',
     });
     expect(alive(recorded(browser.record)[0]?.['pid'] as number)).toBe(false);

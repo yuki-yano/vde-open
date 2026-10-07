@@ -15,7 +15,7 @@ export function describeExportFailure(reason: unknown): string {
       return 'The document could not be prepared for printing (it is too large or too deeply nested).';
     case 'E_LIMIT_EXCEEDED':
       return reason.details['reason'] === 'page-size'
-        ? 'The document is too large to print (its images make the page too large).'
+        ? 'The document is too large to print (including images, fonts, and stylesheets).'
         : 'Other PDF exports are still waiting. Try again after they finish.';
     case 'E_EXPORT_FAILED':
       return reason.details['reason'] === 'timeout'

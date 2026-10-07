@@ -56,6 +56,8 @@ export interface StaticHtmlInput {
   documentLogicalPath: string;
   // Logical paths and roles of the assets that can be served.
   assets: ReadonlyMap<string, AssetRole>;
+  // Print output maps registered assets to its own files or embedded-data slots, after the usual checks.
+  assetUrls?: ReadonlyMap<string, string>;
   // interactive: keep the document's scripts and event handlers (loading only registered script files). Default is static.
   interactive?: boolean;
   // SDK for communication between the HTML and the host, inserted as the first script (interactive only).
@@ -427,7 +429,7 @@ export function resolveAssetUrl(
   baseDir: string,
   assets: ReadonlyMap<string, AssetRole>,
   log: DiagnosticLog,
-  options: { scripts?: boolean } = {},
+  options: { scripts?: boolean; assetUrls?: ReadonlyMap<string, string> } = {},
 ): string | null {
   const shown = url.slice(0, MAX_TARGET_LENGTH);
   const reference = classifyReference(url, baseDir);
@@ -463,6 +465,13 @@ export function resolveAssetUrl(
   }
   // The static view uses no scripts (the whole element is removed).
   if (context === 'script' && options.scripts !== true) return null;
+  if (options.assetUrls !== undefined) {
+    const mapped = options.assetUrls.get(reference.logicalPath);
+    if (mapped === undefined) return null;
+    // A query is irrelevant to a saved revision and would corrupt an embedded data URL. SVG fragments still matter.
+    const hash = reference.suffix.indexOf('#');
+    return `${mapped}${hash === -1 ? '' : reference.suffix.slice(hash)}`;
+  }
   return `${relativeUrlTo(baseDir, reference.logicalPath)}${reference.suffix}`;
 }
 
@@ -479,7 +488,10 @@ export function transformStaticHtml(
     interactive,
     note: (code, target) => log.note(code, target),
     asset: (url, context) =>
-      resolveAssetUrl(url, context, baseDir, input.assets, log, { scripts: interactive }),
+      resolveAssetUrl(url, context, baseDir, input.assets, log, {
+        scripts: interactive,
+        ...(input.assetUrls === undefined ? {} : { assetUrls: input.assetUrls }),
+      }),
     link(href, text) {
       log.note('link-disabled', null);
       const target = classifyLink(href);

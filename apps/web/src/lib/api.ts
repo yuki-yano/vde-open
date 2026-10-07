@@ -97,7 +97,7 @@ export interface Api {
   reorder(order: string[], expectedCatalogVersion: number): Promise<number>;
   focus(documentId: string): Promise<void>;
   refresh(documentId: string): Promise<void>;
-  // PDF of one revision of a Markdown document, printed by the daemon.
+  // PDF of one revision of a document, printed by the daemon.
   exportPdf(documentId: string, revision: string): Promise<Blob>;
   // Fetch a render grant for one revision of a document.
   renderGrant(

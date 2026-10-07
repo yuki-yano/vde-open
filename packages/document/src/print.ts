@@ -9,6 +9,12 @@ import { safeHighlighter } from './highlight.ts';
 import { PRINT_STYLE, printPageStyle } from './print-style.ts';
 import { localImagePath, renderedLinkOf } from './rendering-rules.ts';
 
+export {
+  renderHtmlPrintDocument,
+  type HtmlPrintInput,
+  type HtmlPrintOutput,
+} from './html-print.ts';
+
 export interface PrintInput {
   source: string;
   // Shown in the page header (shortened) and as the PDF title.

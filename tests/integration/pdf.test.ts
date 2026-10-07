@@ -92,9 +92,9 @@ describe('PDF export through the management API', () => {
 
     const refused = async (result: Promise<{ text: string }>) =>
       (JSON.parse((await result).text) as { error: { code: string } }).error.code;
-    expect(await refused(exportPdf(ui, html.documentId, { revision: html.revision }))).toBe(
-      'E_UNSUPPORTED_FORMAT',
-    );
+    const htmlPdf = await exportPdf(ui, html.documentId, { revision: html.revision });
+    expect(htmlPdf.status).toBe(200);
+    expect(htmlPdf.headers['content-type']).toBe('application/pdf');
     expect(await refused(exportPdf(ui, documentId, {}))).toBe('E_INVALID_ARGUMENT');
     expect(await refused(exportPdf(ui, documentId, { revision: `rev_${'0'.repeat(64)}` }))).toBe(
       'E_REVISION_UNAVAILABLE',

@@ -47,6 +47,7 @@ beforeEach(async () => {
       return renderDocument(input);
     },
     print: () => Promise.reject(new Error('Not used by the render service.')),
+    printHtml: () => Promise.reject(new Error('Not used by the render service.')),
     close: () => Promise.resolve(),
   };
   render = createRenderService({
@@ -383,6 +384,7 @@ describe('interactive view and communication with the HTML', () => {
         scan: (kind, text) => Promise.resolve(scanReferences(kind, text)),
         render: (input) => Promise.resolve(renderDocument(input)),
         print: () => Promise.reject(new Error('Not used by the render service.')),
+        printHtml: () => Promise.reject(new Error('Not used by the render service.')),
         close: () => Promise.resolve(),
       },
       previewOrigin: () => 'http://127.0.0.1:1',
@@ -422,6 +424,7 @@ describe('headings the HTML view can be moved to', () => {
     scan: (kind, text) => Promise.resolve(scanReferences(kind, text)),
     render: (input) => Promise.resolve(renderDocument(input)),
     print: () => Promise.reject(new Error('Not used by the render service.')),
+    printHtml: () => Promise.reject(new Error('Not used by the render service.')),
     close: () => Promise.resolve(),
   };
   const HTML = '<h1>A</h1><object><h2>B</h2></object><h2>C</h2>';
