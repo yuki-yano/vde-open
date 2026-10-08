@@ -82,6 +82,8 @@ ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skill
 
 ## Markdownの表示
 
+管理画面のheaderにある「Color palette」で、Standard（初期値）、GitHub、Gruvbox、Catppuccin、GitHub High Contrastから配色を選べます。明るさは「Light」「Dark」「Match OS setting」で別に選びます。どちらの設定もbrowserに保存します。配色は管理画面とMarkdownの本文・コードに適用し、HTMLの独自の配色やPDFの印刷用の配色は変えません。
+
 文書のheaderの「Wide view」で、本文を表示領域いっぱいに広げられます。もう一度押すと標準幅に戻ります。幅の設定はbrowserに保存します。表は列幅を確保し、表示領域に収まらないときは表の中を横にスクロールできます。keyboardでは表にfocusを合わせ、左右の矢印keyでスクロールできます。
 
 ### 表示の制限

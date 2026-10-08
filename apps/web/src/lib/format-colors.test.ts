@@ -2,14 +2,17 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
+import { colorPalettes } from './preferences';
+
 // Contrast of the list's colors, computed from the tokens in index.css (WCAG 2.2 relative luminance).
 // Icons need 3:1 (1.4.11 non-text contrast) and the second line of a row 4.5:1 (1.4.3), against the
 // background and against the selected row (hover uses the same color).
 
-const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../themes.css', import.meta.url), 'utf8');
 
 function tokensOf(selector: string): Map<string, string> {
   const start = css.indexOf(`${selector} {`);
+  if (start === -1) throw new Error(`Missing palette selector: ${selector}`);
   const body = css.slice(start, css.indexOf('}', start));
   const tokens = new Map<string, string>();
   for (const match of body.matchAll(/(--[\w-]+):\s*([^;]+);/g)) {
@@ -18,8 +21,24 @@ function tokensOf(selector: string): Map<string, string> {
   return tokens;
 }
 
-const light = tokensOf(':root');
-const dark = new Map([...light, ...tokensOf('.dark')]);
+const themes = colorPalettes.flatMap(({ value }) => {
+  const overrides =
+    value === 'standard'
+      ? new Map<string, string>()
+      : tokensOf(`:root[data-color-palette='${value}']`);
+  return [
+    [`${value} light`, new Map([...tokensOf(':root'), ...overrides])],
+    [
+      `${value} dark`,
+      new Map([
+        ...tokensOf(':root'),
+        ...tokensOf('.dark'),
+        ...overrides,
+        ...(value === 'standard' ? [] : tokensOf(`:root[data-color-palette='${value}'].dark`)),
+      ]),
+    ],
+  ] as const;
+});
 
 function resolve(tokens: Map<string, string>, name: string): string {
   const value = tokens.get(name);
@@ -46,10 +65,7 @@ function contrast(tokens: Map<string, string>, foreground: string, background: s
   return (high + 0.05) / (low + 0.05);
 }
 
-describe.each([
-  ['light', light],
-  ['dark', dark],
-])('%s theme', (_name, tokens) => {
+describe.each(themes)('%s theme', (_name, tokens) => {
   // The list sits on the background. The selected row uses accent and a hovered row muted.
   const backgrounds = ['--background', '--accent', '--muted'];
 
@@ -66,6 +82,28 @@ describe.each([
     for (const background of backgrounds) {
       expect(contrast(tokens, '--muted-foreground', background)).toBeGreaterThanOrEqual(4.5);
     }
+  });
+
+  it('body text, links, and primary buttons reach 4.5:1', () => {
+    for (const background of backgrounds) {
+      expect(contrast(tokens, '--foreground', background)).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(contrast(tokens, '--link', '--background')).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(tokens, '--primary-foreground', '--primary')).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each([
+    'keyword',
+    'string',
+    'number',
+    'comment',
+    'operator',
+    'function',
+    'type',
+    'variable',
+    'heading',
+  ])('syntax %s reaches 4.5:1 on code blocks', (role) => {
+    expect(contrast(tokens, `--syntax-${role}`, '--muted')).toBeGreaterThanOrEqual(4.5);
   });
 
   it('tells Markdown and HTML apart by color', () => {

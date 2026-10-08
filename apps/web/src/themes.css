@@ -1,0 +1,281 @@
+/* Standard uses shadcn/ui Neutral with GitHub syntax colors.
+   Palette sources: https://ui.shadcn.com/docs/theming
+   https://primer.style/product/primitives/ (GitHub and GitHub High Contrast)
+   https://github.com/morhetz/gruvbox (hard background)
+   https://catppuccin.com/palette/ (Latte and Mocha)
+   Some colors are adjusted for readable text on their actual surfaces. */
+:root {
+  color-scheme: light;
+  --background: #ffffff;
+  --foreground: #171717;
+  --primary: #171717;
+  --primary-foreground: #fafafa;
+  --muted: #f5f5f5;
+  --muted-foreground: #6b6b6b;
+  --accent: #f5f5f5;
+  --border: #e5e5e5;
+  --ring: #737373;
+  --destructive: #b91c1c;
+  --warning: #854d0e;
+  --link: #0969da;
+  --format-markdown: var(--link);
+  --format-html: #c44a00;
+  --syntax-keyword: #cf222e;
+  --syntax-string: #0a3069;
+  --syntax-number: #0550ae;
+  --syntax-comment: #59636e;
+  --syntax-operator: #0550ae;
+  --syntax-function: #6639ba;
+  --syntax-type: #0550ae;
+  --syntax-variable: #953800;
+  --syntax-heading: #cf222e;
+
+  --card: var(--background);
+  --card-foreground: var(--foreground);
+  --popover: var(--background);
+  --popover-foreground: var(--foreground);
+  --secondary: var(--muted);
+  --secondary-foreground: var(--foreground);
+  --accent-foreground: var(--foreground);
+  --input: var(--border);
+  --chart-1: var(--destructive);
+  --chart-2: var(--warning);
+  --chart-3: var(--link);
+  --chart-4: var(--syntax-string);
+  --chart-5: var(--syntax-function);
+  --radius: 0.625rem;
+  --sidebar: var(--muted);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --primary: #e5e5e5;
+  --primary-foreground: #171717;
+  --muted: #262626;
+  --muted-foreground: #a3a3a3;
+  --accent: #262626;
+  --border: #404040;
+  --ring: #a3a3a3;
+  --destructive: #fca5a5;
+  --warning: #fcd34d;
+  --link: #79c0ff;
+  --format-html: #ffa657;
+  --syntax-keyword: #ff7b72;
+  --syntax-string: #a5d6ff;
+  --syntax-number: #79c0ff;
+  --syntax-comment: #9198a1;
+  --syntax-operator: #79c0ff;
+  --syntax-function: #d2a8ff;
+  --syntax-type: #7ee787;
+  --syntax-variable: #ffa657;
+  --syntax-heading: #ff7b72;
+}
+
+:root[data-color-palette='github'] {
+  --background: #ffffff;
+  --foreground: #1f2328;
+  --primary: #0969da;
+  --primary-foreground: #ffffff;
+  --muted: #f6f8fa;
+  --muted-foreground: #59636e;
+  --accent: #ddf4ff;
+  --border: #d1d9e0;
+  --ring: #0969da;
+  --destructive: #d1242f;
+  --warning: #9a6700;
+  --link: #0969da;
+  --format-html: #953800;
+  --syntax-keyword: #cf222e;
+  --syntax-string: #0a3069;
+  --syntax-number: #0550ae;
+  --syntax-comment: #59636e;
+  --syntax-operator: #0550ae;
+  --syntax-function: #6639ba;
+  --syntax-type: #0550ae;
+  --syntax-variable: #953800;
+  --syntax-heading: #cf222e;
+}
+
+:root[data-color-palette='github'].dark {
+  --background: #0d1117;
+  --foreground: #f0f6fc;
+  --primary: #1f6feb;
+  --primary-foreground: #ffffff;
+  --muted: #151b23;
+  --muted-foreground: #9198a1;
+  --accent: #1c2d41;
+  --border: #3d444d;
+  --ring: #4493f8;
+  --destructive: #f85149;
+  --warning: #d29922;
+  --link: #4493f8;
+  --format-html: #ffa657;
+  --syntax-keyword: #ff7b72;
+  --syntax-string: #a5d6ff;
+  --syntax-number: #79c0ff;
+  --syntax-comment: #9198a1;
+  --syntax-operator: #79c0ff;
+  --syntax-function: #d2a8ff;
+  --syntax-type: #7ee787;
+  --syntax-variable: #ffa657;
+  --syntax-heading: #ff7b72;
+}
+
+:root[data-color-palette='gruvbox'] {
+  --background: #f9f5d7;
+  --foreground: #3c3836;
+  --primary: #076678;
+  --primary-foreground: #f9f5d7;
+  --muted: #f2e5bc;
+  --muted-foreground: #665c54;
+  --accent: #ebdbb2;
+  --border: #bdae93;
+  --ring: #076678;
+  --destructive: #9d0006;
+  --warning: #8a580a;
+  --link: #076678;
+  --format-html: #af3a03;
+  --syntax-keyword: #9d0006;
+  --syntax-string: #626000;
+  --syntax-number: #8f3f71;
+  --syntax-comment: #665c54;
+  --syntax-operator: #316145;
+  --syntax-function: #076678;
+  --syntax-type: #8a580a;
+  --syntax-variable: #af3a03;
+  --syntax-heading: #9d0006;
+}
+
+:root[data-color-palette='gruvbox'].dark {
+  --background: #1d2021;
+  --foreground: #ebdbb2;
+  --primary: #83a598;
+  --primary-foreground: #1d2021;
+  --muted: #282828;
+  --muted-foreground: #bdae93;
+  --accent: #3c3836;
+  --border: #665c54;
+  --ring: #83a598;
+  --destructive: #fb4934;
+  --warning: #fabd2f;
+  --link: #83a598;
+  --format-html: #fe8019;
+  --syntax-keyword: #ff5b48;
+  --syntax-string: #b8bb26;
+  --syntax-number: #d3869b;
+  --syntax-comment: #a89984;
+  --syntax-operator: #8ec07c;
+  --syntax-function: #83a598;
+  --syntax-type: #fabd2f;
+  --syntax-variable: #fe8019;
+  --syntax-heading: #ff5b48;
+}
+
+:root[data-color-palette='catppuccin'] {
+  --background: #eff1f5;
+  --foreground: #4c4f69;
+  --primary: #8839ef;
+  --primary-foreground: #eff1f5;
+  --muted: #e6e9ef;
+  --muted-foreground: #5c5f77;
+  --accent: #e6e9ef;
+  --border: #ccd0da;
+  --ring: #8839ef;
+  --destructive: #d20f39;
+  --warning: #8d5b0a;
+  --link: #175ad0;
+  --format-html: #c44a00;
+  --syntax-keyword: #7b2edc;
+  --syntax-string: #24711d;
+  --syntax-number: #a94400;
+  --syntax-comment: #5c5f77;
+  --syntax-operator: #096a8d;
+  --syntax-function: #175ad0;
+  --syntax-type: #8d5b0a;
+  --syntax-variable: #ba2635;
+  --syntax-heading: #c30d34;
+}
+
+:root[data-color-palette='catppuccin'].dark {
+  --background: #1e1e2e;
+  --foreground: #cdd6f4;
+  --primary: #cba6f7;
+  --primary-foreground: #1e1e2e;
+  --muted: #313244;
+  --muted-foreground: #a6adc8;
+  --accent: #313244;
+  --border: #45475a;
+  --ring: #b4befe;
+  --destructive: #f38ba8;
+  --warning: #f9e2af;
+  --link: #89b4fa;
+  --format-html: #fab387;
+  --syntax-keyword: #cba6f7;
+  --syntax-string: #a6e3a1;
+  --syntax-number: #fab387;
+  --syntax-comment: #a6adc8;
+  --syntax-operator: #89dceb;
+  --syntax-function: #89b4fa;
+  --syntax-type: #f9e2af;
+  --syntax-variable: #eba0ac;
+  --syntax-heading: #f38ba8;
+}
+
+:root[data-color-palette='github-high-contrast'] {
+  --background: #ffffff;
+  --foreground: #010409;
+  --primary: #0349b4;
+  --primary-foreground: #ffffff;
+  --muted: #e6eaef;
+  --muted-foreground: #454c54;
+  --accent: #d2e5ff;
+  --border: #454c54;
+  --ring: #023b95;
+  --destructive: #960d1e;
+  --warning: #603700;
+  --link: #023b95;
+  --format-html: #702c00;
+  --syntax-keyword: #a0111f;
+  --syntax-string: #032563;
+  --syntax-number: #023b95;
+  --syntax-comment: #454c54;
+  --syntax-operator: #023b95;
+  --syntax-function: #512598;
+  --syntax-type: #023b95;
+  --syntax-variable: #702c00;
+  --syntax-heading: #a0111f;
+}
+
+:root[data-color-palette='github-high-contrast'].dark {
+  --background: #010409;
+  --foreground: #ffffff;
+  --primary: #194fb1;
+  --primary-foreground: #ffffff;
+  --muted: #151b23;
+  --muted-foreground: #b7bdc8;
+  --accent: #1a2d42;
+  --border: #b7bdc8;
+  --ring: #74b9ff;
+  --destructive: #ff9492;
+  --warning: #f0b72f;
+  --link: #74b9ff;
+  --format-html: #ffb757;
+  --syntax-keyword: #ff9492;
+  --syntax-string: #addcff;
+  --syntax-number: #91cbff;
+  --syntax-comment: #b7bdc8;
+  --syntax-operator: #91cbff;
+  --syntax-function: #dbb7ff;
+  --syntax-type: #72f088;
+  --syntax-variable: #ffb757;
+  --syntax-heading: #ff9492;
+}

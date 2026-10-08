@@ -73,13 +73,13 @@ test('DOC-017: each document shows its repository, worktree, path, and format, i
   await expect(location('Notes')).toHaveText('…/notes/c.md');
   await expect(location('View')).toHaveText(/^vde-open\s*view\.html$/);
 
-  // Markdown is blue and HTML orange (Catppuccin Latte blue, and the darker orange used for light).
+  // The default Standard palette keeps Markdown blue and HTML orange.
   const color = (title: string) =>
     rowOf(page, title)
       .locator('svg[data-format]')
       .evaluate((icon) => getComputedStyle(icon).color);
   await page.getByRole('button', { name: 'Light' }).click();
-  expect(await color('Design')).toBe('rgb(30, 102, 245)');
+  expect(await color('Design')).toBe('rgb(9, 105, 218)');
   expect(await color('View')).toBe('rgb(196, 74, 0)');
 
   await sidebar.getByRole('button', { name: 'Tree' }).click();

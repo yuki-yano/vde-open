@@ -1,9 +1,10 @@
 import type { DocumentSummary, SearchHit, ServerEvent } from '@vde-open/shared';
-import { Menu, Monitor, Moon, Search, Sun, X } from 'lucide-react';
+import { Menu, Monitor, Moon, Palette, Search, Sun, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 
 import { RepositoryLabelsContext } from '@/components/document-location';
 import { DocumentSwitcher } from '@/components/document-workspace';
+import { DetailsPopover } from '@/components/details-popover';
 import { SearchDialog } from '@/components/search-dialog';
 import { Sidebar } from '@/components/sidebar';
 import type { SectionTarget } from '@/components/viewer';
@@ -20,9 +21,13 @@ import {
   type HistoryMode,
 } from '@/lib/location';
 import {
+  applyAppearance,
+  colorPalettes,
+  isColorPalette,
   isSidebarView,
   isTheme,
   usePreference,
+  type ColorPalette,
   type SidebarView,
   type Theme,
 } from '@/lib/preferences';
@@ -45,19 +50,21 @@ function arrange(documents: DocumentSummary[], order: string[] | null): Document
 const isWidth = (value: unknown): value is number =>
   typeof value === 'number' && value >= SIDEBAR_MIN && value <= SIDEBAR_MAX;
 
-function useTheme(): [Theme, (theme: Theme) => void] {
+function useAppearance() {
   const [theme, setTheme] = usePreference<Theme>('theme', 'system', isTheme);
+  const [palette, setPalette] = usePreference<ColorPalette>(
+    'color-palette',
+    'standard',
+    isColorPalette,
+  );
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const apply = () => {
-      const dark = theme === 'dark' || (theme === 'system' && media.matches);
-      window.document.documentElement.classList.toggle('dark', dark);
-    };
+    const apply = () => applyAppearance(theme, palette);
     apply();
     media.addEventListener('change', apply);
     return () => media.removeEventListener('change', apply);
-  }, [theme]);
-  return [theme, setTheme];
+  }, [theme, palette]);
+  return { theme, setTheme, palette, setPalette };
 }
 
 export function Workspace({ api }: { api: Api }) {
@@ -153,7 +160,7 @@ export function Workspace({ api }: { api: Api }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = usePreference<SidebarView>('sidebar-view', 'flat', isSidebarView);
   const [width, setWidth] = usePreference<number>('sidebar-width', SIDEBAR_DEFAULT, isWidth);
-  const [theme, setTheme] = useTheme();
+  const { theme, setTheme, palette, setPalette } = useAppearance();
   const lastEvent = useRef<{ daemonId: string; sequence: number } | null>(null);
   // How many question-change notifications have been received. The answer panel refetches the question each time this changes.
   const [feedbackSignal, setFeedbackSignal] = useState(0);
@@ -355,6 +362,37 @@ export function Workspace({ api }: { api: Api }) {
           <span className="max-sm:sr-only">Search open documents</span>
           <kbd className="ml-1 text-xs text-muted-foreground max-sm:hidden">⌘K</kbd>
         </Button>
+        <DetailsPopover
+          title="Color palette"
+          trigger={
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Color palette"
+              title={`Color palette: ${colorPalettes.find((item) => item.value === palette)?.label}`}
+            >
+              <Palette aria-hidden="true" />
+            </Button>
+          }
+        >
+          <label htmlFor="color-palette" className="font-medium">
+            Palette
+          </label>
+          <select
+            id="color-palette"
+            value={palette}
+            onChange={(event) => {
+              if (isColorPalette(event.target.value)) setPalette(event.target.value);
+            }}
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {colorPalettes.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </DetailsPopover>
         <ToggleGroup
           value={[theme]}
           onValueChange={(value) => {

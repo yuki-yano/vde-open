@@ -82,6 +82,8 @@ ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skill
 
 ## Markdown display
 
+Use "Color palette" in the management header to choose Standard (the default), GitHub, Gruvbox, Catppuccin, or GitHub High Contrast. Light, Dark, and Match OS setting are separate controls. Both preferences are saved in the browser. The palette applies to the management UI and Markdown, including code highlighting; HTML keeps its own styling and PDFs keep their print styling.
+
 "Wide view" in the document header expands Markdown to the available width. Press it again to return to the standard width. The width preference is saved in the browser. Tables keep their column widths and scroll horizontally when they do not fit. To scroll with the keyboard, focus the table and press the left or right arrow key.
 
 ### Display limits

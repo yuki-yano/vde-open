@@ -2,6 +2,7 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/geist';
+@import './themes.css';
 
 @custom-variant dark (&:is(.dark *));
 /* A row of the document list shows its buttons: while focus is in it, while hovered on a screen without touch,
@@ -67,114 +68,6 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-}
-
-/* Light uses Catppuccin Latte, dark uses Catppuccin Mocha. The roles follow the Catppuccin style guide. */
-:root {
-  --ctp-rosewater: #dc8a78;
-  --ctp-flamingo: #dd7878;
-  --ctp-pink: #ea76cb;
-  --ctp-mauve: #8839ef;
-  --ctp-red: #d20f39;
-  --ctp-maroon: #e64553;
-  --ctp-peach: #fe640b;
-  --ctp-yellow: #df8e1d;
-  --ctp-green: #40a02b;
-  --ctp-teal: #179299;
-  --ctp-sky: #04a5e5;
-  --ctp-sapphire: #209fb5;
-  --ctp-blue: #1e66f5;
-  --ctp-lavender: #7287fd;
-  --ctp-text: #4c4f69;
-  --ctp-subtext1: #5c5f77;
-  --ctp-subtext0: #6c6f85;
-  --ctp-overlay2: #7c7f93;
-  --ctp-overlay1: #8c8fa1;
-  --ctp-overlay0: #9ca0b0;
-  --ctp-surface2: #acb0be;
-  --ctp-surface1: #bcc0cc;
-  --ctp-surface0: #ccd0da;
-  --ctp-base: #eff1f5;
-  --ctp-mantle: #e6e9ef;
-  --ctp-crust: #dce0e8;
-
-  --background: var(--ctp-base);
-  --foreground: var(--ctp-text);
-  --card: var(--ctp-base);
-  --card-foreground: var(--ctp-text);
-  --popover: var(--ctp-base);
-  --popover-foreground: var(--ctp-text);
-  --primary: var(--ctp-mauve);
-  --primary-foreground: var(--ctp-base);
-  --secondary: var(--ctp-mantle);
-  --secondary-foreground: var(--ctp-text);
-  --muted: var(--ctp-mantle);
-  /* Subtext 0 is below 4.5:1 on Latte's base, so light uses Subtext 1. */
-  --muted-foreground: var(--ctp-subtext1);
-  --accent: var(--ctp-mantle);
-  --accent-foreground: var(--ctp-text);
-  --destructive: var(--ctp-red);
-  --warning: var(--ctp-yellow);
-  --link: var(--ctp-blue);
-  /* Document format icons in the list. Each is at least 3:1 against the background and the selected row (WCAG 1.4.11).
-     Latte's peach (#fe640b) is 2.6:1 on the background, so light uses a darker orange outside the palette (4.3:1, 4.0:1 selected).
-     Kept away from the hues of destructive (red) and primary (mauve). Yellow and orange are not used for other states in the list. */
-  --format-markdown: var(--ctp-blue);
-  --format-html: #c44a00;
-  --border: var(--ctp-surface0);
-  --input: var(--ctp-surface1);
-  --ring: var(--ctp-lavender);
-  --chart-1: var(--ctp-red);
-  --chart-2: var(--ctp-peach);
-  --chart-3: var(--ctp-yellow);
-  --chart-4: var(--ctp-green);
-  --chart-5: var(--ctp-sapphire);
-  --radius: 0.625rem;
-  --sidebar: var(--ctp-mantle);
-  --sidebar-foreground: var(--ctp-text);
-  --sidebar-primary: var(--ctp-mauve);
-  --sidebar-primary-foreground: var(--ctp-base);
-  --sidebar-accent: var(--ctp-crust);
-  --sidebar-accent-foreground: var(--ctp-text);
-  --sidebar-border: var(--ctp-surface0);
-  --sidebar-ring: var(--ctp-lavender);
-}
-
-/* Only the palette and the roles whose color differs from light are redefined. */
-.dark {
-  --ctp-rosewater: #f5e0dc;
-  --ctp-flamingo: #f2cdcd;
-  --ctp-pink: #f5c2e7;
-  --ctp-mauve: #cba6f7;
-  --ctp-red: #f38ba8;
-  --ctp-maroon: #eba0ac;
-  --ctp-peach: #fab387;
-  --ctp-yellow: #f9e2af;
-  --ctp-green: #a6e3a1;
-  --ctp-teal: #94e2d5;
-  --ctp-sky: #89dceb;
-  --ctp-sapphire: #74c7ec;
-  --ctp-blue: #89b4fa;
-  --ctp-lavender: #b4befe;
-  --ctp-text: #cdd6f4;
-  --ctp-subtext1: #bac2de;
-  --ctp-subtext0: #a6adc8;
-  --ctp-overlay2: #9399b2;
-  --ctp-overlay1: #7f849c;
-  --ctp-overlay0: #6c7086;
-  --ctp-surface2: #585b70;
-  --ctp-surface1: #45475a;
-  --ctp-surface0: #313244;
-  --ctp-base: #1e1e2e;
-  --ctp-mantle: #181825;
-  --ctp-crust: #11111b;
-
-  --secondary: var(--ctp-surface0);
-  --muted: var(--ctp-surface0);
-  --format-html: var(--ctp-peach);
-  --muted-foreground: var(--ctp-subtext0);
-  --accent: var(--ctp-surface0);
-  --sidebar-accent: var(--ctp-surface0);
 }
 
 @layer base {
@@ -301,33 +194,33 @@
   font-size: 0.875rem;
   line-height: 1.6;
 }
-/* Code highlighting. The token colors follow the Catppuccin style guide. */
+/* Code highlighting follows the selected palette. */
 .markdown-body .th-keyword {
-  color: var(--ctp-mauve);
+  color: var(--syntax-keyword);
 }
 .markdown-body :is(.th-string, .th-code-inline, .th-inserted) {
-  color: var(--ctp-green);
+  color: var(--syntax-string);
 }
 .markdown-body :is(.th-number, .th-literal) {
-  color: var(--ctp-peach);
+  color: var(--syntax-number);
 }
 .markdown-body :is(.th-comment, .th-meta) {
-  color: var(--ctp-overlay2);
+  color: var(--syntax-comment);
 }
 .markdown-body .th-operator {
-  color: var(--ctp-sky);
+  color: var(--syntax-operator);
 }
 .markdown-body :is(.th-function, .th-command, .th-tag, .th-property, .th-link) {
-  color: var(--ctp-blue);
+  color: var(--syntax-function);
 }
 .markdown-body :is(.th-type, .th-attr, .th-selector) {
-  color: var(--ctp-yellow);
+  color: var(--syntax-type);
 }
 .markdown-body .th-variable {
-  color: var(--ctp-maroon);
+  color: var(--syntax-variable);
 }
 .markdown-body :is(.th-heading, .th-deleted) {
-  color: var(--ctp-red);
+  color: var(--syntax-heading);
 }
 .markdown-body hr {
   margin: 1.5em 0;

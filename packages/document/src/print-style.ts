@@ -1,4 +1,4 @@
-// Styles of the print document (PDF export). A white document for paper; the Catppuccin theme of the management UI is not used.
+// Styles of the print document (PDF export). A white document for paper; the management UI palette is not used.
 // Colors of text on the code background (#f6f8fa) are at least 4.5:1, and keywords are bold so they stay apart in a
 // monochrome print. Comments are not italic, since Japanese fonts have no italic and would be slanted mechanically.
 
