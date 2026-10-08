@@ -41,3 +41,7 @@ export const isSidebarView = (value: unknown): value is SidebarView =>
 export type ViewMode = 'preview' | 'source';
 export const isViewMode = (value: unknown): value is ViewMode =>
   value === 'preview' || value === 'source';
+
+export type MarkdownWidth = 'standard' | 'wide';
+export const isMarkdownWidth = (value: unknown): value is MarkdownWidth =>
+  value === 'standard' || value === 'wide';

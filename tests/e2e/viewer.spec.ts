@@ -12,6 +12,118 @@ test.afterEach(async () => {
   await t.cleanup();
 });
 
+test('Markdown width expands, persists across documents and reloads, and applies only to previews', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 900 });
+  t.write('first.md', '# Width settings\n\nDocument content\n');
+  t.write('second.md', '# Another Markdown\n\nMore content\n');
+  t.write('page.html', '<!doctype html><title>HTML document</title><h1>HTML document</h1>');
+  await t.json(['open', 'first.md', 'second.md', 'page.html']);
+  await page.goto(await t.bootstrapUrl());
+  const article = page.locator('article');
+  const wide = page.getByRole('button', { name: 'Wide view', exact: true });
+  await expect(article).toHaveCSS('max-width', '960px');
+  await expect(wide).toHaveAttribute('aria-pressed', 'false');
+  const standardWidth = (await article.boundingBox())!.width;
+  await wide.click();
+  await expect(wide).toHaveAttribute('aria-pressed', 'true');
+  expect((await article.boundingBox())!.width).toBeGreaterThan(standardWidth + 200);
+  await page
+    .getByRole('navigation', { name: 'Open documents' })
+    .getByRole('button', {
+      name: 'Another Markdown',
+      exact: true,
+    })
+    .click();
+  await expect(article).toContainText('More content');
+  await expect(wide).toHaveAttribute('aria-pressed', 'true');
+  await page.reload();
+  await expect(wide).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Source', exact: true }).click();
+  await expect(wide).toHaveCount(0);
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(wide).toHaveAttribute('aria-pressed', 'true');
+  await wide.focus();
+  await wide.press('Space');
+  await expect(wide).toHaveAttribute('aria-pressed', 'false');
+  await expect(article).toHaveCSS('max-width', '960px');
+  await page
+    .getByRole('navigation', { name: 'Open documents' })
+    .getByRole('button', {
+      name: 'HTML document',
+      exact: true,
+    })
+    .click();
+  await expect(page.getByTestId('document-frame')).toBeVisible();
+  await expect(wide).toHaveCount(0);
+});
+
+test('Markdown tables keep readable columns and scroll by keyboard without widening the page', async ({
+  page,
+}) => {
+  const description = '表示領域が狭い場合でも説明文を読める列幅で表示します。'.repeat(8);
+  const token = 'very_long_identifier_'.repeat(30);
+  t.write(
+    'table.md',
+    [
+      '# 表の表示',
+      '',
+      '| 項目 | 内容 | 実装箇所 | 担当者 | 状態 | 確認方法 |',
+      '| --- | --- | --- | --- | --- | --- |',
+      `| Markdownの幅 | ${description} | \`${token}\` | 開発担当 | 対応済み | ブラウザで表示を確認 |`,
+      '',
+      '| 少ない列 | 数値 |',
+      '| ---: | :---: |',
+      '| 右揃え | 123 |',
+      '',
+    ].join('\n'),
+  );
+  await t.json(['open', 'table.md']);
+  await page.setViewportSize({ width: 480, height: 900 });
+  await page.goto(await t.bootstrapUrl());
+  const viewport = page.getByRole('region', { name: 'Scrollable table' }).first();
+  await expect(viewport).toBeVisible();
+  const table = viewport.getByRole('table');
+  await expect(table.getByRole('columnheader')).toHaveCount(6);
+  const widths = await table
+    .locator('th')
+    .evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().width));
+  for (const width of widths) expect(width).toBeGreaterThanOrEqual(128);
+  const cells = table.locator('td');
+  expect((await cells.nth(1).boundingBox())!.width).toBeLessThanOrEqual(449);
+  expect((await cells.nth(2).boundingBox())!.width).toBeLessThanOrEqual(449);
+  expect(await viewport.evaluate((element) => element.scrollWidth)).toBeGreaterThan(
+    await viewport.evaluate((element) => element.clientWidth),
+  );
+  await viewport.focus();
+  await viewport.press('ArrowRight');
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await viewport.press('ArrowLeft');
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBe(0);
+  for (const width of [480, 900, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+    expect(
+      await page
+        .getByTestId('document-body')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBe(0);
+  }
+  await page.getByRole('button', { name: 'Wide view', exact: true }).click();
+  expect(
+    await page
+      .getByTestId('document-body')
+      .evaluate((element) => element.scrollWidth - element.clientWidth),
+  ).toBe(0);
+  const alignedTable = page.getByRole('table').last();
+  expect((await alignedTable.boundingBox())!.width).toBeLessThan(
+    (await page.locator('article').boundingBox())!.width,
+  );
+  await expect(alignedTable.locator('td').first()).toHaveCSS('text-align', 'right');
+  await expect(alignedTable.locator('td').last()).toHaveCSS('text-align', 'center');
+});
+
 test('outline resizing captures drags across the HTML iframe, stops on release, and persists after reload', async ({
   page,
 }) => {

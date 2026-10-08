@@ -38,7 +38,7 @@ describe('UX-007 README and help', () => {
       '## `vde-open` and `vo`',
       '## Search scope',
       '## HTML display limits',
-      '## Markdown display limits',
+      '## Markdown display',
       '## Where the state is stored, and stopping',
       '## Asking a person and getting answers',
       '## Troubleshooting',

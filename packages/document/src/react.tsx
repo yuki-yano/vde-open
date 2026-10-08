@@ -26,6 +26,37 @@ export function codeOfBlock(element: Element): string {
 
 type Components = NonNullable<Parameters<typeof renderMarkdownReact>[1]>['components'];
 
+// Keep the native table layout inside a keyboard-scrollable viewport.
+/* oxlint-disable jsx-a11y/no-noninteractive-tabindex, jsx-a11y/no-noninteractive-element-interactions -- A scroll region needs focus and keyboard input. */
+function Table({ children, ...rest }: ComponentPropsWithoutRef<'table'>): ReactNode {
+  return (
+    <div
+      data-table-scroll=""
+      role="region"
+      aria-label="Scrollable table"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (
+          event.target !== event.currentTarget ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.shiftKey
+        )
+          return;
+        const offset = event.key === 'ArrowRight' ? 64 : event.key === 'ArrowLeft' ? -64 : 0;
+        if (offset === 0 || event.currentTarget.scrollWidth <= event.currentTarget.clientWidth)
+          return;
+        event.preventDefault();
+        event.currentTarget.scrollBy({ left: offset });
+      }}
+    >
+      <table {...rest}>{children}</table>
+    </div>
+  );
+}
+/* oxlint-enable jsx-a11y/no-noninteractive-tabindex, jsx-a11y/no-noninteractive-element-interactions */
+
 // URLs are narrowed at parse time (analysis.ts). Rendering checks the same conditions,
 // so an AST built by another path still produces no dangerous links or image loads.
 function createComponents(
@@ -83,7 +114,7 @@ function createComponents(
     );
   }
 
-  return { a: Link, img: Image, pre: Pre };
+  return { a: Link, img: Image, pre: Pre, table: Table };
 }
 
 export function MarkdownView({

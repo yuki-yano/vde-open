@@ -191,8 +191,12 @@
 
 /* Markdown body. Component styles take their values from the shadcn theme. */
 .markdown-body {
-  line-height: 1.75;
+  max-width: 60rem;
+  line-height: 1.5;
   overflow-wrap: anywhere;
+}
+.markdown-body[data-width='wide'] {
+  max-width: none;
 }
 .markdown-body :is(h1, h2, h3, h4, h5, h6) {
   margin: 1.6em 0 0.6em;
@@ -214,7 +218,7 @@
 .markdown-body > :first-child {
   margin-top: 0;
 }
-.markdown-body :is(p, ul, ol, table, pre, blockquote) {
+.markdown-body :is(p, ul, ol, [data-table-scroll], pre, blockquote) {
   margin: 0.9em 0;
 }
 .markdown-body :is(ul, ol) {
@@ -249,16 +253,26 @@
   border-left: 3px solid var(--border);
   color: var(--muted-foreground);
 }
-.markdown-body table {
-  display: block;
+.markdown-body [data-table-scroll] {
   max-width: 100%;
   overflow-x: auto;
+}
+.markdown-body [data-table-scroll]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.markdown-body table {
+  width: max-content;
   border-collapse: collapse;
+  overflow-wrap: break-word;
 }
 .markdown-body :is(th, td) {
-  padding: 0.4em 0.8em;
+  min-width: 8rem;
+  max-width: 28rem;
+  padding: 6px 13px;
   border: 1px solid var(--border);
   text-align: left;
+  vertical-align: top;
 }
 .markdown-body th {
   background: var(--muted);

@@ -80,7 +80,11 @@ ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skill
 - Scripts run only in HTML opened with `--html-mode interactive`. Use it only with HTML that you or the agent prepared and trust: scripts can load only registered files and cannot reach the management UI, the management API, or other files, but this does not block every outbound request (navigation inside the view, for example). After the daemon restarts, the HTML is static until you allow scripts again in the management UI.
 - "Differences from the original document" in the management UI lists what the view changed, why, and what to do.
 
-## Markdown display limits
+## Markdown display
+
+"Wide view" in the document header expands Markdown to the available width. Press it again to return to the standard width. The width preference is saved in the browser. Tables keep their column widths and scroll horizontally when they do not fit. To scroll with the keyboard, focus the table and press the left or right arrow key.
+
+### Display limits
 
 Markdown is rendered with TanStack Markdown 1.0.0. It is not fully compatible with CommonMark or GFM.
 

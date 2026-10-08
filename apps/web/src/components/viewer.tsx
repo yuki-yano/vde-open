@@ -1,7 +1,15 @@
 import { encodeLogicalPath, fragmentOfAnchor, localImagePath } from '@vde-open/document';
 import { codeOfBlock, MarkdownView } from '@vde-open/document/react';
 import type { DocumentSummary, FeedbackForUi, OutlineItem } from '@vde-open/shared';
-import { CircleAlert, FileDown, Hash, Pause, Play, RefreshCw } from 'lucide-react';
+import {
+  ChevronsLeftRight,
+  CircleAlert,
+  FileDown,
+  Hash,
+  Pause,
+  Play,
+  RefreshCw,
+} from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -34,7 +42,13 @@ import { ApiError, type Api } from '@/lib/api';
 import { describeDiagnostic } from '@/lib/diagnostics';
 import type { HeadingInUrl, HeadingRestore } from '@/lib/location';
 import { pdfExports, usePdfExport } from '@/lib/pdf-export';
-import { isViewMode, usePreference, type ViewMode } from '@/lib/preferences';
+import {
+  isMarkdownWidth,
+  isViewMode,
+  usePreference,
+  type MarkdownWidth,
+  type ViewMode,
+} from '@/lib/preferences';
 import { useBridge } from '@/lib/use-bridge';
 import { useMarkdown } from '@/lib/use-markdown';
 import { useMissingAssets } from '@/lib/use-missing-assets';
@@ -140,6 +154,11 @@ export function Viewer({
   onReady,
 }: ViewerProps) {
   const [mode, setMode] = usePreference<ViewMode>('view-mode', 'preview', isViewMode);
+  const [markdownWidth, setMarkdownWidth] = usePreference<MarkdownWidth>(
+    'markdown-width',
+    'standard',
+    isMarkdownWidth,
+  );
   const [preferredOutlineWidth, setOutlineWidth] = usePreference<number>(
     'outline-width',
     OUTLINE_DEFAULT,
@@ -612,6 +631,22 @@ export function Viewer({
           <ToggleGroupItem value="preview">Preview</ToggleGroupItem>
           <ToggleGroupItem value="source">Source</ToggleGroupItem>
         </ToggleGroup>
+        {isMarkdown && wantsPreview && (
+          <Button
+            variant={markdownWidth === 'wide' ? 'secondary' : 'outline'}
+            size="sm"
+            aria-pressed={markdownWidth === 'wide'}
+            title={
+              markdownWidth === 'wide'
+                ? 'Return to standard Markdown width'
+                : 'Use the full available width for Markdown'
+            }
+            onClick={() => setMarkdownWidth(markdownWidth === 'wide' ? 'standard' : 'wide')}
+          >
+            <ChevronsLeftRight aria-hidden="true" />
+            Wide view
+          </Button>
+        )}
         <Button
           variant="outline"
           size="sm"
@@ -869,7 +904,7 @@ export function Viewer({
                 {error !== null ? 'Could not load this document.' : 'Loading…'}
               </p>
             ) : showMarkdown ? (
-              <article className="markdown-body mx-auto max-w-3xl">
+              <article className="markdown-body mx-auto" data-width={markdownWidth}>
                 <MarkdownView
                   document={markdown.document}
                   {...(resolveImage ? { resolveImage } : {})}

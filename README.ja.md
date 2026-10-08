@@ -80,7 +80,11 @@ ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skill
 - `--html-mode interactive`を指定したHTMLだけ、scriptを動かします。自分やAgentが用意した、信頼できるHTMLだけで使ってください。scriptが読み込めるのは登録したfileだけで、管理画面・管理API・fileには触れられませんが、表示の中でのpageの移動など、すべての外部への通信を止めるものではありません。daemonを起動し直すと、管理画面で許可し直すまで静的表示になります。
 - 元の文書と表示が違う点は、管理画面の「Differences from the original document」に、対象・理由・対処とともに表示します。
 
-## Markdownの表示の制限
+## Markdownの表示
+
+文書のheaderの「Wide view」で、本文を表示領域いっぱいに広げられます。もう一度押すと標準幅に戻ります。幅の設定はbrowserに保存します。表は列幅を確保し、表示領域に収まらないときは表の中を横にスクロールできます。keyboardでは表にfocusを合わせ、左右の矢印keyでスクロールできます。
+
+### 表示の制限
 
 Markdownは、TanStack Markdown 1.0.0で表示します。CommonMark・GFMの完全な互換ではありません。
 
