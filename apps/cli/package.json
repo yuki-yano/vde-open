@@ -1,6 +1,6 @@
 {
   "name": "vde-open",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "A local document viewer shared by agents and people: open Markdown, HTML, and images, search documents and read text from the CLI, and ask the person questions.",
   "keywords": [
     "agent",
