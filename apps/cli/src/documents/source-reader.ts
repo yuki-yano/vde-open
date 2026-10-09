@@ -3,7 +3,7 @@ import type { Stats } from 'node:fs';
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
-import { LIMITS, VdeError } from '@vde-open/shared';
+import { LIMITS, VdeError, type DocumentFormat } from '@vde-open/shared';
 
 export interface LoadedSource {
   // Absolute path with symlinks resolved. Used as the document's identity.
@@ -92,7 +92,10 @@ export function decodeSource(bytes: Buffer, label: string): string {
 }
 
 // Reads regular files only. Checks the type first so it never blocks on opening a FIFO or device.
-export async function readSourceFile(path: string): Promise<LoadedSource> {
+export async function readSourceFile(
+  path: string,
+  format: DocumentFormat = 'markdown',
+): Promise<LoadedSource> {
   let canonicalPath: string;
   try {
     canonicalPath = await realpath(path);
@@ -141,7 +144,7 @@ export async function readSourceFile(path: string): Promise<LoadedSource> {
       return {
         canonicalPath,
         bytes,
-        text: decodeSource(bytes, path),
+        text: format === 'image' ? '' : decodeSource(bytes, path),
         signature: statSignature(after),
       };
     } finally {

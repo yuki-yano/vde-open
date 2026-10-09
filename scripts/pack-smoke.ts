@@ -352,6 +352,29 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     if (htmlId) runJson('vo', ['close', htmlId]);
 
     progress(
+      'Step 6, continued: standalone images retain and serve binary bytes in the install target.',
+    );
+    const imageBytes = readFileSync(join(repoRoot, 'tests', 'fixtures', 'images', 'sample.png'));
+    writeFileSync(join(installDir, 'picture.png'), imageBytes);
+    const imageDocument = runJson<{
+      documents: Array<{ documentId: string; format: string }>;
+    }>('vo', ['picture.png']).documents[0];
+    if (imageDocument?.format !== 'image') fail('cannot open an image in the install target');
+    const imageGrant = await post<{ documentUrl: string }>(
+      `/documents/${imageDocument.documentId}/render-grants`,
+      {},
+    );
+    const imageResponse = await fetch(imageGrant.documentUrl);
+    if (
+      imageResponse.status !== 200 ||
+      imageResponse.headers.get('content-type') !== 'image/png' ||
+      !Buffer.from(await imageResponse.arrayBuffer()).equals(imageBytes)
+    ) {
+      fail('an image does not retain its bytes or MIME type in the install target');
+    }
+    runJson('vo', ['close', imageDocument.documentId]);
+
+    progress(
       'Step 6, continued: the PDF export renders the print document (the lazily loaded chunk with bundled TanStack Highlight) with only the install target.',
     );
     writeFileSync(join(installDir, 'print.md'), '# 印刷\n\n```ts\nconst a = 1;\n```\n');

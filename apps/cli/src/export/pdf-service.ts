@@ -344,6 +344,9 @@ export function createPdfService(options: PdfServiceOptions): PdfService {
   const run = async (documentId: string, revision: string, signal: AbortSignal | undefined) => {
     const started = Date.now();
     const { record, entry } = documents.describeRevision(documentId, revision);
+    if (entry.format === 'image') {
+      throw new VdeError('E_UNSUPPORTED_FORMAT', 'PDF export is available for Markdown and HTML.');
+    }
     const source = (await store.readBlob(entry.sourceSha256)).toString('utf8');
     const slot = randomBytes(16).toString('hex');
     let assets = entry.assets.filter((asset) => asset.role === 'image' || asset.role === 'svg');

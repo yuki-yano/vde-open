@@ -35,6 +35,7 @@ import { DocumentLocation } from '@/components/document-location';
 import { CopyButton } from '@/components/copy-button';
 import { DetailsPopover } from '@/components/details-popover';
 import { HtmlViewBar, ScriptLimits } from '@/components/html-view-bar';
+import { ImageViewer } from '@/components/image-viewer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -140,7 +141,11 @@ function elementWithId(root: HTMLElement | null, id: string): Element | null {
 }
 
 // Recreated when the document changes (the caller passes documentId as key).
-export function Viewer({
+export function Viewer(props: ViewerProps) {
+  return props.document.format === 'image' ? <ImageViewer {...props} /> : <TextViewer {...props} />;
+}
+
+function TextViewer({
   api,
   document,
   fixedRevision = null,

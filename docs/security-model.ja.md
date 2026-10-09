@@ -19,6 +19,8 @@
 | PDF出力のbrowser | 人が「Export PDF」を押したときだけ、daemonが起動する。通常の場所に入っているGoogle Chrome・Microsoft Edgeか、`VDE_OPEN_BROWSER`で指定した実行file。一時profileでheadlessに動かし、pipeで操作する（portを開かない）。印刷するpageはdaemonが書いたもの。HTMLのCSSは登録済みのものを安全化した一時fileだけを読み込む |
 | 外部のnetwork | daemonは外部へ通信しない。外部の画像・CSS・fontを読み込まない |
 
+単体画像にも同じ表示の権限とsourceのsize上限を適用する。SVGを含む元のbytesは画像assetとして配信し、管理画面では`<img>`で表示する。assetのCSP（`default-src 'none'; style-src 'unsafe-inline'; sandbox`）は、SVGのURLを直接開いた場合もscriptと外部参照を遮断する。未登録fileは配信しない。
+
 ## 主な対策
 
 - 表示の権限（256bitの乱数）は、文書・版・表示方法・閉じた回数・scriptの許可の世代に結び付き、閉じる操作・許可の取消・返却・daemonの再起動で失効する。保持はdaemon全体で64件までで、超過した分は古いものから失効する（ADR-0008、0012、0014）。

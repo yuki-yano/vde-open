@@ -6,7 +6,7 @@ export const documentIdSchema = z.string().regex(/^doc_[0-9a-f-]{36}$/);
 export const revisionSchema = z.string().regex(/^rev_[0-9a-f]{64}$/);
 export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 
-export const documentFormatSchema = z.enum(['markdown', 'html']);
+export const documentFormatSchema = z.enum(['markdown', 'html', 'image']);
 export type DocumentFormat = z.infer<typeof documentFormatSchema>;
 
 export const sourceKindSchema = z.enum(['file', 'stdin', 'generated']);
@@ -342,7 +342,7 @@ export const renderGrantResultSchema = z.strictObject({
   revision: revisionSchema,
   format: documentFormatSchema,
   mode: htmlModeSchema,
-  // URL to open in the iframe. null for Markdown (rendered by the host; only images are read from filesBaseUrl).
+  // URL for HTML's iframe or a standalone image's img. null for Markdown (rendered by the host).
   documentUrl: z.string().nullable(),
   // Base URL that serves registered assets. Ends with `/`.
   filesBaseUrl: z.string(),
@@ -426,7 +426,7 @@ export const searchHitSchema = z.strictObject({
   // A relative value inside the search engine. Not a probability or a measure of semantic similarity.
   score: z.number(),
   sourceRange: sourceRangeSchema.nullable(),
-  extraction: z.enum(['markdown', 'static-html']),
+  extraction: z.enum(['markdown', 'static-html', 'image']),
 });
 export type SearchHit = z.infer<typeof searchHitSchema>;
 

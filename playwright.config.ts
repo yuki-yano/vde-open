@@ -7,6 +7,7 @@ const CROSS_BROWSER = [
   'interactive.spec.ts',
   'release.spec.ts',
   'viewer.spec.ts',
+  'images.spec.ts',
   'themes.spec.ts',
   'sidebar-drag.spec.ts',
 ];

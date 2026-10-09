@@ -711,7 +711,12 @@ export class SearchIndex {
         score: Math.round(score * 1000) / 1000,
         // Analysis has no source positions, so guessed line numbers are not returned (spec 8.3).
         sourceRange: null,
-        extraction: meta.format === 'markdown' ? 'markdown' : 'static-html',
+        extraction:
+          meta.format === 'image'
+            ? 'image'
+            : meta.format === 'markdown'
+              ? 'markdown'
+              : 'static-html',
       });
     }
     return hits;

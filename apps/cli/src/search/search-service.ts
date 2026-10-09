@@ -276,7 +276,8 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
       if (indexed.get(documentId) === attempt) indexed.delete(documentId);
     };
     try {
-      const text = (await store.readBlob(entry.sourceSha256)).toString('utf8');
+      const text =
+        entry.format === 'image' ? '' : (await store.readBlob(entry.sourceSha256)).toString('utf8');
       const { sections } = await analyzeOnce(entry.format, text);
       if (!current()) {
         await giveUp(false);

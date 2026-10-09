@@ -2,6 +2,14 @@
 
 初期の実装（0.1.0）は、実装仕様と受け入れテスト（125 ID）の一式 1.1.0にもとづく。この一式はrepositoryに含めていない。本文の「仕様N.N」はその節、CLI-001などのIDは受け入れテストを指す。この文書は、フェーズごとの記録、0.1.0の公開とその後の変更、受け入れテストと試験の対応、現状と開発の注意点を記録する。
 
+## 単体画像（2026-10-09）
+
+`vo image.png`、directory、globで画像を直接開ける。元のbytesを版として保持し、画像だけを表示用の権限付きURLから配信する。UIは画面に収まる表示・原寸表示・更新の一時停止・表示errorを扱う。画像のtitleとpathを検索でき、文字読み取りとPDFは`E_UNSUPPORTED_FORMAT`を返す。詳しくは[ADR-0015](adr/0015-standalone-image-documents.md)。
+
+検証: format・lint・typecheck、全体のunit／integration 912件、build・画像の配信を含むpack smokeが成功。ChromiumのE2Eは93件、Firefox／WebKitは102件が成功（6件は既定のskip）。画像の切替テストの対象指定を修正後、3browserの画像E2E 12件が成功。初回にあったファイル監視とbrowser起動の環境エラーは、公開前の再検証で解消した。
+
+linked CLIのdaemonへ反映済み。開いていた8文書のIDと並び順を維持し、認証なしのAPIがHTTP 200を返し、画像表示を含むUIが配信されることを確認した。npmへの公開は、version tagのpushを起点に既存のGitHub Actionsで行う。
+
 ## 管理画面の認証撤去（2026-10-09）
 
 管理画面と管理APIは認証を行わず、同じ端末の別のbrowserやtabからURLを直接開ける。ticket・session token・sessionStorageへの保存・認証の期限・CLIからの開き直し画面は撤去した。`vo ui --print-url`は秘密を含まないURLを返し、`--json`と併用できる。127.0.0.1へのbind、Host・Origin・Sec-Fetch-Siteの確認、変更時のJSON、文書のsandbox・CSPと表示の権限は維持する。表示の権限はdaemon全体で64件まで。詳細は[ADR-0014](adr/0014-management-without-authentication.md)。以下のP0〜P7の認証・sessionについての記録は、撤去前の実装を記したもの。

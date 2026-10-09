@@ -57,6 +57,7 @@ vo search '有効期限' --document <documentId> --json
 ## 抽出の範囲
 
 - `--section`と検索は、文書から取り出した文字を対象にする。Markdownは`extraction: "markdown"`、HTMLは`extraction: "static-html"`。
+- 画像も直接開ける（`vo open image.png --json`）。画像はtitleとpathで検索し、検索結果は`extraction: "image"`。OCR・原文・見出し・節の本文はなく、画像への`vo read`は`E_UNSUPPORTED_FORMAT`を返す。
 - HTMLは静的に解析する。scriptは実行しないので、scriptが作る内容、scriptやstyleの中身、入力欄の値は含まない。CSSで隠している内容かどうかは区別しない。
 - 節の位置（`sourceRange`）は`null`。原文の行が必要なときは`--lines`で取得する。
 

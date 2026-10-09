@@ -363,7 +363,7 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
   program
     .name(PROGRAM_NAME)
     .description(
-      'Local CLI that shows opened Markdown and HTML in the browser and lets agents list, search, and read parts of them',
+      'Local CLI that shows Markdown, HTML, and images in the browser and lets agents search documents and read text',
     )
     .version(CLI_VERSION, '-V, --version', 'Show the version')
     .helpOption('-h, --help', 'Show help')

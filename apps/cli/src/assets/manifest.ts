@@ -20,7 +20,7 @@ export interface LoadedAsset {
 }
 
 export interface ManifestInput {
-  format: DocumentFormat;
+  format: Exclude<DocumentFormat, 'image'>;
   text: string;
   // The document's location (a path relative to the assets-root).
   documentLogicalPath: string;

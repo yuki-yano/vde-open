@@ -57,6 +57,7 @@ Pass the `revision` from a `search` result to `read --revision` to get the same 
 ## What is extracted
 
 - `--section` and search work on the text extracted from the document. Markdown has `extraction: "markdown"`; HTML has `extraction: "static-html"`.
+- Images can be opened directly (`vo open image.png --json`) and searched by title and path. Image search hits have `extraction: "image"`. There is no OCR, source text, outline, or section content; `vo read` returns `E_UNSUPPORTED_FORMAT` for images.
 - HTML is parsed statically. Scripts are not run, so content created by scripts, the contents of scripts and styles, and form input values are not included. Content hidden by CSS is not distinguished.
 - The position of a section (`sourceRange`) is `null`. When you need source lines, use `--lines`.
 

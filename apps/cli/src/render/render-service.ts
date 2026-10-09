@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { encodeLogicalPath, type AssetRole } from '@vde-open/document';
+import { assetTypeOf, encodeLogicalPath, type AssetRole } from '@vde-open/document';
 import type { RenderOutput } from '@vde-open/document/render';
 import {
   LIMITS,
@@ -137,6 +137,26 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       return { record, entry, snapshot: cached };
     }
 
+    if (entry.format === 'image') {
+      const type = assetTypeOf(entry.documentLogicalPath);
+      if (type?.role !== 'image' && type?.role !== 'svg') {
+        throw new VdeError('E_UNSUPPORTED_FORMAT', 'The file extension is not an image format.');
+      }
+      const snapshot: Snapshot = {
+        format: 'image',
+        documentLogicalPath: entry.documentLogicalPath,
+        hasDocument: true,
+        files: new Map([
+          [entry.documentLogicalPath, { kind: 'blob', sha256: entry.sourceSha256, ...type }],
+        ]),
+        assets: [],
+        links: [],
+        diagnostics: [],
+        headingTargets: [],
+      };
+      // Images do not require transformations or a second cached copy of their contents.
+      return { record, entry, snapshot };
+    }
     const source = (await store.readBlob(entry.sourceSha256)).toString('utf8');
     const stylesheets: Array<{ logicalPath: string; text: string }> = [];
     for (const asset of entry.assets) {

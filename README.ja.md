@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-Agentと人が同じ資料を見ながら作業するための、ローカルの文書viewerです。MarkdownとHTMLの文書を開いて、browserの管理画面で読み、Agentは同じ文書をCLIから検索・読み取りできます。Agentから人へ質問し、人が管理画面で回答を確定することもできます。
+Agentと人が同じ資料を見ながら作業するための、ローカルの文書viewerです。Markdown・HTML・画像を開いて、browserの管理画面で読み、Agentは同じ文書をCLIから検索・読み取りできます。Agentから人へ質問し、人が管理画面で回答を確定することもできます。
 
 - 開いた文書だけを、Agentが検索・読み取りできます。
 - 文書を保存すると、管理画面の表示が自動で更新されます。
@@ -96,6 +96,20 @@ Markdownは、TanStack Markdown 1.0.0で表示します。CommonMark・GFMの完
 - 外部の画像は読み込みません。文書と同じdirectoryの下の画像だけを表示します。
 - コードの色付けは、JS・JSX・TS・TSX・JSON・YAML・HTML・CSS・Bash・Markdownだけです。256KiBを超えるコードと、それ以外の言語は色を付けません。
 - 解析が2秒で終わらない文書や、要素が10万を超える・入れ子が64段を超える文書は、原文で表示します。
+
+## 画像ファイル
+
+```bash
+vo diagram.png                          # 画像を直接開く
+vo open photo.jpg animation.gif --focus  # 画像を開いて表示を切り替える
+vo open images -w                        # 後から追加された画像も開く
+```
+
+PNG/APNG、JPEG（`jpg`・`jpeg`・`jpe`・`jif`・`jfif`・`pjpeg`・`pjp`）、GIF、WebP、AVIF、SVG、BMP、ICO/CUR、JPEG XL、TIFF、HEIC/HEIFを認識します。初期表示は画面に収まる大きさで、「Actual size」を押すと原寸で表示し、スクロールできます。fileを保存すると表示が更新され、更新を一時停止すると表示中の版を保ちます。同じ画像のURLを、同じ端末の別browserでも開けます。
+
+画像は変換せず、元のfileをbrowserが読み込みます。表示できる形式はbrowserとOSによって異なり、特にJPEG XL・TIFF・HEIC/HEIFは対応環境が限られます。未対応の形式や壊れた画像はerrorを表示します。SVGも画像として表示し、scriptや外部参照は動かしません。
+
+画像はtitleとpathで検索できます（`vo search diagram --mode path`）。文字の取り出し、`vo read`、PDF出力はMarkdownとHTMLが対象で、画像のOCRは行いません。画像にも既存の1fileあたり10MiBの上限を適用します。
 
 ## PDF出力
 

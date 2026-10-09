@@ -1,11 +1,11 @@
 ---
 name: vde-open
-description: Read, search, and open documents that a person is looking at in vde-open (`vo` / `vde-open`), and ask that person questions through its answer panel. Use when the user mentions vde-open or `vo`, asks you to look at "the documents I have open", to show them a Markdown or HTML file to read, or to collect their decisions on a design, review, or plan through a form instead of chat.
+description: Read, search, and open documents that a person is looking at in vde-open (`vo` / `vde-open`), and ask that person questions through its answer panel. Use when the user mentions vde-open or `vo`, asks you to look at "the documents I have open", to show them a Markdown, HTML, or image file to view, or to collect their decisions on a design, review, or plan through a form instead of chat.
 ---
 
 # vde-open
 
-vde-open is a local document viewer shared by a person and agents. The person reads Markdown and HTML documents in a browser UI; you list, search, and read the same open documents from the CLI, and can ask the person questions that they answer in the UI.
+vde-open is a local document viewer shared by a person and agents. The person views Markdown, HTML, and image files in a browser UI; you list, search, and read the same open documents from the CLI, and can ask the person questions that they answer in the UI.
 
 ## Before you start
 
@@ -31,6 +31,7 @@ vde-open is a local document viewer shared by a person and agents. The person re
 - Keep `revision` and `sectionId` together; a `sectionId` only means something within its revision. Reading with the revision from a search result returns exactly what was searched; if that revision is gone you get `E_REVISION_UNAVAILABLE` (never a silent substitute).
 - Results are cut by `--max-bytes` (default 16384). When `truncated` is true, run the same command with `--cursor <nextCursor>`. Cursors expire after 5 minutes; on `E_CURSOR_STALE`, start over.
 - If `search` returns `incomplete: true`, some documents were not searched (`failedDocuments`, `indexingDocuments`). `E_INDEX_NOT_READY` means nothing could be searched yet; wait a moment and retry.
+- Images are searchable by title and path only (`--mode path`); they have no OCR or text source. Do not call `read`, `--outline`, or `--section` for a document whose `format` is `image`: those return `E_UNSUPPORTED_FORMAT`.
 - HTML is extracted statically: script output, script and style contents, and form values are not included. `sourceRange` is `null`.
 
 ## Show documents to the person
@@ -39,6 +40,7 @@ vde-open is a local document viewer shared by a person and agents. The person re
 vo open docs/design.md notes.md --json        # open files (adds them to the person's list)
 vo open docs -R --json                        # open every document under a directory
 vo open docs -w --json                        # also open documents that appear later
+vo open diagram.png --focus --json           # show an image (decoded by the person's browser)
 vo open docs/design.md --focus --json         # open and switch the person's view to it
 vo focus <documentId> --json                  # switch the view to an open document
 vo close docs/design.md --json                # remove from the list (the file is kept)

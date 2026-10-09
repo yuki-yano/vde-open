@@ -9,7 +9,7 @@ CLI（vde-open／vo） ──IPC（Unix socket、鍵で相互確認）──▶ 
                                                           │
 管理画面（React） ◀──管理listener（127.0.0.1、認証なし）──┤
                                                           │
-文書の表示（iframe） ◀──表示listener（127.0.0.1、別port、表示の権限）──┘
+文書の表示（iframe/img） ◀──表示listener（127.0.0.1、別port、表示の権限）──┘
 ```
 
 ## workspaceの構成
@@ -41,10 +41,12 @@ CLI（vde-open／vo） ──IPC（Unix socket、鍵で相互確認）──▶ 
 - HTMLの表示は、別のoriginのiframe（`sandbox`）。interactiveの表示とだけ、MessagePortで回答案を受け渡す（`apps/web/src/lib/bridge-host.ts`、`use-bridge.ts`）。
 - 文書のheaderの「Export PDF」は、表示中の版を送り、返ってきたPDFをdownloadのlinkで保存する。出力の状態は文書ごとに表示の外で持つ（`apps/web/src/lib/pdf-export.ts`）。別の文書へ切り替えても取り消さず、失敗はその文書に戻ったときも表示する。管理画面を閉じるとrequestが中断され、browserを止める。
 
+単体画像は`format: "image"`とし、元のbytesを版のsourceとして保存する。表示の権限で、その画像だけを画像のMIME type付きで別originから配信し、管理画面はiframeではなく`<img>`で表示する。検索はtitleとpathだけを索引し、原文の読み取りとPDF出力は画像の版を拒否する。ADR-0015を参照。
+
 ## 配布
 
 `pnpm build`がUIとCLIをbuildし、`pnpm test:pack`がtarballを作って別のdirectoryへ導入して確かめる（`scripts/pack-smoke.ts`）。実行時の依存はすべてbundleし（ADR-0001）、導入時にbuildやscriptを実行しない。bundleに入れた依存（JS・CSS・font）のlicense noticeは、buildがbundleのmoduleの一覧から`THIRD_PARTY_NOTICES.md`へ書き出し、tarballに含める（`scripts/notices.ts`）。
 
 ## 設計の判断
 
-`docs/adr/`にあります（0001〜0013）。
+`docs/adr/`にあります（0001〜0015）。

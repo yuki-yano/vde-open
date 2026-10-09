@@ -2,6 +2,7 @@ import { lstat, readdir, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { VdeError, type DocumentFormat } from '@vde-open/shared';
+import { assetTypeOf } from '@vde-open/document';
 import { glob, isDynamicPattern } from 'tinyglobby';
 
 // Default exclusions during scans (spec 5.3). Hidden files and directories are detected by the leading character of the name.
@@ -15,7 +16,10 @@ const FORMAT_BY_EXTENSION = new Map<string, DocumentFormat>([
 ]);
 
 export function formatOfPath(path: string): DocumentFormat | null {
-  return FORMAT_BY_EXTENSION.get(extname(path).toLowerCase()) ?? null;
+  const document = FORMAT_BY_EXTENSION.get(extname(path).toLowerCase());
+  if (document) return document;
+  const asset = assetTypeOf(path);
+  return asset?.role === 'image' || asset?.role === 'svg' ? 'image' : null;
 }
 
 export interface Candidate {

@@ -464,6 +464,17 @@ export function analyzeHtml(source: string): DocumentAnalysis {
   return { title, outline, sections: buildSections(outline, preamble ?? '', texts) };
 }
 
-export function analyzeDocument(source: string, format: 'markdown' | 'html'): DocumentAnalysis {
+export function analyzeDocument(
+  source: string,
+  format: 'markdown' | 'html' | 'image',
+): DocumentAnalysis {
+  // Images are searchable by title and path, without decoding their bytes or inventing extracted text.
+  if (format === 'image') {
+    return {
+      title: null,
+      outline: [],
+      sections: [{ sectionId: 'sec_0000', level: 0, title: '', headingPath: [], text: '' }],
+    };
+  }
   return format === 'markdown' ? analyzeMarkdown(source) : analyzeHtml(source);
 }

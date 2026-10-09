@@ -19,6 +19,8 @@
 | Browser for PDF export | Started by the daemon only when a person presses "Export PDF": Google Chrome or Microsoft Edge found in its usual install location, or the executable given in `VDE_OPEN_BROWSER`. It runs headless with a temporary profile and is driven over a pipe (no port is opened). The page it prints is written by the daemon; HTML loads only sanitized temporary copies of registered CSS |
 | External network | The daemon never makes outbound requests. External images, CSS, and fonts are not loaded |
 
+Standalone images retain the same render grant and source-size limits. Their original bytes are served as an image asset, including SVG, and shown only in `<img>`. The asset CSP (`default-src 'none'; style-src 'unsafe-inline'; sandbox`) blocks scripts and external references even when an SVG URL is opened directly. Unregistered files are never served.
+
 ## Main measures
 
 - A render grant (256 random bits) is bound to the document, the revision, the view mode, how many times the document was closed, and the generation of the script permission. It is revoked when the document is closed, the permission is withdrawn, the grant is released, or the daemon restarts. At most 64 grants are retained across the daemon; excess grants expire oldest first (ADR-0008, 0012, 0014).

@@ -3,6 +3,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import {
+  assetTypeOf,
   buildLineIndex,
   byteRangeOfLines,
   classifyLink,
@@ -108,7 +109,7 @@ export interface DocumentServiceOptions {
   // Analyzes the document structure. Heavy work, so the daemon offloads it to a worker.
   analyze?: (format: DocumentFormat, text: string) => Promise<DocumentAnalysis>;
   // Replaces the file read (used in tests to control the order in which reads complete).
-  readSource?: (path: string) => Promise<LoadedSource>;
+  readSource?: (path: string, format: DocumentFormat) => Promise<LoadedSource>;
   // Collects candidate local files referenced by the document or CSS. The daemon offloads it to a worker.
   scan?: (kind: ScanKind, text: string) => Promise<ScannedReference[]>;
   // Per-document search state shown in the list. Without it, documents are treated as excluded from search.
@@ -215,6 +216,7 @@ const MISSING_RETRY_MS = 1000;
 const MISSING_RETRY_INTERVAL_MS = 100;
 
 function profileOf(format: DocumentFormat): string {
+  if (format === 'image') return 'image-v1';
   return format === 'markdown' ? MARKDOWN_PARSER_PROFILE : HTML_STATIC_PARSER_PROFILE;
 }
 
@@ -334,7 +336,7 @@ export class DocumentService {
   readonly #now: () => Date;
   readonly #emit: (event: DocumentEvent) => void;
   readonly #analyze: ((format: DocumentFormat, text: string) => Promise<DocumentAnalysis>) | null;
-  readonly #readSource: (path: string) => Promise<LoadedSource>;
+  readonly #readSource: (path: string, format: DocumentFormat) => Promise<LoadedSource>;
   // Analysis results by revision. Keyed by revision so a late result for an old revision is never used for a new one.
   // They include section bodies, so both the entry count and the total source size are limited.
   readonly #analysisCache = new Map<string, { analysis: DocumentAnalysis; bytes: number }>();
@@ -525,6 +527,24 @@ export class DocumentService {
         });
       }
       documentLogicalPath = fromRoot.split(sep).join('/');
+    }
+    if (source.format === 'image') {
+      const type = assetTypeOf(documentLogicalPath);
+      if (type?.role !== 'image' && type?.role !== 'svg') {
+        throw new VdeError('E_UNSUPPORTED_FORMAT', 'The file extension is not an image format.');
+      }
+      if (extraAssets.length > 0) {
+        throw new VdeError('E_INVALID_ARGUMENT', '--asset is not available for standalone images.');
+      }
+      return {
+        ...source,
+        assetsRoot,
+        extraAssets: [],
+        documentLogicalPath,
+        assets: [],
+        trackedFiles: [],
+        assetScanFailed: false,
+      };
     }
     // Distinguish a scan that did not finish from a document with no references.
     let assetScanFailed = false;
@@ -1018,7 +1038,7 @@ export class DocumentService {
     for (const [canonicalPath, { candidate, format }] of resolved.unique) {
       let loaded;
       try {
-        loaded = await this.#readSource(candidate.absolutePath);
+        loaded = await this.#readSource(candidate.absolutePath, format);
       } catch (error) {
         if (!(error instanceof VdeError)) throw error;
         problems.push({
@@ -1142,7 +1162,10 @@ export class DocumentService {
         sha256,
       })),
     });
-    const title = options.title ?? extractTitle(item.text, item.format) ?? item.fallbackTitle;
+    const title =
+      options.title ??
+      (item.format === 'image' ? null : extractTitle(item.text, item.format)) ??
+      item.fallbackTitle;
     const revisionRecord: RevisionRecord = {
       revision,
       format: item.format,
@@ -1377,6 +1400,16 @@ export class DocumentService {
 
     // Never substitute the current revision for one that is not retained. Check every time, even when continuing with a cursor.
     const entry = this.#requireRevision(record, revision);
+    if (entry.format === 'image') {
+      throw new VdeError(
+        'E_UNSUPPORTED_FORMAT',
+        'Images have no text source, outline, or sections.',
+        {
+          documentId: record.documentId,
+          format: 'image',
+        },
+      );
+    }
     if (mode === 'outline') return this.#readOutline(record, entry, params.maxBytes, offset ?? 0);
     if (mode === 'section') {
       return this.#readSection(record, entry, sectionId ?? '', params.maxBytes, offset ?? 0);
@@ -1893,7 +1926,9 @@ export class DocumentService {
     const deadline = Date.now() + MISSING_RETRY_MS;
     for (;;) {
       try {
-        loaded = await this.#readSource(canonicalPath);
+        const format = this.#store.payload.documents[documentId]?.format;
+        if (format === undefined) return { changed: false, signature: null };
+        loaded = await this.#readSource(canonicalPath, format);
         break;
       } catch (error) {
         if (!(error instanceof VdeError)) throw error;
@@ -2043,7 +2078,7 @@ export class DocumentService {
       if (isOpenPath(before, path) || rule.suppressedPaths.includes(path)) continue;
       let loaded;
       try {
-        loaded = await this.#readSource(path);
+        loaded = await this.#readSource(path, format);
       } catch (error) {
         // A single error does not stop the whole watch. Try again on the next scan.
         if (error instanceof VdeError) continue;

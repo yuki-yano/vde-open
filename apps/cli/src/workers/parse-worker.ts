@@ -13,7 +13,7 @@ import {
 import { collectGarbage, measureHeap } from '../diagnostics/heap.ts';
 
 export type ParseRequest =
-  | { id: number; op: 'analyze'; format: 'markdown' | 'html'; text: string }
+  | { id: number; op: 'analyze'; format: 'markdown' | 'html' | 'image'; text: string }
   | { id: number; op: 'scan'; kind: ScanKind; text: string }
   | { id: number; op: 'render'; input: RenderInput }
   | { id: number; op: 'print'; input: PrintInput }

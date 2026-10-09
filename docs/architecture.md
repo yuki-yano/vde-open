@@ -9,7 +9,7 @@ CLI (vde-open / vo) ──IPC (Unix socket, mutual check with a key)──▶ da
                                                                   │
 Management UI (React) ◀──management listener (127.0.0.1, no authentication)──┤
                                                                   │
-Document view (iframe) ◀──preview listener (127.0.0.1, separate port, render grant)──┘
+Document view (iframe/img) ◀──preview listener (127.0.0.1, separate port, render grant)──┘
 ```
 
 ## Workspace layout
@@ -41,10 +41,12 @@ Document view (iframe) ◀──preview listener (127.0.0.1, separate port, rend
 - HTML is shown in a sandboxed iframe on a separate origin. Only interactive views exchange draft answers with the management UI, over a MessagePort (`apps/web/src/lib/bridge-host.ts`, `use-bridge.ts`).
 - "Export PDF" in the header of a document posts the shown revision and saves the returned PDF with a download link. The export state is kept per document outside the viewer (`apps/web/src/lib/pdf-export.ts`): switching to another document does not cancel it, and a failure is still shown when the document is shown again. Closing the management UI aborts the request, which stops the browser.
 
+Standalone images use `format: "image"` and retain their original bytes as the revision source. The render grant serves only that image, with its image MIME type, from the separate preview origin. The management UI uses an `<img>` rather than an iframe. Search indexes only the title and path; text reads and PDF export reject image revisions. See ADR-0015.
+
 ## Distribution
 
 `pnpm build` builds the UI and the CLI, and `pnpm test:pack` creates the tarball and verifies an install in a separate directory (`scripts/pack-smoke.ts`). All runtime dependencies are bundled (ADR-0001), and installing runs no build or scripts. The build writes license notices for the bundled dependencies (JS, CSS, fonts) to `THIRD_PARTY_NOTICES.md` from the list of bundled modules and includes it in the tarball (`scripts/notices.ts`).
 
 ## Design decisions
 
-See `docs/adr/` (0001 to 0013, in Japanese).
+See `docs/adr/` (0001 to 0015, in Japanese).

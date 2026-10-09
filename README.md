@@ -2,7 +2,7 @@
 
 [日本語](README.ja.md)
 
-A local document viewer for agents and people who work from the same material. Open Markdown and HTML documents, read them in a management UI in the browser, and let an agent search and read the same documents from the CLI. An agent can also ask a person questions, and the person submits the answers from the management UI.
+A local document viewer for agents and people who work from the same material. Open Markdown, HTML, and image files, read them in a management UI in the browser, and let an agent search and read the same documents from the CLI. An agent can also ask a person questions, and the person submits the answers from the management UI.
 
 - Agents can search and read only the documents you opened.
 - When you save a document, the management UI updates automatically.
@@ -96,6 +96,20 @@ Markdown is rendered with TanStack Markdown 1.0.0. It is not fully compatible wi
 - External images are not loaded. Only images under the document's directory are shown.
 - Code is highlighted only for JS, JSX, TS, TSX, JSON, YAML, HTML, CSS, Bash, and Markdown. Code larger than 256 KiB and other languages are not highlighted.
 - Documents that cannot be parsed within 2 seconds, or that have more than 100,000 elements or more than 64 levels of nesting, are shown as source.
+
+## Image files
+
+```bash
+vo diagram.png                          # open an image directly
+vo open photo.jpg animation.gif --focus  # open images and switch the view
+vo open images -w                        # also open images added later
+```
+
+Recognized extensions include PNG/APNG, JPEG (`jpg`, `jpeg`, `jpe`, `jif`, `jfif`, `pjpeg`, `pjp`), GIF, WebP, AVIF, SVG, BMP, ICO/CUR, JPEG XL, TIFF, and HEIC/HEIF. Images initially fit the view; "Actual size" shows the original dimensions with scrolling. Saving the file updates the view. Pausing updates keeps the displayed revision. You can open the same image's management UI URL in another browser on the same machine.
+
+The browser decodes the original file without conversion. Supported formats depend on the browser and OS. Unsupported or damaged images show an error. SVG is displayed as an image; scripts and external references cannot run.
+
+Images are searchable by title and path (`vo search diagram --mode path`). Text extraction, `vo read`, and PDF export are for Markdown and HTML; images have no OCR. The existing 10 MiB per-file limit also applies to images.
 
 ## Exporting to PDF
 

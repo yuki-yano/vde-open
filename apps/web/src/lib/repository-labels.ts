@@ -6,6 +6,7 @@ import type { DocumentFormat, DocumentSummary, RepositoryReason } from '@vde-ope
 export const FORMAT_LABEL: Record<DocumentFormat, string> = {
   markdown: 'Markdown',
   html: 'HTML',
+  image: 'Image',
 };
 
 export const REPOSITORY_REASON: Record<RepositoryReason, string> = {
