@@ -16,7 +16,6 @@ import { createRenderService } from '../../render/render-service.ts';
 import { createSearchService } from '../../search/search-service.ts';
 import { createParseService } from '../../workers/parse-service.ts';
 import { createEventHub } from '../event-hub.ts';
-import { createSessionService } from '../session-service.ts';
 import { startManagementServer, type ManagementServer } from './management.ts';
 
 const questionnaire: Questionnaire = {
@@ -49,7 +48,6 @@ afterEach(async () => {
 
 interface Started {
   origin: string;
-  token: string;
   feedback: FeedbackService;
   events: DocumentEvent[];
   requestId: string;
@@ -69,17 +67,14 @@ async function start(fs: StoreFs): Promise<Started> {
   };
   const documents = new DocumentService({ store: opened, cursors, emit });
   const feedback = new FeedbackService({ store: opened, documents, emit });
-  const sessions = createSessionService();
   server = await startManagementServer({
     daemonId: 'daemon_test',
     version: '0.0.0',
     documents,
-    sessions,
     events: createEventHub('daemon_test', () => opened.payload.catalogVersion),
     render: createRenderService({
       store: opened,
       documents,
-      sessions,
       parse: createParseService(),
       previewOrigin: () => 'http://127.0.0.1:1',
     }),
@@ -104,7 +99,6 @@ async function start(fs: StoreFs): Promise<Started> {
   });
   return {
     origin: server.origin,
-    token: sessions.exchange(sessions.createBootstrapTicket()) as string,
     feedback,
     events,
     requestId: request.requestId,
@@ -136,7 +130,6 @@ function submit(started: Started, submissionId: string): Sent {
           path: `/_/api/v1/feedback/${started.requestId}/submit`,
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${started.token}`,
             Origin: started.origin,
             'Content-Type': 'application/json',
           },
@@ -246,15 +239,12 @@ describe('FB-013 disconnect during submit and resend', () => {
 describe('11.7 saving a draft answer from the HTML, and grant expiry while waiting', () => {
   interface Bridged {
     origin: string;
-    token: string;
-    sessions: ReturnType<typeof createSessionService>;
     documents: DocumentService;
     feedback: FeedbackService;
     render: ReturnType<typeof createRenderService>;
     requestId: string;
     documentId: string;
     grant: string;
-    sessionId: string;
     gate: { arm: () => Promise<void>; release: () => void };
     // Number of state updates (transactions) enqueued, and a function that waits until that count is reached.
     queued: () => number;
@@ -296,11 +286,9 @@ describe('11.7 saving a draft answer from the HTML, and grant expiry while waiti
     const cursors = createCursorCodec(randomBytes(32));
     const documents = new DocumentService({ store: opened, cursors });
     const feedback = new FeedbackService({ store: opened, documents });
-    const sessions = createSessionService();
     const render = createRenderService({
       store: opened,
       documents,
-      sessions,
       parse: createParseService(),
       previewOrigin: () => 'http://127.0.0.1:1',
     });
@@ -308,7 +296,6 @@ describe('11.7 saving a draft answer from the HTML, and grant expiry while waiti
       daemonId: 'daemon_test',
       version: '0.0.0',
       documents,
-      sessions,
       events: createEventHub('daemon_test', () => opened.payload.catalogVersion),
       render,
       search: createSearchService({ store: opened, cursors }),
@@ -334,22 +321,17 @@ describe('11.7 saving a draft answer from the HTML, and grant expiry while waiti
         documentId: document.documentId,
       })
     ).data;
-    const token = sessions.exchange(sessions.createBootstrapTicket()) as string;
-    const sessionId = sessions.idOf(token);
-    const issued = await render.createGrantForRequest(sessionId, request.requestId, {
+    const issued = await render.createGrantForRequest(request.requestId, {
       origin: server.origin,
     });
     return {
       origin: server.origin,
-      token,
-      sessions,
       documents,
       feedback,
       render,
       requestId: request.requestId,
       documentId: document.documentId,
       grant: issued.grant,
-      sessionId,
       gate: {
         arm: () =>
           new Promise<void>((resolve) => {
@@ -383,7 +365,6 @@ describe('11.7 saving a draft answer from the HTML, and grant expiry while waiti
           path: `/_/api/v1${path}`,
           method,
           headers: {
-            Authorization: `Bearer ${bridged.token}`,
             Origin: bridged.origin,
             'Content-Type': 'application/json',
           },
@@ -404,41 +385,32 @@ describe('11.7 saving a draft answer from the HTML, and grant expiry while waiti
     });
   }
 
-  it.each([
-    [
-      'the render grant is released',
-      (bridged: Bridged) => bridged.render.release(bridged.sessionId, [bridged.grant]),
-    ],
-    ['the session expires', (bridged: Bridged) => bridged.sessions.revoke(bridged.token)],
-  ])(
-    'does not save the draft answer from the HTML if %s while waiting its turn to save',
-    async (_name, expire) => {
-      const bridged = await startBridged();
-      const reached = bridged.gate.arm();
-      // Hold the save queued first (the management UI's draft answer) mid-commit.
-      const first = call(bridged, 'PUT', `/feedback/${bridged.requestId}/draft`, {
-        expectedDraftVersion: 0,
-        answers: { layout: 'A' },
-      });
-      await reached;
-      const before = bridged.queued();
-      // The save from the HTML passes the entry check and joins the queue (confirm it is queued before expiring).
-      const fromHtml = call(bridged, 'PUT', '/render-grants/bridge/draft', {
-        grant: bridged.grant,
-        expectedDraftVersion: 1,
-        answers: { layout: 'B' },
-      });
-      await bridged.untilQueued(before + 1);
-      expire(bridged);
-      bridged.gate.release();
-      expect(await first).toEqual({ status: 200, code: null });
-      expect(await fromHtml).toEqual({ status: 403, code: 'E_RENDER_GRANT_INVALID' });
-      expect(bridged.feedback.getForUi(bridged.requestId).data).toMatchObject({
-        draftVersion: 1,
-        draftAnswers: { layout: 'A' },
-      });
-    },
-  );
+  it('does not save the draft answer from the HTML if the render grant is released while waiting its turn to save', async () => {
+    const bridged = await startBridged();
+    const reached = bridged.gate.arm();
+    // Hold the save queued first (the management UI's draft answer) mid-commit.
+    const first = call(bridged, 'PUT', `/feedback/${bridged.requestId}/draft`, {
+      expectedDraftVersion: 0,
+      answers: { layout: 'A' },
+    });
+    await reached;
+    const before = bridged.queued();
+    // The save from the HTML passes the entry check and joins the queue (confirm it is queued before expiring).
+    const fromHtml = call(bridged, 'PUT', '/render-grants/bridge/draft', {
+      grant: bridged.grant,
+      expectedDraftVersion: 1,
+      answers: { layout: 'B' },
+    });
+    await bridged.untilQueued(before + 1);
+    bridged.render.release([bridged.grant]);
+    bridged.gate.release();
+    expect(await first).toEqual({ status: 200, code: null });
+    expect(await fromHtml).toEqual({ status: 403, code: 'E_RENDER_GRANT_INVALID' });
+    expect(bridged.feedback.getForUi(bridged.requestId).data).toMatchObject({
+      draftVersion: 1,
+      draftAnswers: { layout: 'A' },
+    });
+  });
 
   it('does not save the draft answer from the HTML queued later once the script permission revocation queued earlier is committed', async () => {
     const bridged = await startBridged();

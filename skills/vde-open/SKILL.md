@@ -44,7 +44,7 @@ vo focus <documentId> --json                  # switch the view to an open docum
 vo close docs/design.md --json                # remove from the list (the file is kept)
 ```
 
-- `vo ui` opens the management UI in the browser with a one-time URL. Do not print or share the URL from `vo ui --print-url`; it contains a secret.
+- `vo ui` opens the local management UI without authentication. `vo ui --print-url` prints a reusable URL that can be opened in another browser or tab on the same machine while the daemon is running. Document URLs work directly too; the listeners bind only to `127.0.0.1`.
 - Opening does not delete or modify files. Saving a file updates the person's view automatically.
 
 ## Ask the person and wait for answers

@@ -14,7 +14,6 @@ const eventOf = (sequence: number): ServerEvent => ({
 function harness(limit: number) {
   const written: ServerEvent[] = [];
   const waiting: Array<() => void> = [];
-  let active = true;
   let heartbeats = 0;
   const queue = createEventQueue({
     limit,
@@ -27,7 +26,6 @@ function harness(limit: number) {
       heartbeats += 1;
       return Promise.resolve();
     },
-    beforeWrite: () => active,
     onError: () => undefined,
   });
   const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -42,9 +40,6 @@ function harness(limit: number) {
     complete,
     flush,
     heartbeats: () => heartbeats,
-    deactivate: () => {
-      active = false;
-    },
   };
 }
 
@@ -105,7 +100,7 @@ describe('notification queue', () => {
     expect(t.queue.pending).toBe(1);
   });
 
-  it('writes nothing after stop, or after the pre-write check refuses', async () => {
+  it('writes nothing after stop, including writes queued before it', async () => {
     const t = harness(4);
     t.queue.send(eventOf(1));
     t.queue.send(eventOf(2));
@@ -115,11 +110,5 @@ describe('notification queue', () => {
     await t.complete();
     await t.queue.settled();
     expect(t.written.map((event) => event.sequence)).toEqual([1]);
-
-    const u = harness(4);
-    u.deactivate();
-    u.queue.send(eventOf(1));
-    await u.queue.settled();
-    expect(u.written).toEqual([]);
   });
 });

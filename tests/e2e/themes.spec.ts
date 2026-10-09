@@ -43,7 +43,7 @@ test('all palettes style the UI and Markdown in both modes and survive reloads',
     '# Theme preview\n\nRead the document and [open a link](https://example.com).\n\n> Supporting text\n\n| Item | Value |\n| --- | --- |\n| Palette | Preview |\n\n```ts\n// Code comment\nconst count: number = 42;\nfunction greet(name: string) { return "Hello " + name; }\n```\n',
   );
   await t.json(['open', 'theme.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const html = page.locator('html');
   const keyword = page.locator('pre .th-keyword').first();
   await expect(html).toHaveAttribute('data-color-palette', 'standard');
@@ -91,7 +91,7 @@ test('palette and explicit mode are independent, while System follows OS changes
     '<!doctype html><title>Author colors</title><body style="background:#123456;color:#ffffff"><h1>Author colors</h1></body>',
   );
   await t.json(['open', 'one.md', 'two.md', 'author.html']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const html = page.locator('html');
   await choosePalette(page, 'gruvbox');
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -125,7 +125,7 @@ test('palette controls fit narrow screens and restore keyboard focus', async ({
   await page.setViewportSize({ width: 375, height: 700 });
   t.write('mobile.md', '# Narrow screen\n');
   await t.json(['open', 'mobile.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const trigger = page.getByRole('button', { name: 'Color palette', exact: true });
   await trigger.focus();
   await trigger.press('Enter');

@@ -17,7 +17,6 @@ import { createRenderService } from '../../render/render-service.ts';
 import { createSearchService } from '../../search/search-service.ts';
 import { createParseService } from '../../workers/parse-service.ts';
 import { createEventHub } from '../event-hub.ts';
-import { createSessionService } from '../session-service.ts';
 import { startManagementServer, type ManagementServer } from './management.ts';
 
 let base: string;
@@ -35,31 +34,24 @@ afterEach(async () => {
 
 interface Fixture {
   store: StateStore;
-  sessions: ReturnType<typeof createSessionService>;
   events: ReturnType<typeof createEventHub>;
-  token: string;
-  advance: (ms: number) => void;
   // What was received over SSE, and whether the connection ended.
   stream: { received: string; ended: boolean; reading: Promise<void> };
 }
 
 async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> {
-  let now = 1_000_000;
   const store = await StateStore.open({ root: join(base, 'home'), fs: nodeStoreFs });
   const cursors = createCursorCodec(randomBytes(32));
   const documents = new DocumentService({ store, cursors });
-  const sessions = createSessionService(() => now);
   const events = createEventHub('daemon_test', () => store.payload.catalogVersion);
   server = await startManagementServer({
     daemonId: 'daemon_test',
     version: '0.0.0',
     documents,
-    sessions,
     events,
     render: createRenderService({
       store,
       documents,
-      sessions,
       parse: createParseService(),
       previewOrigin: () => 'http://127.0.0.1:1',
     }),
@@ -76,10 +68,7 @@ async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> 
     heartbeatMs,
     ...(stallMs === undefined ? {} : { stallMs }),
   });
-  const token = sessions.exchange(sessions.createBootstrapTicket()) as string;
-  const response = await fetch(`${server.origin}/_/api/v1/events`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await fetch(`${server.origin}/_/api/v1/events`);
   expect(response.status).toBe(200);
   // With a storable response, Firefox holds a second connection to the same URL.
   expect(response.headers.get('cache-control')).toBe('no-store');
@@ -101,12 +90,7 @@ async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> 
   }
   return {
     store,
-    sessions,
     events,
-    token,
-    advance: (ms) => {
-      now += ms;
-    },
     stream,
   };
 }
@@ -119,58 +103,26 @@ const ended = (stream: Fixture['stream']) =>
     ),
   ]);
 
-describe('SEC-001 connections of an expired session', () => {
-  it('closes without sending a notification published after expiry, without waiting for the next periodic check', async () => {
-    // The periodic check does not occur during this test.
-    const { store, events, stream, advance, token } = await connect(60_000);
-    advance(LIMITS.sessionIdleMs + 1);
+describe('management notifications without authentication', () => {
+  it('delivers changes and keeps the connection open until shutdown', async () => {
+    const { store, events, stream } = await connect(20);
     events.publish({ type: 'catalog-changed' });
-    await ended(stream);
-    expect(stream.received).not.toContain('catalog-changed');
-    expect(events.subscriberCount).toBe(0);
-    const after = await fetch(`${(server as ManagementServer).origin}/_/api/v1/status`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(after.status).toBe(401);
-    await store.close();
-  });
-
-  it('staying connected does not extend the expiry, and SSE is closed once it expires', async () => {
-    const { store, events, stream, advance, token } = await connect(20);
-
-    // Within the expiry, notifications arrive while the connection stays open. Repeated checks do not extend it.
-    advance(LIMITS.sessionIdleMs - 1000);
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(stream.ended).toBe(false);
-    events.publish({ type: 'catalog-changed' });
-    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(stream.received).toContain('event: catalog-changed');
-    expect(events.subscriberCount).toBe(1);
-
-    // Once expired, the next periodic check closes the connection and unsubscribes. It closes even without notifications.
-    advance(1001);
+    expect(stream.ended).toBe(false);
+    await server?.close();
     await ended(stream);
-    expect(stream.ended).toBe(true);
     expect(events.subscriberCount).toBe(0);
-    const after = await fetch(`${(server as ManagementServer).origin}/_/api/v1/status`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(after.status).toBe(401);
     await store.close();
   });
 });
 
 // A connection that does not read notifications. Stops reading from the socket once hello is received.
 // Keeps what was received (and keeps appending after reading resumes).
-async function connectStuck(
-  port: number,
-  token: string,
-): Promise<Socket & { received: () => string }> {
+async function connectStuck(port: number): Promise<Socket & { received: () => string }> {
   const socket = connectSocket(port, '127.0.0.1');
   await once(socket, 'connect');
-  socket.write(
-    `GET /_/api/v1/events HTTP/1.1\r\nHost: 127.0.0.1:${String(port)}\r\nAuthorization: Bearer ${token}\r\n\r\n`,
-  );
+  socket.write(`GET /_/api/v1/events HTTP/1.1\r\nHost: 127.0.0.1:${String(port)}\r\n\r\n`);
   let received = '';
   let paused = false;
   await new Promise<void>((resolve) => {
@@ -210,9 +162,9 @@ const sequencesOf = (received: string) =>
 
 describe('PERF-004 connections that do not read notifications', () => {
   it('the queue stops at the limit even when writes stall, the reading connection still receives, and the stalled one is cut', async () => {
-    const { store, events, stream, token } = await connect(50, 3000);
+    const { store, events, stream } = await connect(50, 3000);
     const running = server as ManagementServer;
-    const stuck = await connectStuck(running.port, token);
+    const stuck = await connectStuck(running.port);
     stuck.on('error', () => undefined);
     expect(running.eventStreams().streams).toBe(2);
 
@@ -254,34 +206,10 @@ describe('PERF-004 connections that do not read notifications', () => {
     await store.close();
   });
 
-  it('if the session expires while writes are stalled, closes down to the socket without sending the rest', async () => {
-    // Verify that session expiry closes it before the stall cutoff (60 seconds) does.
-    const { store, events, stream, token, advance } = await connect(50, 60_000);
-    const running = server as ManagementServer;
-    const stuck = await connectStuck(running.port, token);
-    stuck.on('error', () => undefined);
-    await fillUntilStuck(events, running);
-    expect(running.eventStreams().streams).toBe(2);
-
-    advance(LIMITS.sessionIdleMs + 1);
-    const deadline = Date.now() + 5000;
-    while (running.eventStreams().streams > 0) {
-      if (Date.now() > deadline) throw new Error('Connection of the expired session did not end');
-      await wait(20);
-    }
-    expect(events.subscriberCount).toBe(0);
-    await ended(stream);
-    // The server has closed the non-reading socket too (resuming reading delivers the end).
-    stuck.resume();
-    await Promise.race([once(stuck, 'close'), wait(5000)]);
-    expect(stuck.destroyed).toBe(true);
-    await store.close();
-  });
-
   it('delivered sequences keep increasing and a resync marker arrives even as notifications continue after the queue overflows', async () => {
-    const { store, events, token } = await connect(60_000);
+    const { store, events } = await connect(60_000);
     const running = server as ManagementServer;
-    const slow = await connectStuck(running.port, token);
+    const slow = await connectStuck(running.port);
     slow.on('error', () => undefined);
     // Overflow the queue, then resume reading and keep publishing while writes progress.
     await fillUntilStuck(events, running);

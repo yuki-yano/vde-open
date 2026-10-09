@@ -1,6 +1,6 @@
 # ADR-0008: 文書の表示は別のlistenerで行い、版ごとの権限で読める範囲を限る
 
-状態: 採用（P3）
+状態: 採用（P3）。管理画面の認証・sessionへの結び付け・保持上限は[ADR-0014](0014-management-without-authentication.md)で更新。
 
 ## 背景
 

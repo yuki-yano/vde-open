@@ -32,7 +32,7 @@ for (const file of ['a.md', 'a.html']) {
     t.write(file, file.endsWith('.md') ? '# A\n\nbody\n' : '<h1>A</h1><p>body</p>');
     await t.json(['open', file]);
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(await t.bootstrapUrl());
+    await page.goto(await t.uiUrl());
     await expect(page.getByRole('region', { name: 'Document view' })).toBeVisible();
     if (file.endsWith('.html')) await expect(page.getByTestId('document-frame')).toBeVisible();
     const initial = await listWidth(page);

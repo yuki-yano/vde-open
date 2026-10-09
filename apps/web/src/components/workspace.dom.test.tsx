@@ -799,21 +799,6 @@ describe('keeping the shown document in the URL', () => {
     expect(window.history.length).toBe(length);
   });
 
-  it('keeps the query when the bootstrap fragment is removed', async () => {
-    const { establishSession } = await import('@/lib/api');
-    window.history.replaceState(null, '', '/?document=doc_2#bootstrap=used');
-    const fetchMock = () => Promise.reject(new Error('offline'));
-    const original = window.fetch;
-    window.fetch = fetchMock as typeof window.fetch;
-    try {
-      await establishSession();
-    } finally {
-      window.fetch = original;
-    }
-    expect(window.location.search).toBe('?document=doc_2');
-    expect(window.location.hash).toBe('');
-  });
-
   it('a switch from the list or a focus request adds a history entry; choosing the shown document again does not', async () => {
     await start('/');
     await until(() => window.location.search === '?document=doc_1');

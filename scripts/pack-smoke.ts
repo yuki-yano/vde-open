@@ -322,14 +322,12 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     );
     const htmlId = runJson<Documents>('vo', ['open', 'site/index.html']).documents[0]?.documentId;
     const origin = uiUrl.replace(/\/$/, '');
-    const ticket = runBin('vo', ['ui', '--print-url']).trim().split('#bootstrap=')[1] ?? '';
-    const post = async <T>(path: string, body: unknown, token?: string): Promise<T> => {
+    const post = async <T>(path: string, body: unknown): Promise<T> => {
       const response = await fetch(`${origin}/_/api/v1${path}`, {
         method: 'POST',
         headers: {
           Origin: origin,
           'Content-Type': 'application/json',
-          ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }),
         },
         body: JSON.stringify(body),
       });
@@ -337,11 +335,9 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
       if (!envelope.ok) fail(`${path} failed (${String(response.status)})`);
       return envelope.data;
     };
-    const { token } = await post<{ token: string }>('/sessions/bootstrap', { ticket });
     const grant = await post<{ documentUrl: string; filesBaseUrl: string }>(
       `/documents/${htmlId ?? ''}/render-grants`,
       {},
-      token,
     );
     const rendered = await (await fetch(grant.documentUrl)).text();
     if (!rendered.includes('<p id="p">pack</p>') || rendered.includes('<script')) {
@@ -376,7 +372,6 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
           headers: {
             Origin: origin,
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ revision: printDoc?.revision }),
         },
@@ -406,7 +401,6 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     const bridged = await post<{ documentUrl: string; bridge: { instanceId: string } | null }>(
       `/feedback/${interactiveAsk.requestId}/render-grants`,
       {},
-      token,
     );
     const appResponse = await fetch(bridged.documentUrl);
     const appHtml = await appResponse.text();

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { analyzeDocument, HTML_STATIC_PARSER_PROFILE } from '@vde-open/document';
 import { renderDocument, scanReferences } from '@vde-open/document/render';
+import { LIMITS } from '@vde-open/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createCursorCodec } from '../documents/cursor.ts';
@@ -12,7 +13,6 @@ import { computeRevision } from '../documents/revision.ts';
 import { DocumentService } from '../documents/service.ts';
 import { StateStore } from '../persistence/state-store.ts';
 import { nodeStoreFs } from '../persistence/store-fs.ts';
-import { createSessionService } from '../server/session-service.ts';
 import { createWatchService } from '../watch/watch-service.ts';
 import type { ParseService } from '../workers/parse-service.ts';
 import { createRenderService, type RenderService } from './render-service.ts';
@@ -21,7 +21,6 @@ let base: string;
 let store: StateStore;
 let documents: DocumentService;
 let render: RenderService;
-let sessionId: string;
 // Hold the render until signalled.
 let holdRender: Promise<void> | null;
 let renderStarted: () => void;
@@ -31,8 +30,6 @@ beforeEach(async () => {
   base = realpathSync(mkdtempSync(join(tmpdir(), 'vde-open-render-')));
   store = await StateStore.open({ root: join(base, 'home'), fs: nodeStoreFs });
   documents = new DocumentService({ store, cursors: createCursorCodec(randomBytes(32)) });
-  const sessions = createSessionService();
-  sessionId = sessions.idOf(sessions.exchange(sessions.createBootstrapTicket()) as string);
   holdRender = null;
   renderStarted = () => undefined;
   renders = 0;
@@ -53,7 +50,6 @@ beforeEach(async () => {
   render = createRenderService({
     store,
     documents,
-    sessions,
     parse,
     previewOrigin: () => 'http://127.0.0.1:1',
   });
@@ -93,7 +89,7 @@ describe('SEC-015 ordering of render grants and closing a document', () => {
   it('does not issue a grant if the document is closed while rendering', async () => {
     const documentId = await openDocument();
     const paused = pauseRender();
-    const issuing = render.createGrant(sessionId, { documentId }, GRANT_CONTEXT);
+    const issuing = render.createGrant({ documentId }, GRANT_CONTEXT);
     await paused.started;
 
     await documents.close({ cwd: base, targets: [documentId] });
@@ -105,7 +101,7 @@ describe('SEC-015 ordering of render grants and closing a document', () => {
   it('if closed and reopened while rendering, the issue started before the close does not take effect as is', async () => {
     const documentId = await openDocument();
     const paused = pauseRender();
-    const issuing = render.createGrant(sessionId, { documentId }, GRANT_CONTEXT);
+    const issuing = render.createGrant({ documentId }, GRANT_CONTEXT);
     await paused.started;
 
     await documents.close({ cwd: base, targets: [documentId] });
@@ -126,7 +122,7 @@ describe('SEC-015 ordering of render grants and closing a document', () => {
 
   it('an issued grant is unusable after reopen, even without waiting for the cleanup at close', async () => {
     const documentId = await openDocument();
-    const grant = await render.createGrant(sessionId, { documentId }, GRANT_CONTEXT);
+    const grant = await render.createGrant({ documentId }, GRANT_CONTEXT);
     expect(await render.resolve(grant.grant, 'index.html')).not.toBeNull();
 
     // Close and reopen without calling the cleanup (pruneClosed).
@@ -135,7 +131,7 @@ describe('SEC-015 ordering of render grants and closing a document', () => {
     expect(await render.resolve(grant.grant, 'index.html')).toBeNull();
 
     // A grant issued after the reopen is usable.
-    const fresh = await render.createGrant(sessionId, { documentId }, GRANT_CONTEXT);
+    const fresh = await render.createGrant({ documentId }, GRANT_CONTEXT);
     expect(await render.resolve(fresh.grant, 'index.html')).not.toBeNull();
   });
 
@@ -144,14 +140,14 @@ describe('SEC-015 ordering of render grants and closing a document', () => {
     write('site/b.html', '<p>Same</p>');
     const opened = await documents.open({ cwd: base, paths: ['site/a.html', 'site/b.html'] });
     const [a, b] = opened.data.documents.map((document) => document.documentId) as [string, string];
-    const grantA = await render.createGrant(sessionId, { documentId: a }, GRANT_CONTEXT);
-    const grantB = await render.createGrant(sessionId, { documentId: b }, GRANT_CONTEXT);
+    const grantA = await render.createGrant({ documentId: a }, GRANT_CONTEXT);
+    const grantB = await render.createGrant({ documentId: b }, GRANT_CONTEXT);
     expect(grantA.revision).toBe(grantB.revision);
     expect([grantA.documentLogicalPath, grantB.documentLogicalPath]).toEqual(['a.html', 'b.html']);
     expect(await render.resolve(grantB.grant, 'a.html')).toBeNull();
     expect(await render.resolve(grantB.grant, 'b.html')).not.toBeNull();
     // A second grant for the same document and revision does not render again.
-    await render.createGrant(sessionId, { documentId: a }, GRANT_CONTEXT);
+    await render.createGrant({ documentId: a }, GRANT_CONTEXT);
     expect(renders).toBe(2);
   });
 });
@@ -191,17 +187,13 @@ describe('interactive view and communication with the HTML', () => {
   it('does not issue an interactive view for a document without script permission', async () => {
     const documentId = await openDocument();
     await expect(
-      render.createGrant(sessionId, { documentId, mode: 'interactive' }, GRANT_CONTEXT),
+      render.createGrant({ documentId, mode: 'interactive' }, GRANT_CONTEXT),
     ).rejects.toMatchObject({ code: 'E_INTERACTIVE_NOT_ALLOWED' });
   });
 
   it('the interactive view keeps scripts, and the SDK is included only in views of pending questions created as interactive', async () => {
     const documentId = await openInteractive();
-    const plain = await render.createGrant(
-      sessionId,
-      { documentId, mode: 'interactive' },
-      GRANT_CONTEXT,
-    );
+    const plain = await render.createGrant({ documentId, mode: 'interactive' }, GRANT_CONTEXT);
     expect(plain.bridge).toBeNull();
     const plainHtml = await body(plain.grant, plain.documentLogicalPath);
     expect(plainHtml).toContain('<script>document.title');
@@ -211,7 +203,7 @@ describe('interactive view and communication with the HTML', () => {
     );
 
     const request = await ask(documentId);
-    const bridged = await render.createGrantForRequest(sessionId, request.requestId, GRANT_CONTEXT);
+    const bridged = await render.createGrantForRequest(request.requestId, GRANT_CONTEXT);
     expect(bridged).toMatchObject({ mode: 'interactive', revision: request.revision });
     expect(bridged.bridge).toEqual({
       instanceId: expect.any(String),
@@ -229,7 +221,7 @@ describe('interactive view and communication with the HTML', () => {
     expect(html).not.toContain('__vde_bridge_config_');
     // A question cannot be specified when issuing a document view.
     await expect(
-      render.createGrant(sessionId, { documentId, requestId: request.requestId }, GRANT_CONTEXT),
+      render.createGrant({ documentId, requestId: request.requestId }, GRANT_CONTEXT),
     ).rejects.toThrow();
   });
 
@@ -240,11 +232,7 @@ describe('interactive view and communication with the HTML', () => {
     const staticRequest = await ask(documentId);
     await documents.open({ cwd: base, paths: ['site/app.html'], htmlMode: 'interactive' });
     expect(documents.interactiveAllowed(documentId)).toBe(true);
-    const pinned = await render.createGrantForRequest(
-      sessionId,
-      staticRequest.requestId,
-      GRANT_CONTEXT,
-    );
+    const pinned = await render.createGrantForRequest(staticRequest.requestId, GRANT_CONTEXT);
     expect(pinned).toMatchObject({ mode: 'static', bridge: null });
     expect(await body(pinned.grant, pinned.documentLogicalPath)).not.toContain('<script');
 
@@ -258,11 +246,7 @@ describe('interactive view and communication with the HTML', () => {
     write('site/app.html', '<p>Version 2</p>');
     await documents.open({ cwd: base, paths: ['site/app.html'] });
     await documents.setHtmlMode({ documentId, mode: 'static' });
-    const revoked = await render.createGrantForRequest(
-      sessionId,
-      interactiveRequest.requestId,
-      GRANT_CONTEXT,
-    );
+    const revoked = await render.createGrantForRequest(interactiveRequest.requestId, GRANT_CONTEXT);
     expect(revoked).toMatchObject({
       mode: 'static',
       bridge: null,
@@ -273,56 +257,58 @@ describe('interactive view and communication with the HTML', () => {
 
   it('re-granting after revocation does not revive interactive views issued under the previous permission', async () => {
     const documentId = await openInteractive();
-    const grant = await render.createGrant(
-      sessionId,
-      { documentId, mode: 'interactive' },
-      GRANT_CONTEXT,
-    );
+    const grant = await render.createGrant({ documentId, mode: 'interactive' }, GRANT_CONTEXT);
     expect(await body(grant.grant, grant.documentLogicalPath)).not.toBeNull();
     // Revoke, then re-grant without touching the previous view.
     await documents.setHtmlMode({ documentId, mode: 'static' });
     await documents.setHtmlMode({ documentId, mode: 'interactive', confirmed: true });
     expect(await render.resolve(grant.grant, grant.documentLogicalPath)).toBeNull();
     // Reopening with the same option while allowed keeps issued views usable.
-    const current = await render.createGrant(
-      sessionId,
-      { documentId, mode: 'interactive' },
-      GRANT_CONTEXT,
-    );
+    const current = await render.createGrant({ documentId, mode: 'interactive' }, GRANT_CONTEXT);
     await documents.open({ cwd: base, paths: ['site/app.html'], htmlMode: 'interactive' });
     expect(await body(current.grant, current.documentLogicalPath)).not.toBeNull();
   });
 
-  it('operations from an SDK-enabled view work only while the grant is valid, belongs to the issuing session, and the question is pending', async () => {
+  it('bounds retained grants and revokes only the oldest view when the limit is exceeded', async () => {
+    const documentId = await openInteractive();
+    const first = await render.createGrant({ documentId }, GRANT_CONTEXT);
+    const second = await render.createGrant({ documentId }, GRANT_CONTEXT);
+    for (let index = 2; index <= LIMITS.renderGrants; index += 1) {
+      await render.createGrant({ documentId }, GRANT_CONTEXT);
+    }
+    expect(render.grantCount).toBe(LIMITS.renderGrants);
+    expect(await render.resolve(first.grant, first.documentLogicalPath)).toBeNull();
+    expect(await render.resolve(second.grant, second.documentLogicalPath)).not.toBeNull();
+    expect(render.release([second.grant])).toBe(1);
+    expect(render.release([second.grant])).toBe(0);
+  });
+
+  it('operations from an SDK-enabled view work only while the grant is valid and the question is pending', async () => {
     const documentId = await openInteractive();
     const request = await ask(documentId);
-    const bridged = await render.createGrantForRequest(sessionId, request.requestId, GRANT_CONTEXT);
-    expect(render.bridgeOf(sessionId, bridged.grant)).toEqual({
+    const bridged = await render.createGrantForRequest(request.requestId, GRANT_CONTEXT);
+    expect(render.bridgeOf(bridged.grant)).toEqual({
       requestId: request.requestId,
       documentId,
       revision: request.revision,
     });
-    expect(render.bridgeOf('session_other', bridged.grant)).toBeNull();
+    expect(render.bridgeOf('unknown-grant')).toBeNull();
     // Not available for a view without the SDK.
-    const plain = await render.createGrant(
-      sessionId,
-      { documentId, mode: 'interactive' },
-      GRANT_CONTEXT,
-    );
-    expect(render.bridgeOf(sessionId, plain.grant)).toBeNull();
+    const plain = await render.createGrant({ documentId, mode: 'interactive' }, GRANT_CONTEXT);
+    expect(render.bridgeOf(plain.grant)).toBeNull();
     // A released grant is unusable.
-    render.release(sessionId, [bridged.grant]);
-    expect(render.bridgeOf(sessionId, bridged.grant)).toBeNull();
+    render.release([bridged.grant]);
+    expect(render.bridgeOf(bridged.grant)).toBeNull();
     // Unusable once the question ends.
-    const again = await render.createGrantForRequest(sessionId, request.requestId, GRANT_CONTEXT);
+    const again = await render.createGrantForRequest(request.requestId, GRANT_CONTEXT);
     const { FeedbackService } = await import('../feedback/service.ts');
     await new FeedbackService({ store, documents }).cancel(
       { requestId: request.requestId },
       'agent',
     );
-    expect(render.bridgeOf(sessionId, again.grant)).toBeNull();
+    expect(render.bridgeOf(again.grant)).toBeNull();
     await expect(
-      render.createGrantForRequest(sessionId, request.requestId, GRANT_CONTEXT),
+      render.createGrantForRequest(request.requestId, GRANT_CONTEXT),
     ).rejects.toMatchObject({ code: 'E_REQUEST_NOT_PENDING' });
   });
 
@@ -334,7 +320,7 @@ describe('interactive view and communication with the HTML', () => {
       const { FeedbackService } = await import('../feedback/service.ts');
       const feedback = new FeedbackService({ store, documents });
       const paused = pauseRender();
-      const issuing = render.createGrantForRequest(sessionId, request.requestId, GRANT_CONTEXT);
+      const issuing = render.createGrantForRequest(request.requestId, GRANT_CONTEXT);
       await paused.started;
       if (ending === 'submit') {
         await feedback.submit(request.requestId, {
@@ -359,25 +345,17 @@ describe('interactive view and communication with the HTML', () => {
 
   it('issued interactive views become unusable once the script permission is revoked', async () => {
     const documentId = await openInteractive();
-    const grant = await render.createGrant(
-      sessionId,
-      { documentId, mode: 'interactive' },
-      GRANT_CONTEXT,
-    );
+    const grant = await render.createGrant({ documentId, mode: 'interactive' }, GRANT_CONTEXT);
     expect(await body(grant.grant, grant.documentLogicalPath)).not.toBeNull();
     await documents.setHtmlMode({ documentId, mode: 'static' });
     expect(await render.resolve(grant.grant, grant.documentLogicalPath)).toBeNull();
   });
 
-  it('records and reports loads of unregistered files per view; not visible from another session', async () => {
+  it('records and reports loads of unregistered files per view', async () => {
     const notified: string[] = [];
-    const sessions = createSessionService();
-    const owner = sessions.idOf(sessions.exchange(sessions.createBootstrapTicket()) as string);
-    const other = sessions.idOf(sessions.exchange(sessions.createBootstrapTicket()) as string);
     const tracking = createRenderService({
       store,
       documents,
-      sessions,
       parse: {
         diagnostics: () => Promise.resolve(null),
         analyze: (format, text) => Promise.resolve(analyzeDocument(text, format)),
@@ -392,15 +370,14 @@ describe('interactive view and communication with the HTML', () => {
     });
     const documentId = await openInteractive();
     const { grant } = await tracking.createGrant(
-      owner,
       { documentId, mode: 'interactive' },
       GRANT_CONTEXT,
     );
     expect(await tracking.resolve(grant, 'data.json')).toBeNull();
     expect(await tracking.resolve(grant, 'data.json')).toBeNull();
     expect(await tracking.resolve(grant, 'mod.js')).toBeNull();
-    expect(tracking.missingOf(owner, grant)).toEqual(['data.json', 'mod.js']);
-    expect(tracking.missingOf(other, grant)).toEqual([]);
+    expect(tracking.missingOf(grant)).toEqual(['data.json', 'mod.js']);
+    expect(tracking.missingOf('unknown-grant')).toEqual([]);
     // The same file is reported only once.
     expect(notified).toEqual([documentId, documentId]);
   });
@@ -441,23 +418,16 @@ describe('headings the HTML view can be moved to', () => {
     const interactive = (
       await documents.open({ cwd: base, paths: ['site/c.html'], htmlMode: 'interactive' })
     ).data.documents[0]?.documentId as string;
-    expect(
-      (await render.createGrant(sessionId, { documentId: html }, GRANT_CONTEXT)).headingTargets,
-    ).toEqual([
+    expect((await render.createGrant({ documentId: html }, GRANT_CONTEXT)).headingTargets).toEqual([
       { sectionId: 'sec_0001', anchor: 'h1' },
       { sectionId: 'sec_0003', anchor: 'h3' },
     ]);
     expect(
-      (await render.createGrant(sessionId, { documentId: markdown }, GRANT_CONTEXT)).headingTargets,
+      (await render.createGrant({ documentId: markdown }, GRANT_CONTEXT)).headingTargets,
     ).toEqual([]);
     expect(
-      (
-        await render.createGrant(
-          sessionId,
-          { documentId: interactive, mode: 'interactive' },
-          GRANT_CONTEXT,
-        )
-      ).headingTargets,
+      (await render.createGrant({ documentId: interactive, mode: 'interactive' }, GRANT_CONTEXT))
+        .headingTargets,
     ).toEqual([]);
   });
 
@@ -515,12 +485,9 @@ describe('headings the HTML view can be moved to', () => {
       cursors: createCursorCodec(randomBytes(32)),
       analyze: parse.analyze,
     });
-    const sessions = createSessionService();
-    const session = sessions.idOf(sessions.exchange(sessions.createBootstrapTicket()) as string);
     const restartedRender = createRenderService({
       store,
       documents: restarted,
-      sessions,
       parse,
       previewOrigin: () => 'http://127.0.0.1:1',
     });
@@ -551,11 +518,7 @@ describe('headings the HTML view can be moved to', () => {
         ['sec_0002', 'h2'],
         ['sec_0003', 'h3'],
       ]);
-      const grant = await restartedRender.createGrantForRequest(
-        session,
-        request.requestId,
-        GRANT_CONTEXT,
-      );
+      const grant = await restartedRender.createGrantForRequest(request.requestId, GRANT_CONTEXT);
       expect(grant).toMatchObject({ revision: pinned, mode: 'static' });
       expect(grant.headingTargets).toEqual([
         { sectionId: 'sec_0001', anchor: 'h1' },

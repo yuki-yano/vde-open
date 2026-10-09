@@ -17,7 +17,6 @@ export function readPreference<T extends string | number>(
 }
 
 // View preferences are stored only in the browser. They are kept apart from the state of open documents (daemon side) (spec 13.3).
-// The management token never goes here.
 export function usePreference<T extends string | number>(
   key: string,
   initial: T,

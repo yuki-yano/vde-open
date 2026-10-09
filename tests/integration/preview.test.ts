@@ -500,7 +500,7 @@ describe('SEC-014 SVG', () => {
 });
 
 describe('SEC-015 expiry of render grants', () => {
-  it('an issued URL cannot be read after the document is closed, the session is revoked, or a restart', async () => {
+  it('an issued URL cannot be read after the view is released, the document is closed, or a restart', async () => {
     site('<img src="img/a.png">');
     t.write('other/index.html', '<p>別の文書</p>');
     const document = await open(['site/index.html']);
@@ -512,17 +512,13 @@ describe('SEC-015 expiry of render grants', () => {
 
     // A grant works only within the document it was issued for. Files of another document cannot be read.
     expect((await previewGet(ui, otherGrant, 'img/a.png')).status).toBe(404);
-    // It cannot authenticate to the management API. Nor can the management token be used as a preview URL.
-    const asToken = await rawRequest(ui.origin, '/_/api/v1/documents', {
-      headers: { Authorization: `Bearer ${grant.grant}` },
-    });
-    expect(asToken.status).toBe(401);
-    expect((await rawRequest(ui.previewOrigin, `/r/${ui.token}/files/index.html`)).status).toBe(
+    // Unknown preview grants cannot read a document.
+    expect((await rawRequest(ui.previewOrigin, '/r/unknown-grant/files/index.html')).status).toBe(
       404,
     );
     expect((await rawRequest(ui.origin, `${ui.filesPath(grant)}index.html`)).status).toBe(404);
 
-    // A grant released by its own session becomes unusable immediately.
+    // A released grant becomes unusable immediately.
     const released = await ui.api<{ released: number }>('/render-grants/release', {
       method: 'POST',
       body: { grants: [otherGrant.grant] },
@@ -530,27 +526,14 @@ describe('SEC-015 expiry of render grants', () => {
     expect(released.json.data.released).toBe(1);
     expect((await previewGet(ui, otherGrant, 'index.html')).status).toBe(404);
 
-    // Another session cannot release a grant of a different session.
-    const second = await connectUi(t);
-    const stolen = await second.api<{ released: number }>('/render-grants/release', {
-      method: 'POST',
-      body: { grants: [grant.grant] },
-    });
-    expect(stolen.json.data.released).toBe(0);
+    // Only the supplied grant is released; an unrelated view remains available.
     expect((await previewGet(ui, grant, 'index.html')).status).toBe(200);
-
     // Closing the document expires it. Even if never used while closed, the old grant does not return after reopening.
     const unused = await ui.grant(document.documentId);
     await t.run(['close', document.documentId, '--json']);
     await open(['site/index.html']);
     expect((await previewGet(ui, unused, 'index.html')).status).toBe(404);
     expect((await previewGet(ui, grant, 'index.html')).status).toBe(404);
-
-    // Revoking the session also expires the grants it issued.
-    const fresh = await ui.grant(document.documentId);
-    expect((await previewGet(ui, fresh, 'index.html')).status).toBe(200);
-    await ui.api('/session', { method: 'DELETE' });
-    expect((await previewGet(ui, fresh, 'index.html')).status).toBe(404);
 
     // After a daemon restart, the old grant is unusable.
     const third = await connectUi(t);
@@ -588,7 +571,7 @@ describe('SEC-015 expiry of render grants', () => {
       body: {},
     });
     expect(closed.status).toBe(404);
-    // Issuing a grant requires a management session.
+    // Issuing a grant without authentication still requires an open document.
     const anonymous = await rawRequest(
       ui.origin,
       `/_/api/v1/documents/${document.documentId}/render-grants`,
@@ -598,7 +581,7 @@ describe('SEC-015 expiry of render grants', () => {
         body: '{}',
       },
     );
-    expect(anonymous.status).toBe(401);
+    expect(anonymous.status).toBe(404);
   });
 });
 
@@ -657,7 +640,7 @@ describe('SEC-016 / SEC-017 responses of the preview listener', () => {
     // The management API does not treat `Origin: null` as a management principal, and returns no allowance.
     for (const path of ['/_/api/v1/documents', '/_/api/v1/status']) {
       const response = await rawRequest(ui.origin, path, {
-        headers: { Origin: 'null', Authorization: `Bearer ${ui.token}` },
+        headers: { Origin: 'null' },
       });
       expect(response.status, path).toBe(401);
       expect(response.headers['access-control-allow-origin'], path).toBeUndefined();
@@ -710,9 +693,7 @@ describe('SEC-016 / SEC-017 responses of the preview listener', () => {
       `${files.replace(/files\/$/, '')}index.html`,
       '/favicon.ico',
     ]) {
-      const response = await rawRequest(ui.previewOrigin, path, {
-        headers: { Authorization: `Bearer ${ui.token}` },
-      });
+      const response = await rawRequest(ui.previewOrigin, path, {});
       expect(response.status, path).toBe(404);
       expect(response.headers['content-type'], path).toBe('text/plain; charset=utf-8');
       expect(response.headers['location'], path).toBeUndefined();
@@ -744,7 +725,6 @@ describe('SEC-016 / SEC-017 responses of the preview listener', () => {
     expect(log).toContain('preview.rejected');
     expect(log).not.toContain(grant.grant);
     expect(log).not.toContain('secret-path-name');
-    expect(log).not.toContain(ui.token);
   });
 });
 
@@ -814,7 +794,7 @@ describe('interactive (the interactive view)', () => {
     ]);
   });
 
-  it('loading an unregistered file is 404, and only the session holding that render grant can fetch it as missing', async () => {
+  it('loading an unregistered file is 404, and missing files are reported only for the supplied render grant', async () => {
     t.write('site/app.html', '<p>本文</p>');
     t.write('site/secret.json', '{"secret":true}');
     const document = await open(['site/app.html', '--html-mode', 'interactive']);
@@ -834,7 +814,7 @@ describe('interactive (the interactive view)', () => {
     const other = await connectUi(t);
     const hidden = await other.api<{ missing: string[] }>('/render-grants/missing', {
       method: 'POST',
-      body: { grant: grant.grant },
+      body: { grant: 'unknown-grant' },
     });
     expect(hidden.json.data.missing).toEqual([]);
   });
@@ -889,7 +869,7 @@ describe('rendering questions and draft answers from HTML (spec 12.2, 11.7)', ()
     expect(refused.status).toBe(400);
   });
 
-  it('draft answer operations from HTML are accepted only while the render grant is valid, by the issuing session', async () => {
+  it('draft answer operations from HTML are accepted only while the render grant is valid', async () => {
     t.write('site/app.html', '<p>本文</p>');
     const request = await ask(['--view', 'site/app.html', '--html-mode', 'interactive']);
     const ui = await connectUi(t);
@@ -915,11 +895,11 @@ describe('rendering questions and draft answers from HTML (spec 12.2, 11.7)', ()
       body: { grant, expectedDraftVersion: 0, answers: { layout: 'A' } },
     });
     expect(stale.json.error.code).toBe('E_DRAFT_CONFLICT');
-    // Unusable from another session.
+    // An unknown grant cannot access the HTML bridge.
     const other = await connectUi(t);
     const foreign = await other.api('/render-grants/bridge/ready', {
       method: 'POST',
-      body: { grant },
+      body: { grant: 'unknown-grant' },
     });
     expect(foreign.status).toBe(403);
     expect(foreign.json.error.code).toBe('E_RENDER_GRANT_INVALID');

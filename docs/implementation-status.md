@@ -2,6 +2,12 @@
 
 初期の実装（0.1.0）は、実装仕様と受け入れテスト（125 ID）の一式 1.1.0にもとづく。この一式はrepositoryに含めていない。本文の「仕様N.N」はその節、CLI-001などのIDは受け入れテストを指す。この文書は、フェーズごとの記録、0.1.0の公開とその後の変更、受け入れテストと試験の対応、現状と開発の注意点を記録する。
 
+## 管理画面の認証撤去（2026-10-09）
+
+管理画面と管理APIは認証を行わず、同じ端末の別のbrowserやtabからURLを直接開ける。ticket・session token・sessionStorageへの保存・認証の期限・CLIからの開き直し画面は撤去した。`vo ui --print-url`は秘密を含まないURLを返し、`--json`と併用できる。127.0.0.1へのbind、Host・Origin・Sec-Fetch-Siteの確認、変更時のJSON、文書のsandbox・CSPと表示の権限は維持する。表示の権限はdaemon全体で64件まで。詳細は[ADR-0014](adr/0014-management-without-authentication.md)。以下のP0〜P7の認証・sessionについての記録は、撤去前の実装を記したもの。
+
+検証: `pnpm check`（unit・結合902件）、build、pack smoke、関連E2E110件が成功。同じ文書・見出しのURLを別browserで開く試験もChromium・Firefox・WebKitで成功し、ChromiumからFirefoxへの受け渡しを確認した。linked CLIのdaemonにも反映し、開いていた8文書と並び順を維持して、認証なしの一覧取得がHTTP 200を返すことを確認した。
+
 ## 進め方
 
 - 実装はP0〜P7の順に進めた。フェーズごとにDoD（仕様17.2）を確かめ、レビューを受けてからcommitした。各フェーズの「レビュー」には、指摘（must-fix・should-fix）と対応を、レビューの回（往復）ごとに記録する。
@@ -558,7 +564,7 @@ HTMLの実browserでの印刷はmacOSのみ確認した。Linux・Windowsでの�
 | CLI-016 | P1 | PASS | `tests/integration/documents.test.ts` |  |
 | SYS-001 | P1 | PASS | `tests/integration/daemon.test.ts` |  |
 | SYS-002 | P2 | PASS | `tests/integration/browser.test.ts` | 既定のbrowser起動は、stdoutが端末である条件をCLIへ直接渡して検証（子processでは端末を再現できないため） |
-| SYS-003 | P5 | PASS | `tests/integration/feedback.test.ts`（再起動後も質問と回答が残る）、`tests/integration/daemon.test.ts` | 再起動の前のtokenが使えないことも確認 |
+| SYS-003 | P5 | PASS | `tests/integration/feedback.test.ts`（再起動後も質問と回答が残る）、`tests/integration/daemon.test.ts` | 再起動後も管理APIを認証なしで利用できる |
 | SYS-004 | P1 | PASS | `apps/cli/src/server/ipc.test.ts` |  |
 | SYS-005 | P1 | PASS | `apps/cli/src/server/ipc.test.ts` |  |
 | SYS-006 | P1 | PASS | `tests/integration/daemon.test.ts`、`apps/cli/src/daemon/lock.test.ts` |  |
@@ -611,9 +617,9 @@ HTMLの実browserでの印刷はmacOSのみ確認した。Linux・Windowsでの�
 | MD-004 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
 | MD-005 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
 | MD-006 | P2 | PASS | `packages/document/src/analysis.test.ts`、`apps/cli/src/workers/parse-service.test.ts`、`tests/e2e/workspace.spec.ts` |  |
-| SEC-001 | P2 | PASS | `tests/integration/http.test.ts`、`apps/cli/src/server/session-service.test.ts`、`tests/e2e/viewer.spec.ts` |  |
+| SEC-001 | P2 | 廃止 | `tests/integration/http.test.ts`、`tests/e2e/viewer.spec.ts` | ADR-0014で認証を撤去。直接URLを開けることを検証する |
 | SEC-002 | P2 | PASS | `tests/integration/http.test.ts` |  |
-| SEC-003 | P2 | PASS | `tests/integration/http.test.ts`、`tests/e2e/viewer.spec.ts` |  |
+| SEC-003 | P2 | 廃止 | `tests/integration/http.test.ts`、`tests/e2e/viewer.spec.ts` | 一回限りのticketを撤去。繰り返し利用できるURLを検証する |
 | SEC-004 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/e2e/html.spec.ts`、`tests/integration/preview.test.ts` | scriptを動かす表示のiframeから、管理画面のDOM・sessionStorage・localStorage・cookie・管理APIに触れられない。`allow-same-origin`なし。staticでの検証はP3 |
 | SEC-005 | P3 | PASS | `packages/document/src/html-static.test.ts`、`tests/e2e/html.spec.ts` |  |
 | SEC-006 | P3 | PASS | `packages/document/src/html-static.test.ts`、`tests/e2e/html.spec.ts` | 外部への要求は、browserのrequestと、記録用のserverの両方で0件を確認 |
@@ -628,7 +634,7 @@ HTMLの実browserでの印刷はmacOSのみ確認した。Linux・Windowsでの�
 | SEC-015 | P3 | PASS | `tests/integration/preview.test.ts`、`apps/cli/src/render/render-service.test.ts`、`apps/web/src/lib/use-render-grant.dom.test.tsx`、`tests/e2e/html.spec.ts` | UIが権限を返す順序についての最後の修正は、commit後の再レビューで指摘なし |
 | SEC-016 | P3 | PASS | `tests/integration/preview.test.ts` |  |
 | SEC-017 | P3 | PASS | `tests/integration/preview.test.ts` |  |
-| SEC-018 | P5 | PASS | `tests/integration/feedback.test.ts`（log）、`tests/integration/daemon.test.ts`、`tests/integration/preview.test.ts`、`tests/integration/http.test.ts` | 回答・回答案・質問のtitle・tokenがlogにない |
+| SEC-018 | P5 | PASS | `tests/integration/feedback.test.ts`（log）、`tests/integration/daemon.test.ts`、`tests/integration/preview.test.ts`、`tests/integration/http.test.ts` | 回答・回答案・質問のtitle・表示の権限がlogにない |
 | SEC-019 | P3 | PASS | `tests/integration/preview.test.ts`、`tests/e2e/html.spec.ts` |  |
 | SEC-020 | P3 | PASS | `tests/e2e/release.spec.ts` | 配布物（`apps/cli/dist`）を対象に確認 |
 | SEC-021 | 追加 | PASS | `apps/cli/src/documents/repository.test.ts` | Gitのmetadataを信頼できない入力として読む: FIFOの`HEAD`で止まらない、4KiBを超えると読まない、読むfileは`.git`・`commondir`・`HEAD`・`gitdir`だけ、他のworktreeの管理directoryを指す`.git`ファイルと`cp -r`で複製したworktreeは`unresolved`、他のrepoの`.git`へのsymlinkと他のworktreeの`.git`ファイルへのsymlinkはそのrepoに入らない、WindowsのUNC・device pathにfilesystemの処理をしない |
@@ -648,7 +654,7 @@ HTMLの実browserでの印刷はmacOSのみ確認した。Linux・Windowsでの�
 | FB-014 | P5 | PASS | `apps/cli/src/feedback/service.test.ts` |  |
 | FB-015 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/e2e/feedback.spec.ts`、`apps/web/src/components/workspace.dom.test.tsx`、`apps/cli/src/render/render-service.test.ts`、`tests/integration/preview.test.ts` | 質問の間にHTMLとCSSが更新されても、質問の版（scriptとCSSを含む）を表示し続け、新しい版の警告を出す。SDKに旧版の確認はない。質問の表示方法は質問に固定し、staticで作った質問は、後から許可してもscriptを動かさない |
 | FB-016 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/cli/src/feedback/service.test.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx` | 旧版の確認は回答panelだけで行い、確認した版を送る。確認後に版が変われば確認し直し |
-| FB-017 | P5 | PASS | `tests/integration/feedback.test.ts`、`apps/cli/src/feedback/service.test.ts` | browserを閉じる操作は、管理UIのsessionの終了で確認 |
+| FB-017 | P5 | PASS | `tests/integration/feedback.test.ts`、`apps/cli/src/feedback/service.test.ts` | CLI待機の中断・時間切れで質問がpendingのまま残ることを確認 |
 | FB-018 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts`、`tests/e2e/feedback.spec.ts` |  |
 | FB-019 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts`、`tests/e2e/feedback.spec.ts` |  |
 | FB-020 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
@@ -665,7 +671,7 @@ HTMLの実browserでの印刷はmacOSのみ確認した。Linux・Windowsでの�
 | PERF-001 | P7 | PASS | `scripts/perf.ts`、`docs/performance.md` | 100文書／10MiB: cold open 720.4ms、warm検索 p50 32.0ms／p95 80.7ms、保存から画面の表示まで308.8ms、最大のRSS 754.0MiB、操作の60秒後のRSS 296.0MiB・footprint 204.9MiB（macOS、Apple M5 Max、Node 24.21.0）。memoryの内訳と、操作の後のGC、結果を変えない検索の削減を記録 |
 | PERF-002 | P7 | PASS | `scripts/perf.ts`、`docs/performance.md`、`tests/e2e/ux.spec.ts`（PERF-002）、`tests/integration/documents.test.ts`（件数・大きさの上限） | 1,000文書／50MiB: hangなし、索引 8865.0ms、list 5.0ms、read 1.2ms、管理画面の一覧に全件が出るまで225.1ms、末尾の文書の選択 413.9ms、保存から画面の表示まで342.3ms、全件が検索の対象になる |
 | PERF-003 | P7 | PASS | `tests/integration/resources.test.ts` | 100回の開閉と監視ruleの追加・解除20回の後でも、監視しているdirectoryの数とNodeの有効な資源の数が増えず、外したwatcherはすべて閉じ終えている（作った数－閉じた数＝監視中の数）。開く・読む・検索する・表示する・閉じるの反復で、daemonの本体と検索のindexが保持している項目の数が3区間で同じで、本体・検索のworker・解析のworkerのGCの後のheapの区間ごとの増え方が1MiB未満 |
-| PERF-004 | P7 | PASS | `tests/integration/resources.test.ts`、`apps/cli/src/server/http/management.test.ts`、`apps/cli/src/workers/parse-service.test.ts`（MD-006） | 通知を読まないclientがいても、50回の連続した更新とほかのclientの操作が終わる。書き込みが詰まった接続の待ち行列は上限で止まり、読む接続には届き、詰まった接続は期限の後とsessionの失効のときにsocketまで閉じる。届く連番は逆戻りしない。大きい・深い文書は解析の時間と構造の上限で止まる |
+| PERF-004 | P7 | PASS | `tests/integration/resources.test.ts`、`apps/cli/src/server/http/management.test.ts`、`apps/cli/src/workers/parse-service.test.ts`（MD-006） | 通知を読まないclientがいても、50回の連続した更新とほかのclientの操作が終わる。書き込みが詰まった接続の待ち行列は上限で止まり、読む接続には届き、詰まった接続は書き込みの停止期限の後にsocketまで閉じる。届く連番は逆戻りしない。大きい・深い文書は解析の時間と構造の上限で止まる |
 | PERF-005 | P7 | PASS | `tests/integration/resources.test.ts`、`apps/web/src/components/workspace.dom.test.tsx` | 3秒の待機のCPU時間が150ms未満。通知の接続・切断30回で購読が残らない。欠けた通知は一覧と質問の取り直しで回復する |
 
 ## 現状と開発の注意点

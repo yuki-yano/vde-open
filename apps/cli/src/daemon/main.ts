@@ -30,7 +30,6 @@ import { createEventHub } from '../server/event-hub.ts';
 import { startManagementServer, type ManagementServer } from '../server/http/management.ts';
 import { startPreviewServer, type PreviewServer } from '../server/http/preview.ts';
 import { startIpcServer, type IpcServer } from '../server/ipc-server.ts';
-import { createSessionService } from '../server/session-service.ts';
 import { createWatchService, type WatchService } from '../watch/watch-service.ts';
 import { measureHeap } from '../diagnostics/heap.ts';
 import { startHeapWatch } from '../diagnostics/idle-collect.ts';
@@ -285,7 +284,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     await documents.initializeRepositories();
     feedback = new FeedbackService({ store: openedStore, documents, emit });
     const answering = feedback;
-    const sessions = createSessionService();
     const startedAt = new Date().toISOString();
     // The development origin is accepted only when running from source. Always disabled in the distributed build.
     const devOrigin = isSourceRun ? (environment.env['VDE_OPEN_DEV_UI_ORIGIN'] ?? null) : null;
@@ -296,7 +294,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     const render = createRenderService({
       store: openedStore,
       documents,
-      sessions,
       parse: parser,
       previewOrigin: () => previewOrigin,
       // When a view tries to load an unregistered file, notify the UI (the path is not included in the notification).
@@ -330,7 +327,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         daemonId,
         version,
         documents,
-        sessions,
         events,
         render,
         search: searching,
@@ -399,7 +395,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
               search: search?.retainedCounts() ?? {},
               render: render.retainedCounts(),
               feedback: answering.retainedCounts(),
-              sessions: sessions.retainedCounts(),
             },
             workers,
             activeResources,
@@ -446,10 +441,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         watching.sync();
         return result;
       },
-      // Create a one-time URL for opening the browser. The URL contains a secret, so it is not logged.
-      'ui.bootstrap': (): MethodResult => ({
-        data: { bootstrapUrl: `${uiUrl}#bootstrap=${sessions.createBootstrapTicket()}`, uiUrl },
-      }),
     };
 
     ipc = await startIpcServer({

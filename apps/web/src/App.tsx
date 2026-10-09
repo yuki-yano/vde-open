@@ -10,7 +10,7 @@ import { Sidebar } from '@/components/sidebar';
 import type { SectionTarget } from '@/components/viewer';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { createApi, establishSession, forgetSession, type Api } from '@/lib/api';
+import { createApi, type Api } from '@/lib/api';
 import {
   documentInUrl,
   headingInUrl,
@@ -472,34 +472,6 @@ export function Workspace({ api }: { api: Api }) {
 }
 
 export function App() {
-  const [session, setSession] = useState<'loading' | 'missing' | { token: string }>('loading');
-
-  useEffect(() => {
-    void establishSession().then((token) => setSession(token ? { token } : 'missing'));
-  }, []);
-
-  const api = useMemo(
-    () =>
-      typeof session === 'object'
-        ? createApi(session.token, () => {
-            forgetSession();
-            setSession('missing');
-          })
-        : null,
-    [session],
-  );
-
-  if (session === 'loading') return null;
-  if (!api) {
-    return (
-      <main className="mx-auto flex min-h-svh max-w-lg flex-col justify-center gap-3 p-8">
-        <h1 className="text-xl font-semibold">Open again from the CLI</h1>
-        <p className="text-sm text-muted-foreground">
-          This UI must be opened from the one-time URL that the CLI issues. Run{' '}
-          <code className="rounded bg-muted px-1.5 py-0.5">vo ui</code> in your terminal.
-        </p>
-      </main>
-    );
-  }
+  const [api] = useState(createApi);
   return <Workspace api={api} />;
 }

@@ -72,8 +72,7 @@ export interface UiClient {
   origin: string;
   // Origin of the listener that serves documents.
   previewOrigin: string;
-  token: string;
-  // Calls the management API with authentication.
+  // Calls the local management API.
   api: <T>(
     path: string,
     options?: { method?: string; body?: unknown },
@@ -83,24 +82,14 @@ export interface UiClient {
   filesPath: (grant: GrantData) => string;
 }
 
-// Creates a management UI session from the one-time URL issued by the CLI.
+// Connects to the local management UI without authentication.
 export async function connectUi(t: TestHome): Promise<UiClient> {
   const status = (await t.run(['daemon', 'status', '--json'])).json<{ uiUrl: string }>();
   const origin = status.data.uiUrl.replace(/\/$/, '');
-  const printed = await t.run(['ui', '--print-url']);
-  const ticket = printed.stdout.trim().split('#bootstrap=')[1] as string;
-  const exchanged = await rawRequest(origin, '/_/api/v1/sessions/bootstrap', {
-    method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ticket }),
-  });
-  const token = (JSON.parse(exchanged.text) as Envelope<{ token: string }>).data.token;
-
   const api: UiClient['api'] = async (path, options = {}) => {
     const response = await rawRequest(origin, `/_/api/v1${path}`, {
       method: options.method ?? 'GET',
       headers: {
-        Authorization: `Bearer ${token}`,
         Origin: origin,
         ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
@@ -117,7 +106,6 @@ export async function connectUi(t: TestHome): Promise<UiClient> {
   return {
     origin,
     previewOrigin,
-    token,
     api,
     async grant(documentId, revision) {
       const response = await api<GrantData>(`/documents/${documentId}/render-grants`, {

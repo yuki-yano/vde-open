@@ -38,30 +38,13 @@ test('SEC-020: the development origin allowance and HMR are not left in the dist
     'site/index.html',
   ]);
   const ui = (await t.uiUrl()).replace(/\/$/, '');
-  const ticket = (await t.bootstrapUrl()).split('#bootstrap=')[1] as string;
-
-  // The ticket cannot be exchanged from the development origin.
-  const fromDev = await request.post(`${ui}/_/api/v1/sessions/bootstrap`, {
-    headers: { Origin: DEV_ORIGIN, 'Content-Type': 'application/json' },
-    data: { ticket },
-  });
-  expect(fromDev.status()).toBe(401);
-  expect(fromDev.headers()['access-control-allow-origin']).toBeUndefined();
-
-  const exchanged = await request.post(`${ui}/_/api/v1/sessions/bootstrap`, {
-    headers: { Origin: ui, 'Content-Type': 'application/json' },
-    data: { ticket: (await t.bootstrapUrl()).split('#bootstrap=')[1] as string },
-  });
-  const { token } = ((await exchanged.json()) as { data: { token: string } }).data;
-
-  // Even with a valid session, requests claiming the development origin are rejected.
-  const authorized = { Authorization: `Bearer ${token}` };
+  // Requests claiming the development origin are rejected in distribution builds.
   const devRead = await request.get(`${ui}/_/api/v1/documents`, {
-    headers: { ...authorized, Origin: DEV_ORIGIN },
+    headers: { Origin: DEV_ORIGIN },
   });
   expect(devRead.status()).toBe(401);
   const crossSite = await request.get(`${ui}/_/api/v1/documents`, {
-    headers: { ...authorized, Origin: ui, 'Sec-Fetch-Site': 'cross-site' },
+    headers: { Origin: ui, 'Sec-Fetch-Site': 'cross-site' },
   });
   expect(crossSite.status()).toBe(401);
 
@@ -74,7 +57,7 @@ test('SEC-020: the development origin allowance and HMR are not left in the dist
   expect(index.headers()['access-control-allow-origin']).toBeUndefined();
   const granted = await request.post(
     `${ui}/_/api/v1/documents/${opened.documents[0]?.documentId ?? ''}/render-grants`,
-    { headers: { ...authorized, Origin: ui, 'Content-Type': 'application/json' }, data: {} },
+    { headers: { Origin: ui, 'Content-Type': 'application/json' }, data: {} },
   );
   const { documentUrl } = ((await granted.json()) as { data: { documentUrl: string } }).data;
   const documentCsp = (await request.get(documentUrl)).headers()['content-security-policy'] ?? '';

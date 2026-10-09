@@ -64,7 +64,7 @@ test('DOC-017: each document shows its repository, worktree, path, and format, i
     'notes/c.md',
     'vde-open/view.html',
   ]);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const sidebar = sidebarOf(page);
 
   const location = (title: string) => rowOf(page, title).locator('[data-part="location"]');
@@ -133,7 +133,7 @@ for (const layout of [
         layout.width,
       );
     }
-    await page.goto(await t.bootstrapUrl());
+    await page.goto(await t.uiUrl());
     if (layout.width === null) {
       await page.getByRole('button', { name: 'Document list' }).click();
     }
@@ -192,7 +192,7 @@ test('DOC-017: in the tree, the repository row stays on top, and focus and scrol
   for (const name of names) t.write(`wt/docs/${name}`, `# ${name}\n`);
   await t.json(['open', ...names.map((name) => `wt/docs/${name}`)]);
   await page.setViewportSize({ width: 1280, height: 600 });
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const sidebar = sidebarOf(page);
   await sidebar.getByRole('button', { name: 'Tree' }).click();
   const tree = sidebar.getByRole('tree');
@@ -264,7 +264,7 @@ test('DOC-017: on a touch screen, tapping a badge does not remove the document',
   });
   const page = await context.newPage();
   try {
-    await page.goto(await t.bootstrapUrl());
+    await page.goto(await t.uiUrl());
     await page.getByRole('button', { name: 'Document list' }).tap();
     const row = rowOf(page, 'Beta');
     const badge = row.getByTestId('pending-question');
@@ -300,7 +300,7 @@ test('DOC-017: at 180px only the remove button shows, and Alt+Up/Down reorders a
   await page.addInitScript(() =>
     window.localStorage.setItem('vde-open.pref.sidebar-width', JSON.stringify(180)),
   );
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const sidebar = sidebarOf(page);
   const middle = rowOf(page, 'Two');
   await middle.hover();
@@ -337,7 +337,7 @@ test('DOC-017: opening again a document removed with its button does not take fo
   for (const name of names) t.write(`repo/${name}`, `# ${name}\n`);
   await t.json(['open', ...names.map((name) => `repo/${name}`)]);
   await page.setViewportSize({ width: 1280, height: 600 });
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const sidebar = sidebarOf(page);
   const list = sidebar.locator('div.overflow-y-auto');
   const row = rowOf(page, 'd02.md');
@@ -389,7 +389,7 @@ for (const view of ['flat', 'tree'] as const) {
       (layout) => window.localStorage.setItem('vde-open.pref.sidebar-view', JSON.stringify(layout)),
       view,
     );
-    await page.goto(await t.bootstrapUrl());
+    await page.goto(await t.uiUrl());
     const sidebar = sidebarOf(page);
     const list = sidebar.locator('div.overflow-y-auto');
     const row = sidebar.locator(`[data-document-id="${String(target)}"]`);
@@ -434,7 +434,7 @@ test('DOC-017: a tap on a screen with hover does not press a button revealed und
   await t.json(['open', 'repo/Alpha.md', 'repo/Beta.md', 'repo/Gamma.md']);
   await t.json(['ask', 'q.json', '--view', 'repo/Beta.md']);
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const row = rowOf(page, 'Beta');
   const cdp = await page.context().newCDPSession(page);
   const tap = async (x: number, y: number) => {

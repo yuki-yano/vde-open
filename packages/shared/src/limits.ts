@@ -26,8 +26,6 @@ export const LIMITS = {
   printRenderTimeoutMs: 10_000,
   pdfExportTimeoutMs: 60_000,
   watchDebounceMs: 200,
-  bootstrapTicketTtlMs: 60 * 1000,
-  sessionIdleMs: 12 * 60 * 60 * 1000,
   sseHeartbeatMs: 15 * 1000,
   // Number of events not yet written on one notification connection. Events beyond it are dropped and replaced by a resync signal.
   ssePendingEvents: 256,
@@ -37,7 +35,7 @@ export const LIMITS = {
   documentAssetBytes: 100 * MiB,
   documentAssets: 500,
   cssReferenceDepth: 8,
-  renderGrantsPerSession: 64,
+  renderGrants: 64,
   searchLimitDefault: 5,
   searchLimitMax: 50,
   // Query length (Unicode code points) and number of search terms.

@@ -32,8 +32,6 @@ export interface E2eHome {
   write: (relativePath: string, content: string | Buffer) => string;
   // Like an editor save: write to a temporary file, then replace by rename.
   atomicWrite: (relativePath: string, content: string) => void;
-  // A URL containing a one-time ticket.
-  bootstrapUrl: () => Promise<string>;
   uiUrl: () => Promise<string>;
   cleanup: () => Promise<void>;
 }
@@ -91,12 +89,6 @@ export function createE2eHome(extraEnv: Record<string, string> = {}): E2eHome {
       const temp = `${path}.tmp-${Date.now().toString()}`;
       writeFileSync(temp, content);
       renameSync(temp, path);
-    },
-    async bootstrapUrl() {
-      const result = await run(['ui', '--print-url']);
-      const url = result.stdout.trim();
-      if (!url.includes('#bootstrap=')) throw new Error(`Could not get the URL: ${result.stderr}`);
-      return url;
     },
     async uiUrl() {
       return (await json<{ uiUrl: string }>(['daemon', 'status'])).uiUrl;

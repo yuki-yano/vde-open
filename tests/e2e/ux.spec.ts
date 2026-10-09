@@ -39,7 +39,7 @@ test('UX-002: Cmd/Ctrl+K opens search, searches only open documents, and jumps; 
   t.write('closed.md', '# 閉じた文書\n\nIntl.Segmenterの説明。\n');
   await t.json(['open', 'alpha.md', 'beta.md', 'closed.md']);
   await t.json(['close', 'closed.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(heading(page)).toHaveText('認証の設計');
 
   const opener = page.getByRole('button', { name: /Search open documents/ });
@@ -76,7 +76,7 @@ test("UX-002: jumps to the section of a search result, and while the revision to
   );
   t.write('a.md', `# 文書\n\n${filler}\n\n## Old heading\n\n古い本文\n`);
   await t.json(['open', 'a.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const oldHeading = page.getByRole('heading', { name: 'Old heading' });
   await expect(oldHeading).toBeAttached();
   await expect(oldHeading).not.toBeInViewport();
@@ -137,7 +137,7 @@ test('UX-001 / UX-002: search, document switching, answering, and submitting wor
     '--view',
     'other.md',
   ]);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const panel = page.getByRole('complementary', { name: 'Answer the question' });
   await expect(panel.getByRole('heading', { name: 'ログイン画面の確認' })).toBeVisible();
 
@@ -179,7 +179,7 @@ test('UX-003: on a narrow screen the list becomes a drawer, and a huge HTML does
     `<!doctype html><html><body style="margin:0"><div style="position:fixed;inset:0;background:red;z-index:2147483647"></div>${tall}</body></html>`,
   );
   await t.json(['ask', 'q.json', '--view', 'huge.html']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   // The page does not overflow horizontally, and all header controls (list, search, color scheme) are on screen.
   await expect(page.getByRole('button', { name: 'Light' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
@@ -224,7 +224,7 @@ test("UX-004: view settings such as the color scheme stay in the browser, and op
   t.write('a.md', '# A\n');
   t.write('b.md', '# B\n');
   await t.json(['open', 'a.md', 'b.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const titles = page
     .getByRole('navigation', { name: 'Open documents' })
     .locator('[data-part="title"]');
@@ -246,7 +246,7 @@ test('UX-005: what cannot be shown is reported with the target, reason, and fix,
     '<h1>表示の確認</h1><img src="https://example.com/a.png"><script>alert(1)</script><img src="missing.png">',
   );
   await t.json(['open', 'page.html']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const diagnostics = page.getByTestId('render-diagnostics');
   await diagnostics.locator('summary').click();
   await expect(diagnostics).toContainText('https://example.com/a.png');
@@ -269,7 +269,7 @@ test('PERF-002: with 1,000 documents, the list shows all of them, the last docum
     t.write(`docs/doc-${name}.md`, `# 文書${name}\n\n本文${name}\n`);
   }
   await t.json(['open', 'docs', '--recursive']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const sidebar = page.getByRole('navigation', { name: 'Open documents' });
   await expect(
     sidebar.getByRole('heading', { name: `Open documents (${String(COUNT)})` }),
@@ -300,7 +300,7 @@ test('code and the document path and ID can be copied (spec 13.2)', async ({ pag
   ]);
   const document = opened.documents[0];
   if (!document) throw new Error('Could not open the document');
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(heading(page)).toHaveText('コードの例');
   const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
   const result = page.getByTestId('copy-result').filter({ hasText: /.+/ });

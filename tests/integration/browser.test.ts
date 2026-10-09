@@ -28,14 +28,13 @@ const openedUrls = () =>
   existsSync(opened) ? readFileSync(opened, 'utf8').trim().split('\n') : [];
 
 describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 launching the browser', () => {
-  it('opens the browser with --open, and the URL contains a one-time ticket', async () => {
+  it('opens the browser with --open, with the reusable UI URL', async () => {
     const first = await t.run(['open', 'a.md', '--open', '--json'], { env: { BROWSER: opener } });
     expect(first.exitCode).toBe(0);
     expect(first.json().warnings).toEqual([]);
     const urls = openedUrls();
     expect(urls).toHaveLength(1);
-    expect(urls[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#bootstrap=[A-Za-z0-9_-]+$/);
-    // The URL containing a secret is not shown in the JSON result.
+    expect(urls[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
     expect(first.stdout).not.toContain('bootstrap=');
 
     // The second open uses the same daemon. Without --open, no tab is added.
@@ -55,7 +54,7 @@ describe.skipIf(process.platform === 'win32')('SYS-002 / CLI-009 launching the b
     expect(first.stdout).toContain('documents: 1 (new 1');
     const urls = openedUrls();
     expect(urls).toHaveLength(1);
-    expect(urls[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#bootstrap=[A-Za-z0-9_-]+$/);
+    expect(urls[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
     expect(first.stdout).not.toContain('bootstrap=');
     const daemonId = (await t.run(['daemon', 'status', '--json'])).json<{ daemonId: string }>().data
       .daemonId;

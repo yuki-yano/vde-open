@@ -83,7 +83,7 @@ test('FB-007: a draft saved with updateDraft from the HTML is submitted from the
       });`,
     ),
   );
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   const frame = frameOf(ui);
   await expect(ui.getByTestId('html-mode')).toHaveText('Scripts running');
   await expect(frame.locator('#state')).toHaveText('ready 0 ログイン画面の確認');
@@ -147,7 +147,7 @@ test('FB-008: submit, ack, cancel, search, read, and older-revision confirmation
       });`,
     ),
   );
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   await expect(frameOf(ui).locator('#state')).toHaveText(
     Array.from({ length: 7 }, () => 'E_METHOD_NOT_ALLOWED').join(','),
   );
@@ -182,7 +182,7 @@ test('FB-009: the port is handed to the shown iframe only once; requests from an
       response.url().endsWith('/render-grants') &&
       ((await response.json()) as { data?: { bridge?: unknown } }).data?.bridge != null,
   );
-  const url = new URL(await t.bootstrapUrl());
+  const url = new URL(await t.uiUrl());
   url.searchParams.set('document', opened.documents[0]!.documentId);
   await ui.goto(url.href);
   await expect(ui.locator('article')).toHaveText('First');
@@ -248,7 +248,7 @@ for (const [name, attack] of [
         });`,
       ),
     );
-    await ui.goto(await t.bootstrapUrl());
+    await ui.goto(await t.uiUrl());
     await expect(ui.getByTestId('bridge-status')).toContainText('Invalid draft message');
     await expect(frameOf(ui).locator('#state')).toHaveText('closed E_BRIDGE_CLOSED');
     // Answering from the management UI still works. The daemon still responds.
@@ -281,13 +281,13 @@ test('FB-011: even after learning of another window update, a draft the HTML sen
       });`,
     ),
   );
-  await first.goto(await t.bootstrapUrl());
+  await first.goto(await t.uiUrl());
   const frame = frameOf(first);
   await expect(frame.locator('#state')).toHaveText('ready 0');
 
-  // Another window (another session) saves a draft.
+  // Another window saves a draft.
   const second = await context.newPage();
-  await second.goto(await t.bootstrapUrl());
+  await second.goto(await t.uiUrl());
   const otherPanel = panelOf(second);
   // The second window also renders without waiting on the notification connection (the browser cache does not block a connection to the same URL).
   await expect(otherPanel).toBeVisible({ timeout: 5000 });
@@ -310,7 +310,7 @@ test("FB-015 / FB-016: even if the HTML and CSS are updated during the question,
       document.getElementById('state').textContent = '版1 ' + Object.keys(vde.feedback).sort().join(',') + ' ' + typeof vde.confirmOlderRevision;
     </script></body></html>`,
   );
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   const frame = frameOf(ui);
   await expect(frame.locator('#state')).toHaveText('版1 onDraftChanged,updateDraft undefined');
 
@@ -361,16 +361,16 @@ test('FB-022: after a daemon restart, scripts stay off until allowed again, and 
       });`,
     ),
   );
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   const before = frameOf(ui);
   await expect(before.locator('#state')).toHaveText(`ready ${request.requestId}`);
 
   expect((await t.run(['daemon', 'restart', '--json'])).exitCode).toBe(0);
-  // The port from the window before the restart cannot change the draft (the old daemon's token and view are unusable).
+  // The port from the window before the restart cannot change the draft (the old view is unusable).
   await before.locator('#apply').click();
   await expect(before.locator('#state')).toHaveText(/^error /);
 
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   await expect(panelOf(ui).getByTestId('feedback-status')).toHaveText('Not answered');
   await expect(ui.getByTestId('html-mode')).toHaveText('Scripts off');
   await expect(ui.getByTestId('document-frame')).toHaveAttribute('sandbox', '');
@@ -408,7 +408,7 @@ test('SEC-004: even in the Interactive view, the management UI DOM, sessionStora
     ),
   );
   await t.json(['open', 'probe.html', '--html-mode', 'interactive', '--focus']);
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   await expect(frameOf(ui).locator('#state')).toHaveText(
     JSON.stringify({
       parentDocument: 'blocked',
@@ -466,7 +466,7 @@ test('SEC-007 / SEC-013: registered JSON and modules load by relative reference,
     'mod.js',
     '--focus',
   ]);
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   await ui
     .getByRole('navigation', { name: 'Open documents' })
     .getByRole('button', { name: 'app.html', exact: true })
@@ -529,7 +529,7 @@ test('SEC-008: even in the Interactive view, popups, top navigation, form submis
     ),
   );
   await t.json(['open', 'hostile.html', '--html-mode', 'interactive']);
-  const before = await t.bootstrapUrl();
+  const before = await t.uiUrl();
   await ui.goto(before);
   const frame = frameOf(ui);
   await expect(frame.locator('#state')).toContainText('"dataWorker":"blocked"');
@@ -588,7 +588,7 @@ test('FB-003: the SDK ready and updateDraft succeed even when both the questionn
     ),
   );
   await t.json(['ask', 'q.json', '--view', 'review.html', '--html-mode', 'interactive']);
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   await expect(frameOf(ui).locator('#state')).toHaveText('ok 4000 4000,4000,4000,4000,4000', {
     timeout: 15_000,
   });
@@ -620,7 +620,7 @@ test('FB-009: once the render grant expires, drafts from the HTML are not accept
 }) => {
   await askInteractive(page('<button id="apply" type="button">反映</button>', APPLY));
   const granted = bridgedGrant(ui);
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   const { data } = (await (await granted).json()) as { data: { grant: string } };
   const frame = frameOf(ui);
   await expect(frame.locator('#state')).toHaveText('ready 0');
@@ -630,7 +630,6 @@ test('FB-009: once the render grant expires, drafts from the HTML are not accept
     await fetch('/_/api/v1/render-grants/release', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${window.sessionStorage.getItem('vde-open.session') ?? ''}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ grants: [grant] }),
@@ -648,7 +647,7 @@ test('FB-009: returning from Source to Preview ends the previous communication a
   page: ui,
 }) => {
   await askInteractive(page('<button id="apply" type="button">反映</button>', APPLY));
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   const frame = frameOf(ui);
   await expect(frame.locator('#state')).toHaveText('ready 0');
   const before = await ui.getByTestId('document-frame').getAttribute('src');
@@ -677,7 +676,7 @@ test('FB-015: a question created in static mode stays in the Static view until a
     'review.html',
   ]);
   await t.json(['open', 'review.html', '--html-mode', 'interactive']);
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   await expect(ui.getByTestId('html-mode')).toHaveText('Scripts off for this question');
   await expect(ui.getByTestId('document-frame')).toHaveAttribute('sandbox', '');
   await ui.getByRole('button', { name: 'Details', exact: true }).click();
@@ -707,7 +706,7 @@ test('FB-009: after the render grant expires, the communication ends without rep
     ),
   );
   const granted = bridgedGrant(ui);
-  await ui.goto(await t.bootstrapUrl());
+  await ui.goto(await t.uiUrl());
   const { data } = (await (await granted).json()) as { data: { grant: string } };
   const frame = frameOf(ui);
   await expect(frame.locator('#state')).toHaveText('ready 0');
@@ -716,7 +715,6 @@ test('FB-009: after the render grant expires, the communication ends without rep
     await fetch('/_/api/v1/render-grants/release', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${window.sessionStorage.getItem('vde-open.session') ?? ''}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ grants: [grant] }),

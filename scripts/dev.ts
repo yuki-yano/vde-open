@@ -44,7 +44,7 @@ process.on('SIGTERM', stopAll);
 start(process.execPath, [cliEntry, 'serve', '--port', String(BACKEND_PORT)], repoRoot);
 start(process.execPath, [join(webDir, 'node_modules', 'vite', 'bin', 'vite.js')], webDir);
 
-// Once the daemon is ready, show the one-time URL for opening it in the development UI.
+// Once the daemon is ready, show the URL for opening it in the development UI.
 const deadline = Date.now() + 15_000;
 const printUrl = () => {
   if (stopping) return;
@@ -54,9 +54,7 @@ const printUrl = () => {
   });
   const url = result.stdout.trim();
   if (result.status === 0 && url.startsWith(BACKEND_ORIGIN)) {
-    console.log(
-      `\nDevelopment UI: ${url.replace(BACKEND_ORIGIN, UI_ORIGIN)}\n(valid for 60 seconds, once only)\n`,
-    );
+    console.log(`\nDevelopment UI: ${url.replace(BACKEND_ORIGIN, UI_ORIGIN)}\n`);
     return;
   }
   if (Date.now() < deadline) setTimeout(printUrl, 500);

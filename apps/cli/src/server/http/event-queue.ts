@@ -5,8 +5,6 @@ export interface EventQueueOptions {
   writeEvent: (event: ServerEvent) => Promise<unknown>;
   // Writes an empty line to keep the connection alive.
   writeHeartbeat: () => Promise<unknown>;
-  // Check right before writing. If false, do not write (session expired, etc. The caller ends the connection).
-  beforeWrite: () => boolean;
   // A write failed.
   onError: () => void;
   // Maximum number of pending notifications. Defaults to `LIMITS.ssePendingEvents`.
@@ -47,7 +45,7 @@ export function createEventQueue(options: EventQueueOptions): EventQueue {
     pending += 1;
     writes = writes
       .then(() => {
-        if (stopped || !options.beforeWrite()) return undefined;
+        if (stopped) return undefined;
         return write();
       })
       .then(() => {

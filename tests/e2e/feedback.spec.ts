@@ -48,7 +48,7 @@ test('FB-001: shows the question as a native form, does not preselect required o
 }) => {
   t.write('q.json', JSON.stringify(sample));
   const { request } = await t.json<{ request: Request }>(['ask', 'q.json']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const panel = panelOf(page);
   await expect(panel.getByRole('heading', { name: 'ログイン画面の確認' })).toBeVisible();
   // The list also shows which document has a question awaiting an answer.
@@ -116,7 +116,7 @@ test("FB-015 prerequisite: while awaiting an answer, the question's revision sta
   t.write('q.json', JSON.stringify(question));
   t.write('a.md', '# 版1\n\n最初の本文\n');
   const { request } = await t.json<{ request: Request }>(['ask', 'q.json', '--view', 'a.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const panel = panelOf(page);
   const article = page.locator('article');
   await expect(article).toContainText('最初の本文');
@@ -161,7 +161,7 @@ test('cancelling a question from the management UI reaches the agent as cancelle
 }) => {
   t.write('q.json', JSON.stringify(sample));
   const { request } = await t.json<{ request: Request }>(['ask', 'q.json']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const panel = panelOf(page);
   await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.getByRole('button', { name: 'Cancel question' }).click();

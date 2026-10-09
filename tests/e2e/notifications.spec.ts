@@ -29,7 +29,7 @@ test('a copy failure stays at its button, can be read and retried with the keybo
   });
   t.write('note.md', '# Note\n\nContent\n');
   await t.json(['open', 'note.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const body = page.getByTestId('document-body');
   await expect(page.locator('article h1')).toHaveText('Note');
   const before = (await body.boundingBox())!;
@@ -54,7 +54,7 @@ test('a PDF export failure uses the export button for details and dismissal with
 }) => {
   t.write('note.md', '# Note\n\nContent\n');
   await t.json(['open', 'note.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(page.locator('article h1')).toHaveText('Note');
   const body = page.getByTestId('document-body');
   const top = (await body.boundingBox())!.y;

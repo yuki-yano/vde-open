@@ -16,7 +16,7 @@ const rows = (page: Page) => sidebar(page).locator('button[data-document-id]');
 async function openList(page: Page, names = ['Alpha', 'Beta', 'Gamma']) {
   names.forEach((name) => t.write(`${name}.md`, `# ${name}\n`));
   await t.json(['open', ...names.map((name) => `${name}.md`)]);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(rows(page)).toHaveCount(names.length);
 }
 

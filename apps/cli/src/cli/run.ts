@@ -10,7 +10,6 @@ import {
   LIMITS,
   successEnvelope,
   VdeError,
-  type BootstrapResult,
   type CloseResult,
   type DaemonStatus,
   type DocumentSummary,
@@ -332,8 +331,8 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
 
   // Open the management UI in the browser. If that fails, report it as a warning separate from the result of the open itself.
   const openBrowser = async (connection: IpcConnection): Promise<Warning[]> => {
-    const { data } = unwrap(await connection.request<BootstrapResult>('ui.bootstrap', {}));
-    if (await browser.open(data.bootstrapUrl)) return [];
+    const { data } = unwrap(await connection.request<DaemonStatus>('daemon.status', {}));
+    if (await browser.open(data.uiUrl ?? '')) return [];
     return [
       {
         code: 'W_BROWSER_OPEN_FAILED',
@@ -344,17 +343,13 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     ];
   };
 
-  const showUi = async (printUrl: boolean): Promise<CommandOutcome<UiResult>> => {
+  const showUi = async (printUrl: boolean, json = false): Promise<CommandOutcome<UiResult>> => {
     const connection = await control.ensure();
     try {
       if (printUrl) {
-        const { data } = unwrap(await connection.request<BootstrapResult>('ui.bootstrap', {}));
-        // A URL that contains a secret. Keep it out of the normal result (JSON) and print it only when asked explicitly.
-        context.stderr(
-          'This URL contains a one-time secret valid for 60 seconds. Do not share it.\n',
-        );
-        context.stdout(`${data.bootstrapUrl}\n`);
-        return { data: { uiUrl: data.uiUrl, opened: false } };
+        const { data } = unwrap(await connection.request<DaemonStatus>('daemon.status', {}));
+        if (!json) context.stdout(`${data.uiUrl ?? ''}\n`);
+        return { data: { uiUrl: data.uiUrl ?? '', opened: false } };
       }
       const status = unwrap(await connection.request<DaemonStatus>('daemon.status', {})).data;
       const warnings = await openBrowser(connection);
@@ -958,23 +953,13 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
   program
     .command('ui')
     .description('Open the management UI in the browser')
-    .option('--print-url', 'Print a one-time URL instead of opening the browser', false)
+    .option('--print-url', 'Print the UI URL instead of opening the browser', false)
     .option('--json', 'Output the result as JSON', false)
     .action(async (options: { printUrl: boolean; json: boolean }) => {
-      if (options.printUrl && options.json) {
-        fail(
-          new VdeError(
-            'E_INVALID_ARGUMENT',
-            '--print-url cannot be combined with --json because its output contains a secret.',
-          ),
-          true,
-        );
-        return;
-      }
       await execute<UiResult>(
         'ui',
         options.json,
-        () => showUi(options.printUrl),
+        () => showUi(options.printUrl, options.json),
         () => '',
       );
     });

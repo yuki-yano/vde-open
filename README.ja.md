@@ -45,13 +45,15 @@ bun add -g "$PWD/artifacts/vde-open-0.1.9.tgz"   # bun add -g には絶対path�
 ```bash
 vo open README.md docs/design.md        # 文書を開く（daemonがなければ起動する）
 vo open docs -w                          # directoryを開き、新しい文書も追う
-vo ui                                    # 管理画面を開く（一回限りのURL）
+vo ui                                    # 管理画面を開く（認証なし）
 vo list --json                           # 開いている文書の一覧
 vo search "認証の設計" --json            # 開いている文書を検索する
 vo read <documentId> --section sec_0003 --json   # 節を読む
 vo close docs/design.md                  # 一覧から外す（fileは消さない）
 vo daemon stop                           # daemonを止める
 ```
+
+管理画面は認証を行いません。`vo ui --print-url`で出るURLは、daemonが動いている間、同じ端末の別のbrowserやtabへコピーして開けます。文書を指定したURLも、そのまま開けます。配信は`127.0.0.1`だけで、別の端末からの閲覧には対応していません。
 
 Agentからの検索・読み取り・質問の方法は [docs/agent-usage.ja.md](docs/agent-usage.ja.md) にあります。
 
@@ -131,7 +133,7 @@ vo feedback ack <requestId> --submission-id <id> --json
 | 症状 | 対処 |
 |---|---|
 | `vo`で別のcommandが動く | `vde-open`を使うか、PATHの順番を確かめる |
-| 管理画面が、CLIから開き直すよう表示する | `vo ui`で新しいURLを開く（URLは一回限り。daemonを起動し直すと前の画面は使えない） |
+| daemonの再起動後、以前のURLで画面が開かない | `vo ui`で現在のURLを開く（再起動でportが変わる場合がある） |
 | 終了コード8（daemonへ接続できない・起動できない） | `vo daemon status`で確かめ、`vo doctor`で残ったfileを調べる |
 | 画像やCSSが表示されない | 「Differences from the original document」を開き、`--assets-root`・`--asset`で登録する |
 | 検索で見つからない | `vo list --json`で、文書が開いていて`searchState`が`ready`かを確かめる |
@@ -143,7 +145,7 @@ vo feedback ack <requestId> --submission-id <id> --json
 |---|---|
 | CIのLinuxとmacOS（GitHub Actionsの`ubuntu-latest`と`macos-latest`、Node.js 24.21.0） | 検証済み（format・lint・typecheck・unit／integration・build・pack・e2e。`.github/workflows/ci.yml`） |
 | CIのWindows（`windows-latest`、Node.js 24.21.0） | 検証済み: build、pack smoke（導入、両bin、IPC、daemonの起動と停止、JSON出力、管理画面とworker）、daemonと文書の結合試験。そのほかの単体・結合試験とe2eは、Windowsでは実行していない |
-| browser | Chromium（PlaywrightのChrome Headless Shell）は全件を検証済み。Firefox・WebKit（Playwright 1.63.0）は、表示の隔離・CSP・HTMLとの通信・認証の試験（`pnpm test:e2e:cross`）を検証済み。Firefox・WebKitのそれ以外の画面操作（検索、回答panel、狭い画面、1,000文書の一覧など）は未検証 |
+| browser | Chromium（PlaywrightのChrome Headless Shell）は全件を検証済み。Firefox・WebKit（Playwright 1.63.0）は、表示の隔離・CSP・HTMLとの通信・URLからの表示の試験（`pnpm test:e2e:cross`）を検証済み。Firefox・WebKitのそれ以外の画面操作（検索、回答panel、狭い画面、1,000文書の一覧など）は未検証 |
 | PDF出力 | macOS（開発機）で、Google Chrome 154とMicrosoft Edge 154での出力を検証済み。CIのLinuxで、runnerのGoogle Chromeでの出力を検証済み（e2e）。Windowsでの実際のbrowserでの印刷は未検証（印刷用の文書の描画はpack smokeで確かめる） |
 
 性能の実測は [docs/performance.ja.md](docs/performance.ja.md)、設計は [docs/architecture.ja.md](docs/architecture.ja.md) と [docs/security-model.ja.md](docs/security-model.ja.md) にあります。開発の記録は [docs/implementation-status.md](docs/implementation-status.md)、[docs/dependency-validation.md](docs/dependency-validation.md)、[docs/adr/](docs/adr/) にあります。
@@ -162,7 +164,7 @@ cd ../..
 pnpm build:watch
 ```
 
-`build:watch`は、source・build設定・同梱fileが変わるとbuildし直します。buildが失敗しても、直前に成功した出力が残ります。次のCLI実行から新しいbuildが使われますが、watcherはdaemonを再起動しません。`vo daemon restart`、続けて`vo ui`を実行します。登録した文書と保存済みの回答は引き継ぎますが、UIのURLが変わり、以前のbrowser sessionとinteractive HTMLの許可は失効します。
+`build:watch`は、source・build設定・同梱fileが変わるとbuildし直します。buildが失敗しても、直前に成功した出力が残ります。次のCLI実行から新しいbuildが使われますが、watcherはdaemonを再起動しません。`vo daemon restart`、続けて`vo ui`を実行します。登録した文書と保存済みの回答は引き継ぎますが、UIのURLが変わり、以前の表示用URLとinteractive HTMLの許可は失効します。
 
 UIを頻繁に調整するときは`pnpm dev`を使います。別の`.dev-home`でsourceのdaemonを動かし、Vite HMRでUIの変更を反映します。link先のCLIはbuildせず、backendのsourceを変更しても自動再起動しません。この環境へCLIでつなぐときは、`VDE_OPEN_HOME`に`.dev-home`の絶対pathを指定します（repositoryのrootなら`VDE_OPEN_HOME="$PWD/.dev-home" vo list`）。
 

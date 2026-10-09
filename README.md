@@ -45,13 +45,15 @@ Installing never overwrites or removes an existing `vo` (another tool's command,
 ```bash
 vo open README.md docs/design.md        # open documents (starts the daemon if needed)
 vo open docs -w                          # open a directory and follow new documents
-vo ui                                    # open the management UI (one-time URL)
+vo ui                                    # open the management UI (no authentication)
 vo list --json                           # list open documents
 vo search "authentication design" --json # search open documents
 vo read <documentId> --section sec_0003 --json   # read a section
 vo close docs/design.md                  # remove from the list (the file is not deleted)
 vo daemon stop                           # stop the daemon
 ```
+
+The management UI does not require authentication. The URL printed by `vo ui --print-url` can be copied to another browser or tab on the same machine while the daemon is running. URLs that select a document work directly too. Both listeners bind to `127.0.0.1`; viewing from another machine is not supported.
 
 For how agents search, read, and ask questions, see [docs/agent-usage.md](docs/agent-usage.md).
 
@@ -131,7 +133,7 @@ The person answers in the answer panel of the management UI. The answers are sub
 | Symptom | What to do |
 |---|---|
 | `vo` runs a different command | Use `vde-open`, or check the order of `PATH` |
-| The management UI asks you to open it again from the CLI | Open a new URL with `vo ui` (each URL works once; after the daemon restarts, earlier windows stop working) |
+| An earlier URL stops working after the daemon restarts | Open the current URL with `vo ui` (the port may change on restart) |
 | Exit code 8 (cannot connect to or start the daemon) | Check with `vo daemon status`, and look for leftover files with `vo doctor` |
 | Images or CSS are not shown | Open "Differences from the original document" and register them with `--assets-root` or `--asset` |
 | Search does not find a document | Check with `vo list --json` that the document is open and its `searchState` is `ready` |
@@ -143,7 +145,7 @@ The person answers in the answer panel of the management UI. The answers are sub
 |---|---|
 | Linux and macOS on CI (GitHub Actions `ubuntu-latest` and `macos-latest`, Node.js 24.21.0) | Verified (format, lint, typecheck, unit/integration, build, pack, e2e; `.github/workflows/ci.yml`) |
 | Windows on CI (`windows-latest`, Node.js 24.21.0) | Verified: build, pack smoke (install, both bins, IPC, starting and stopping the daemon, JSON output, the UI and workers), and the daemon and document integration tests. The other unit and integration tests and the e2e tests are not run on Windows |
-| Browsers | Chromium (Playwright's Chrome Headless Shell): the full suite is verified. Firefox and WebKit (Playwright 1.63.0): the view isolation, CSP, HTML bridge, and authentication tests (`pnpm test:e2e:cross`) are verified. Other UI interactions in Firefox and WebKit (search, answer panel, narrow screens, a list of 1,000 documents) are not verified |
+| Browsers | Chromium (Playwright's Chrome Headless Shell): the full suite is verified. Firefox and WebKit (Playwright 1.63.0): the view isolation, CSP, HTML bridge, and direct URL tests (`pnpm test:e2e:cross`) are verified. Other UI interactions in Firefox and WebKit (search, answer panel, narrow screens, a list of 1,000 documents) are not verified |
 | PDF export | macOS (development machine): verified with Google Chrome 154 and Microsoft Edge 154. Linux on CI: verified with the runner's Google Chrome (e2e). Windows: printing with a real browser is not verified (the pack smoke test checks rendering the print document) |
 
 More details: [docs/performance.md](docs/performance.md) (measurements), [docs/architecture.md](docs/architecture.md) and [docs/security-model.md](docs/security-model.md) (design). Development records (in Japanese): [docs/implementation-status.md](docs/implementation-status.md), [docs/dependency-validation.md](docs/dependency-validation.md), and [docs/adr/](docs/adr/).
@@ -162,7 +164,7 @@ cd ../..
 pnpm build:watch
 ```
 
-`build:watch` rebuilds when the sources, the build configuration, or the packaged files change; a failed build keeps the last successful output. The next linked CLI invocation uses the new build, but the watcher does not restart your daemon: run `vo daemon restart`, then `vo ui`. Restarting keeps registered documents and saved answers, but changes the UI address and invalidates earlier browser sessions and interactive HTML permissions.
+`build:watch` rebuilds when the sources, the build configuration, or the packaged files change; a failed build keeps the last successful output. The next linked CLI invocation uses the new build, but the watcher does not restart your daemon: run `vo daemon restart`, then `vo ui`. Restarting keeps registered documents and saved answers, but changes the UI address and invalidates earlier render grants and interactive HTML permissions.
 
 For frequent UI changes, use `pnpm dev` instead. It runs the daemon from source with a separate `.dev-home` and serves the UI with Vite HMR. It does not rebuild the linked CLI or restart the backend when its source changes. To run CLI commands against it, set `VDE_OPEN_HOME` to the absolute path of `.dev-home` (for example, `VDE_OPEN_HOME="$PWD/.dev-home" vo list` from the repository root).
 

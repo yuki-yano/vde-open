@@ -70,10 +70,7 @@ async function watchersSettled(call: (method: string) => Promise<unknown>): Prom
 }
 
 // Connect to SSE and either hold without reading (a slow client) or close immediately.
-function openEvents(
-  origin: string,
-  token: string,
-): Promise<{ response: IncomingMessage; close: () => void }> {
+function openEvents(origin: string): Promise<{ response: IncomingMessage; close: () => void }> {
   const url = new URL(origin);
   return new Promise((resolve, reject) => {
     const request = httpRequest(
@@ -81,7 +78,6 @@ function openEvents(
         host: url.hostname,
         port: url.port,
         path: '/_/api/v1/events',
-        headers: { Authorization: `Bearer ${token}` },
       },
       (response) => resolve({ response, close: () => request.destroy() }),
     );
@@ -165,8 +161,7 @@ describe('PERF-003 continuous memory growth', () => {
       samples.push(await measure());
     }
     const [first, second, third] = samples as [Diagnostics, Diagnostics, Diagnostics];
-    // The number of items the daemon itself retains (parse results, revision records, render grants and conversion results, index records, pending operations,
-    // sessions) does not change
+    // The number of items the daemon itself retains (parse results, revision records, render grants and conversion results, index records, pending operations) does not change
     // between intervals. Records of closed documents stop at the number of documents ever opened (5 here).
     expect(second.retained).toEqual(first.retained);
     expect(third.retained).toEqual(first.retained);
@@ -192,7 +187,7 @@ describe('PERF-004 slow client and consecutive updates', () => {
   it('consecutive updates and operations of other clients do not stall even with a client that does not read notifications', async () => {
     const call = await connect();
     const ui = await connectUi(t);
-    const slow = await openEvents(ui.origin, ui.token);
+    const slow = await openEvents(ui.origin);
     slow.response.pause();
     try {
       const startedAt = Date.now();
@@ -230,7 +225,7 @@ describe('PERF-005 idling and notification reconnects', () => {
     const call = await connect();
     const ui = await connectUi(t);
     for (let index = 0; index < 30; index += 1) {
-      const events = await openEvents(ui.origin, ui.token);
+      const events = await openEvents(ui.origin);
       events.close();
     }
     await settle(500);

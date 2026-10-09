@@ -66,7 +66,6 @@ function exportPdf(
   return rawRequest(ui.origin, `/_/api/v1/documents/${documentId}/pdf`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${ui.token}`,
       Origin: ui.origin,
       'Content-Type': 'application/json',
       ...headers,
@@ -99,10 +98,7 @@ describe('PDF export through the management API', () => {
     expect(await refused(exportPdf(ui, documentId, { revision: `rev_${'0'.repeat(64)}` }))).toBe(
       'E_REVISION_UNAVAILABLE',
     );
-    // The same checks as every other change: a session and the UI's own Origin.
-    expect(await refused(exportPdf(ui, documentId, { revision }, { Authorization: '' }))).toBe(
-      'E_UNAUTHORIZED',
-    );
+    // Changes require the UI's own Origin. No token is needed.
     expect(
       await refused(exportPdf(ui, documentId, { revision }, { Origin: 'http://127.0.0.1:1' })),
     ).toBe('E_UNAUTHORIZED');
@@ -120,7 +116,6 @@ describe('PDF export through the management API', () => {
       path: `/_/api/v1/documents/${documentId}/pdf`,
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${ui.token}`,
         Origin: ui.origin,
         'Content-Type': 'application/json',
       },

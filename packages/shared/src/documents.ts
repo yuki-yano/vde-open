@@ -309,19 +309,6 @@ export const uiStatusSchema = z.strictObject({
 });
 export type UiStatus = z.infer<typeof uiStatusSchema>;
 
-export const bootstrapResultSchema = z.strictObject({
-  // URL whose fragment holds a one-time ticket. Treated as a secret.
-  bootstrapUrl: z.string(),
-  uiUrl: z.string(),
-});
-export type BootstrapResult = z.infer<typeof bootstrapResultSchema>;
-
-export const sessionResultSchema = z.strictObject({
-  token: z.string(),
-  idleTimeoutSeconds: z.number().int().positive(),
-});
-export type SessionResult = z.infer<typeof sessionResultSchema>;
-
 export const renderGrantParamsSchema = z.strictObject({
   documentId: documentIdSchema,
   // Revision to show. Defaults to the current revision.

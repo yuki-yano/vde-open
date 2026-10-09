@@ -88,7 +88,7 @@ async function openHostile(page: Page): Promise<string> {
   t.write('site/app.js', `fetch('${origin}/local-script')`);
   t.write('site/neighbor.md', '# 隣の文書\n');
   await t.json(['open', 'site/index.html']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(page.getByTestId('document-frame')).toBeVisible();
   return origin;
 }
@@ -218,7 +218,7 @@ test('SEC-019: if the document is updated while the confirmation is shown, the d
   t.write('site/first.md', '# 確認した文書\n');
   t.write('site/second.md', '# 更新後の行き先\n');
   await t.json(['open', 'site/index.html']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const links = page.getByTestId('render-links');
   await links.locator('summary').click();
   await links.getByRole('button', { name: 'link' }).click();
@@ -249,7 +249,7 @@ test('Markdown images show only registered local files, and relative links are c
   t.write('docs/img/a.png', PNG);
   t.write('docs/b.md', '# 次の文書\n');
   await t.json(['open', 'docs/a.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
 
   const image = page.locator('article img');
   await expect(image).toHaveCount(1);
@@ -325,7 +325,7 @@ test('render grants are refetched only when needed, and the previous grant is re
   const touch = (title: string) => t.json(['open', 'site/index.html', '--title', title]);
   const heading = (name: string) => page.getByRole('heading', { level: 1, name });
 
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const frame = page.getByTestId('document-frame');
   const inner = page.frameLocator('[data-testid="document-frame"]');
   const diagnostics = page.getByTestId('render-diagnostics');
@@ -396,7 +396,7 @@ test('updating an HTML document rebuilds the view, and switching to Source does 
   t.write('site/index.html', '<h1 id="h">版1</h1><script>document.title = "x"</script>');
   await t.json(['open', 'site/index.html']);
   await recordReleases(page);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const inner = page.frameLocator('[data-testid="document-frame"]');
   await expect(inner.locator('#h')).toHaveText('版1');
   const first = await page.getByTestId('document-frame').getAttribute('src');
@@ -433,7 +433,7 @@ test('jumping from the outline moves the Static view to the heading, without add
       `<h2 id="重">重なるid</h2>${filler}`,
   );
   await t.json(['open', 'a.md', 'doc.html']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const shown = page
     .getByRole('region', { name: 'Document view' })
     .getByRole('heading', { level: 1 })
@@ -490,7 +490,7 @@ test('the heading jumped to in the Static view is kept in the URL, and a reload 
     `<!doctype html><title>設計HTML</title><h1>文書</h1>${filler}<h2>中間</h2>${filler}<h2>最後</h2>${filler}`,
   );
   await t.json(['open', 'doc.html']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const outline = page.getByRole('complementary', { name: 'Outline' });
   const middle = page
     .frameLocator('[data-testid="document-frame"]')

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, firefox, test } from '@playwright/test';
 
 import { createE2eHome, type E2eHome } from './harness.ts';
 
@@ -20,7 +20,7 @@ test('Markdown width expands, persists across documents and reloads, and applies
   t.write('second.md', '# Another Markdown\n\nMore content\n');
   t.write('page.html', '<!doctype html><title>HTML document</title><h1>HTML document</h1>');
   await t.json(['open', 'first.md', 'second.md', 'page.html']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const article = page.locator('article');
   const wide = page.getByRole('button', { name: 'Wide view', exact: true });
   await expect(article).toHaveCSS('max-width', '960px');
@@ -81,7 +81,7 @@ test('Markdown tables keep readable columns and scroll by keyboard without widen
   );
   await t.json(['open', 'table.md']);
   await page.setViewportSize({ width: 480, height: 900 });
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const viewport = page.getByRole('region', { name: 'Scrollable table' }).first();
   await expect(viewport).toBeVisible();
   const table = viewport.getByRole('table');
@@ -133,7 +133,7 @@ test('outline resizing captures drags across the HTML iframe, stops on release, 
     '<!doctype html><html><head><title>Resizable outline</title></head><body><h1>Resizable outline</h1><p>Document content</p></body></html>',
   );
   await t.json(['open', 'outline.html']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const outline = page.getByRole('complementary', { name: 'Outline', exact: true });
   const handle = page.getByRole('separator', { name: 'Resize outline', exact: true });
   await expect(handle).toBeVisible();
@@ -178,7 +178,7 @@ test('outline resizing supports keys, protects the document beside an answer pan
     }),
   );
   await t.json(['ask', 'question.json', '--view', 'outline.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const outline = page.getByRole('complementary', { name: 'Outline', exact: true });
   const handle = page.getByRole('separator', { name: 'Resize outline', exact: true });
   await expect(handle).toBeVisible();
@@ -215,7 +215,7 @@ test('switching Markdown keeps the current preview until the next one is ready, 
     'first.md',
     'second.md',
   ]);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(page.locator('article strong')).toHaveText('original');
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -278,7 +278,7 @@ test('switching to HTML keeps the previous document until its iframe response lo
     '<!doctype html><html><head><title>Second</title></head><body><p>replacement</p></body></html>',
   );
   await t.json(['open', 'first.md', 'second.html']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(page.locator('article')).toContainText('original');
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -320,7 +320,7 @@ test('P2 gate: a document opened from the CLI is shown in the UI, and additions 
 }) => {
   t.write('a.md', '# 最初の文書\n\n本文です。\n');
   await t.json(['open', 'a.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
 
   const sidebar = page.getByRole('navigation', { name: 'Open documents' });
   await expect(sidebar.getByRole('button', { name: '最初の文書', exact: true })).toBeVisible();
@@ -338,38 +338,59 @@ test('P2 gate: a document opened from the CLI is shown in the UI, and additions 
   await expect(page.locator('article')).toContainText('保存し直した本文です。');
 });
 
-test('SEC-003: the ticket fragment is not kept in history, and the same URL cannot be used twice', async ({
+test('the same document URL opens in another browser without authentication', async ({
   page,
-  context,
+  browser,
+  browserName,
 }) => {
-  t.write('a.md', '# a\n');
+  const filler = Array.from({ length: 100 }, (_, index) => `Paragraph ${String(index)}\n\n`).join(
+    '',
+  );
+  t.write('a.md', `# a\n\n${filler}## Details\nShared content\n`);
   await t.json(['open', 'a.md']);
-  const url = await t.bootstrapUrl();
+  const url = await t.uiUrl();
   await page.goto(url);
   await expect(page.getByRole('navigation', { name: 'Open documents' })).toBeVisible();
-  expect(new URL(page.url()).hash).toBe('');
-  expect(await page.evaluate(() => window.location.href)).not.toContain('bootstrap');
-  // The management UI sends no referrer to navigation targets.
-  const response = await page.request.get(await t.uiUrl());
+  await expect(page.locator('article')).toContainText('Shared content');
+  await page
+    .getByRole('complementary', { name: 'Outline' })
+    .getByRole('button', { name: 'Details' })
+    .click();
+  await expect(page).toHaveURL(/[?&]heading=Details/);
+  const documentUrl = new URL(page.url());
+  // Chromium hands the very same URL to Firefox; other projects use a fresh isolated context.
+  const secondBrowser = browserName === 'chromium' ? await firefox.launch() : null;
+  const secondContext = await (secondBrowser ?? browser).newContext();
+  try {
+    const second = await secondContext.newPage();
+    const apiRequests: Array<{ path: string; authorization: string | undefined }> = [];
+    second.on('request', (request) => {
+      if (request.url().includes('/_/api/v1/'))
+        apiRequests.push({
+          path: new URL(request.url()).pathname,
+          authorization: request.headers()['authorization'],
+        });
+    });
+    await second.goto(documentUrl.href);
+    await expect(second.locator('article')).toContainText('Shared content');
+    expect(new URL(second.url()).searchParams.get('document')).toBe(
+      documentUrl.searchParams.get('document'),
+    );
+    await expect(second.getByRole('heading', { name: 'Details', exact: true })).toBeInViewport();
+    expect(new URL(second.url()).searchParams.get('heading')).toBe('Details');
+    await second.reload();
+    await expect(second.locator('article')).toContainText('Shared content');
+    await expect(second.getByRole('heading', { name: 'Details', exact: true })).toBeInViewport();
+    expect(await second.evaluate(() => sessionStorage.getItem('vde-open.session'))).toBeNull();
+    expect(apiRequests.length).toBeGreaterThan(0);
+    expect(apiRequests.every((request) => request.authorization === undefined)).toBe(true);
+    expect(apiRequests.some((request) => request.path.includes('/sessions'))).toBe(false);
+  } finally {
+    await secondContext.close();
+    await secondBrowser?.close();
+  }
+  const response = await page.request.get(url);
   expect(response.headers()['referrer-policy']).toBe('no-referrer');
-
-  // Opening the same URL in another tab does not yield a session.
-  const second = await context.newPage();
-  await second.goto(url);
-  await expect(second.getByRole('heading', { name: 'Open again from the CLI' })).toBeVisible();
-});
-
-test('SEC-001: the UI opened without a ticket shows no documents, and the API does not respond', async ({
-  page,
-}) => {
-  t.write('secret.md', '# 秘密の見出し\n');
-  await t.json(['open', 'secret.md']);
-  const uiUrl = await t.uiUrl();
-  await page.goto(uiUrl);
-  await expect(page.getByRole('heading', { name: 'Open again from the CLI' })).toBeVisible();
-  await expect(page.getByText('秘密の見出し')).toHaveCount(0);
-  const status = await page.evaluate(async () => (await fetch('/_/api/v1/documents')).status);
-  expect(status).toBe(401);
 });
 
 test('MD-003: raw HTML and scripts in Markdown do not run in the management UI', async ({
@@ -393,7 +414,7 @@ test('MD-003: raw HTML and scripts in Markdown do not run in the management UI',
     ].join('\n'),
   );
   await t.json(['open', 'attack.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(page.locator('article')).toContainText('window.vdeExecuted');
   expect(
     await page.evaluate(() => (window as unknown as { vdeExecuted?: string }).vdeExecuted),

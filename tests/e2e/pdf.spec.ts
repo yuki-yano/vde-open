@@ -41,7 +41,7 @@ test('Export PDF saves the shown Markdown as a PDF without a print dialog', asyn
   t.write('docs/images/chart.png', PNG);
   t.write('docs/report.md', `# ${title}\n\n![グラフ](images/chart.png)\n\n${sections}`);
   await t.json(['open', 'docs/report.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(page.locator('article h1')).toHaveText(title);
 
   const downloading = page.waitForEvent('download');
@@ -96,7 +96,7 @@ test('Export PDF prints static HTML with its CSS, images, registered font and pa
     '<!doctype html><html lang="ja"><title>HTML資料</title><link rel="stylesheet" href="css/main.css"><h1>HTML文書</h1><p class="screen-only">SCREENONLY</p><p class="print-only">PRINTONLY</p><img src="images/chart.png"><p class="second">2ページ目の本文</p><script>document.body.innerHTML="SCRIPTCONTENT";</script></html>',
   );
   await t.json(['open', 'docs/page.html']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(page.getByTestId('html-mode')).toBeVisible();
   const downloading = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export PDF' }).click();
@@ -125,7 +125,7 @@ test('an interactive HTML document exports its saved source as static HTML', asy
     '<title>Interactive</title><h1>STATICCONTENT</h1><script>document.querySelector("h1").textContent="DYNAMICCONTENT";</script>',
   );
   await t.json(['open', 'interactive.html', '--html-mode', 'interactive']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(page.frameLocator('[data-testid="document-frame"]').locator('h1')).toHaveText(
     'DYNAMICCONTENT',
   );

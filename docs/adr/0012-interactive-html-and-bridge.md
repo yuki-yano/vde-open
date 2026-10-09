@@ -1,5 +1,7 @@
 # ADR-0012: scriptを動かすHTMLは明示的な許可でだけ表示し、HTMLからは回答案だけを受け取る
 
+管理画面の認証・sessionへの結び付けは[ADR-0014](0014-management-without-authentication.md)で更新。表示の権限と質問の確認は維持する。
+
 状態: 採用（P6）
 
 ## 背景

@@ -22,7 +22,7 @@ test('DOC-007 / DOC-008: the tree view tells same-named files apart, and reorder
   t.write('beta/docs/a.md', '# betaの文書\n');
   t.write('readme.md', '# 説明\n');
   await t.json(['open', 'alpha/docs/a.md', 'beta/docs/a.md', 'readme.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const sidebar = sidebarOf(page);
 
   // In the flat view, move an item up.
@@ -60,7 +60,7 @@ test('DOC-013: Source and Preview can be switched, and the view does not change 
 }) => {
   t.write('a.md', '# 見出し\n\n**最初**の本文\n');
   await t.json(['open', 'a.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const body = page.getByTestId('document-body');
   await expect(body.locator('strong')).toHaveText('最初');
 
@@ -90,7 +90,7 @@ test('DOC-014: an update to a document not being shown does not steal the docume
   t.write('reading.md', `# 読んでいる文書\n\n${long}\n`);
   t.write('other.md', '# 別の文書\n');
   await t.json(['open', 'reading.md', 'other.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const body = page.getByTestId('document-body');
   await expect(body).toContainText('段落 200');
   await body.evaluate((element) => {
@@ -128,7 +128,7 @@ test('MD-006: a document over the structure limits switches to the Source view a
   t.write('deep.md', `# 深い文書\n\n${'> '.repeat(70)}底\n`);
   t.write('normal.md', '# 普通の文書\n');
   await t.json(['open', 'deep.md', 'normal.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await expect(page.getByText('nested deeper than 64 levels')).toBeVisible();
   await expect(page.getByTestId('document-body').locator('pre')).toContainText('底');
 
@@ -140,7 +140,7 @@ test('MD-006: a document over the structure limits switches to the Source view a
 test('removing from the list keeps the file', async ({ page }) => {
   t.write('a.md', '# 残すfile\n');
   await t.json(['open', 'a.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   await sidebarOf(page).getByRole('listitem').filter({ hasText: '残すfile' }).hover();
   await sidebarOf(page).getByRole('button', { name: 'Remove 残すfile from the list' }).click();
   await expect(sidebarOf(page)).toContainText('No documents are open');
@@ -157,7 +157,7 @@ test('shows every heading even when the outline does not fit in one response', a
   );
   t.write('many.md', `# 多くの見出し\n\n${headings.join('\n')}`);
   await t.json(['open', 'many.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const outline = page.getByRole('complementary', { name: 'Outline' });
   await expect(outline.getByRole('listitem')).toHaveCount(1501);
   await expect(outline.getByRole('listitem').last()).toContainText('見出し1499');
@@ -170,7 +170,7 @@ test('the shown document is kept in the URL: a reload shows it again, and back a
   t.write('a.md', '# 一つ目\n\n本文A\n');
   t.write('b.md', '# 二つ目\n\n本文B\n');
   await t.json(['open', 'a.md', 'b.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const shown = page
     .getByRole('region', { name: 'Document view' })
     .getByRole('heading', { level: 1 })
@@ -199,7 +199,7 @@ test('jumping from the outline moves the Markdown preview to the heading', async
     `# 文書\n\n${filler}\n\n## 中間の見出し\n\n${filler}\n\n## 最後の見出し\n\n${filler}\n`,
   );
   await t.json(['open', 'a.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const outline = page.getByRole('complementary', { name: 'Outline' });
   const middle = page.locator('article').getByRole('heading', { name: '中間の見出し' });
   await expect(middle).toBeAttached();
@@ -224,7 +224,7 @@ test('the heading jumped to is kept in the URL: a reload, and going back to the 
   );
   t.write('b.md', '# 別の文書\n');
   await t.json(['open', 'a.md', 'b.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const outline = page.getByRole('complementary', { name: 'Outline' });
   const middle = page.locator('article').getByRole('heading', { name: '中間の見出し' });
   await expect(middle).toBeAttached();
@@ -258,7 +258,7 @@ test('back within the document jumps to the heading its entry keeps, and a searc
   );
   t.write('b.md', '# 別の文書\n');
   await t.json(['open', 'a.md', 'b.md']);
-  await page.goto(await t.bootstrapUrl());
+  await page.goto(await t.uiUrl());
   const outline = page.getByRole('complementary', { name: 'Outline' });
   const middle = page.locator('article').getByRole('heading', { name: '中間の見出し' });
   const last = page.locator('article').getByRole('heading', { name: '最後の見出し' });

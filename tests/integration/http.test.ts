@@ -56,72 +56,38 @@ function raw(
   });
 }
 
-async function ticket(): Promise<string> {
-  const printed = await t.run(['ui', '--print-url']);
-  return printed.stdout.trim().split('#bootstrap=')[1] as string;
-}
-
-async function session(): Promise<string> {
-  const response = await raw('/_/api/v1/sessions/bootstrap', {
-    method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ticket: await ticket() }),
-  });
-  return (JSON.parse(response.body) as { data: { token: string } }).data.token;
-}
-
-const API_PATHS = ['/documents', '/status', '/events'];
-
-describe('SEC-001 management API authentication', () => {
-  it('returns neither the list nor the body without a token or with a different token', async () => {
-    for (const path of API_PATHS) {
-      const none = await raw(`/_/api/v1${path}`);
-      expect(none.status, path).toBe(401);
-      expect(none.body).not.toContain('秘密');
-      const wrong = await raw(`/_/api/v1${path}`, {
-        headers: { Authorization: `Bearer ${'x'.repeat(43)}` },
-      });
-      expect(wrong.status, path).toBe(401);
-    }
-  });
-
-  it('readable only with the correct token; a revoked token and a token from before a restart are unusable', async () => {
-    const token = await session();
-    const authorized = { Authorization: `Bearer ${token}` };
-    const list = await raw('/_/api/v1/documents', { headers: authorized });
+describe('management API without authentication', () => {
+  it('reads the list and body directly, including after a daemon restart', async () => {
+    const list = await raw('/_/api/v1/documents');
     expect(list.status).toBe(200);
     expect(list.body).toContain('秘密の見出し');
+    const { data } = JSON.parse(list.body) as {
+      data: { documents: Array<{ documentId: string }> };
+    };
+    const id = data.documents[0]?.documentId as string;
+    const content = await raw(`/_/api/v1/documents/${id}/content`);
+    expect(content.status).toBe(200);
+    expect(content.body).toContain('秘密の本文');
 
-    const revoked = await raw('/_/api/v1/session', {
-      method: 'DELETE',
-      headers: { ...authorized, Origin: origin },
-    });
-    expect(revoked.status).toBe(200);
-    expect((await raw('/_/api/v1/documents', { headers: authorized })).status).toBe(401);
-
-    // Sessions live only in memory, so they expire on daemon restart.
-    const before = await session();
     await t.run(['daemon', 'restart', '--json']);
-    const status = (await t.run(['daemon', 'status', '--json'])).json<{ uiUrl: string }>();
-    origin = status.data.uiUrl.replace(/\/$/, '');
-    expect(
-      (await raw('/_/api/v1/documents', { headers: { Authorization: `Bearer ${before}` } })).status,
-    ).toBe(401);
+    origin = (await t.run(['daemon', 'status', '--json']))
+      .json<{ uiUrl: string }>()
+      .data.uiUrl.replace(/\/$/, '');
+    expect((await raw('/_/api/v1/documents')).status).toBe(200);
   });
 });
 
 describe('SEC-002 Origin and Host checks', () => {
   it('rejects an attacker Origin, Origin: null, and an aliased Host', async () => {
-    const token = await session();
-    const authorized = { Authorization: `Bearer ${token}` };
-    for (const headers of [
-      { ...authorized, Origin: 'http://attacker.example' },
-      { ...authorized, Origin: 'null' },
-      { ...authorized, Origin: origin.replace('127.0.0.1', 'localhost') },
-      { ...authorized, Host: 'attacker.example' },
-      { ...authorized, Host: `localhost:${new URL(origin).port}` },
-      { ...authorized, 'Sec-Fetch-Site': 'cross-site' },
-    ]) {
+    const rejectedHeaders: Record<string, string>[] = [
+      { Origin: 'http://attacker.example' },
+      { Origin: 'null' },
+      { Origin: origin.replace('127.0.0.1', 'localhost') },
+      { Host: 'attacker.example' },
+      { Host: `localhost:${new URL(origin).port}` },
+      { 'Sec-Fetch-Site': 'cross-site' },
+    ];
+    for (const headers of rejectedHeaders) {
       const response = await raw('/_/api/v1/documents', { headers });
       expect(response.status, JSON.stringify(headers)).toBe(401);
       expect(response.body).not.toContain('秘密');
@@ -131,22 +97,20 @@ describe('SEC-002 Origin and Host checks', () => {
   });
 
   it('state-changing requests are limited to JSON from the UI origin', async () => {
-    const token = await session();
-    const list = JSON.parse(
-      (await raw('/_/api/v1/documents', { headers: { Authorization: `Bearer ${token}` } })).body,
-    ) as { data: { documents: Array<{ documentId: string }> } };
+    const list = JSON.parse((await raw('/_/api/v1/documents', { headers: {} })).body) as {
+      data: { documents: Array<{ documentId: string }> };
+    };
     const id = list.data.documents[0]?.documentId as string;
 
     // Rejects changes without Origin (equivalent to non-browser clients or form submissions).
     const noOrigin = await raw(`/_/api/v1/documents/${id}`, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {},
     });
     expect(noOrigin.status).toBe(401);
     const form = await raw('/_/api/v1/documents/order', {
       method: 'PUT',
       headers: {
-        Authorization: `Bearer ${token}`,
         Origin: origin,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
@@ -159,7 +123,6 @@ describe('SEC-002 Origin and Host checks', () => {
   });
 
   it('does not allow CORS, and does not answer unknown APIs with the UI HTML', async () => {
-    const token = await session();
     const preflight = await raw('/_/api/v1/documents', {
       method: 'OPTIONS',
       headers: { Origin: 'http://attacker.example', 'Access-Control-Request-Method': 'GET' },
@@ -167,7 +130,7 @@ describe('SEC-002 Origin and Host checks', () => {
     expect(preflight.headers['access-control-allow-origin']).toBeUndefined();
 
     const unknown = await raw('/_/api/v1/unknown', {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {},
     });
     expect(unknown.status).toBe(404);
     expect(unknown.headers['content-type']).toContain('application/json');
@@ -183,15 +146,11 @@ describe('DOC-008 saving the display order', () => {
     t.write('b.md', '# b\n');
     t.write('c.md', '# c\n');
     await t.run(['open', 'b.md', 'c.md', '--json']);
-    const token = await session();
     const headers = {
-      Authorization: `Bearer ${token}`,
       Origin: origin,
       'Content-Type': 'application/json',
     };
-    const listed = JSON.parse(
-      (await raw('/_/api/v1/documents', { headers: { Authorization: `Bearer ${token}` } })).body,
-    ) as {
+    const listed = JSON.parse((await raw('/_/api/v1/documents', { headers: {} })).body) as {
       data: { documents: Array<{ documentId: string; title: string }> };
       meta: { catalogVersion: number };
     };
@@ -237,59 +196,37 @@ describe('DOC-008 saving the display order', () => {
   });
 });
 
-describe('SEC-003 bootstrap ticket', () => {
-  it('can be exchanged once; a second exchange and an unknown ticket are rejected', async () => {
-    const value = await ticket();
-    const exchange = () =>
-      raw('/_/api/v1/sessions/bootstrap', {
-        method: 'POST',
-        headers: { Origin: origin, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket: value }),
-      });
-    expect((await exchange()).status).toBe(200);
-    expect((await exchange()).status).toBe(401);
-
-    const unknown = await raw('/_/api/v1/sessions/bootstrap', {
-      method: 'POST',
-      headers: { Origin: origin, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticket: 'x'.repeat(43) }),
-    });
-    expect(unknown.status).toBe(401);
-    // From a different origin, even a correct ticket cannot be exchanged.
-    const crossOrigin = await raw('/_/api/v1/sessions/bootstrap', {
-      method: 'POST',
-      headers: { Origin: 'http://attacker.example', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticket: await ticket() }),
-    });
-    expect(crossOrigin.status).toBe(401);
-  });
-
-  it('does not show the ticket or token in normal results or the log', async () => {
-    const value = await ticket();
-    const token = await session();
-    const status = await t.run(['daemon', 'status', '--json']);
-    const opened = await t.run(['open', 'secret.md', '--json']);
-    await t.run(['daemon', 'stop', '--json']);
-    const { readFileSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    const log = readFileSync(join(t.home, 'logs', 'daemon.jsonl'), 'utf8');
-    for (const output of [status.stdout, opened.stdout, log]) {
-      expect(output).not.toContain(value);
-      expect(output).not.toContain(token);
-      expect(output).not.toContain('bootstrap=');
-    }
-    // Printing the URL containing a secret cannot be combined with --json.
+describe('reusable UI URL', () => {
+  it('prints the same URL repeatedly without secrets or expiry warnings and supports JSON', async () => {
+    const first = await t.run(['ui', '--print-url']);
+    const second = await t.run(['ui', '--print-url']);
+    expect(first.exitCode).toBe(0);
+    expect(first.stdout.trim()).toBe(`${origin}/`);
+    expect(second.stdout).toBe(first.stdout);
+    expect(first.stderr).toBe('');
     const printed = await t.run(['ui', '--print-url', '--json']);
-    expect(printed.exitCode).toBe(2);
-    expect(printed.stdout).not.toContain('bootstrap=');
+    expect(printed.exitCode).toBe(0);
+    expect(printed.json<{ uiUrl: string; opened: boolean }>().data).toEqual({
+      uiUrl: `${origin}/`,
+      opened: false,
+    });
+    for (const [path, method] of [
+      ['/sessions/bootstrap', 'POST'],
+      ['/session', 'DELETE'],
+    ]) {
+      const response = await raw(`/_/api/v1${path}`, {
+        method,
+        headers: { Origin: origin, 'Content-Type': 'application/json' },
+      });
+      expect(response.status).toBe(404);
+    }
   });
 });
 
 describe('SYS-013 (partial) change notifications', () => {
-  it('authenticated SSE streams hello on connect and change notifications, without bodies', async () => {
-    const token = await session();
+  it('SSE streams without authentication hello on connect and change notifications, without bodies', async () => {
     const response = await fetch(`${origin}/_/api/v1/events`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {},
     });
     expect(response.headers.get('content-type')).toContain('text/event-stream');
     const reader = (response.body as ReadableStream<Uint8Array>).getReader();
@@ -320,10 +257,9 @@ describe('SYS-013 (partial) change notifications', () => {
     expect(sequences).toEqual(sequences.toSorted((a, b) => a - b));
   });
 
-  it('revoking the session also ends the connected SSE, and later notifications do not arrive', async () => {
-    const token = await session();
+  it('stopping the daemon ends the connected SSE', async () => {
     const response = await fetch(`${origin}/_/api/v1/events`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {},
     });
     const reader = (response.body as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
@@ -343,12 +279,7 @@ describe('SYS-013 (partial) change notifications', () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
 
-    const revoked = await raw('/_/api/v1/session', {
-      method: 'DELETE',
-      headers: { Origin: origin, Authorization: `Bearer ${token}` },
-    });
-    expect(revoked.status).toBe(200);
-    // At revocation, the server closes the connection.
+    await t.run(['daemon', 'stop', '--json']);
     await Promise.race([
       reading,
       new Promise((_resolve, reject) =>
@@ -357,9 +288,6 @@ describe('SYS-013 (partial) change notifications', () => {
     ]);
     expect(ended).toBe(true);
 
-    // Later changes do not flow to the revoked session's connection.
-    t.write('after-revoke.md', '# 破棄の後\n');
-    await t.run(['open', 'after-revoke.md', '--json']);
-    expect(received).not.toContain('catalog-changed');
+    expect(received).toContain('daemon-stopping');
   });
 });

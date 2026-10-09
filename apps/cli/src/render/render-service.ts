@@ -16,7 +16,6 @@ import {
 import type { DocumentService } from '../documents/service.ts';
 import { bridgeSdkScript } from './bridge-sdk.ts';
 import type { StateStore } from '../persistence/state-store.ts';
-import type { SessionService } from '../server/session-service.ts';
 import type { ParseService } from '../workers/parse-service.ts';
 
 // One file served from a preview URL. role determines the response headers.
@@ -51,7 +50,6 @@ interface Snapshot {
 }
 
 interface Grant {
-  sessionId: string;
   documentId: string;
   // The document's close count at issue time. Unusable after a close, even if reopened.
   openEpoch: number;
@@ -74,34 +72,23 @@ export interface GrantContext {
 
 export interface RenderService {
   // Issues a limited grant to view one revision of one document (spec 10.2).
-  createGrant(
-    sessionId: string,
-    params: unknown,
-    context: GrantContext,
-  ): Promise<RenderGrantResult>;
+  createGrant(params: unknown, context: GrantContext): Promise<RenderGrantResult>;
   // Issues a render grant for the revision and view mode pinned by a pending question (spec 11.4, 12.2).
   // The view mode is decided from the mode when the question was created and the current script permission.
   // If interactive, the SDK is included so the HTML can send draft answers for that question.
-  createGrantForRequest(
-    sessionId: string,
-    requestId: string,
-    context: GrantContext,
-  ): Promise<RenderGrantResult>;
-  // The question, if the SDK-enabled render grant is still valid, belongs to the session, and the question is pending.
-  bridgeOf(
-    sessionId: string,
-    grant: string,
-  ): { requestId: string; documentId: string; revision: string } | null;
-  // Reclaims grants when a view is closed. Grants of other sessions are not touched.
-  release(sessionId: string, grants: string[]): number;
+  createGrantForRequest(requestId: string, context: GrantContext): Promise<RenderGrantResult>;
+  // The question, if the SDK-enabled render grant is still valid and the question is pending.
+  bridgeOf(grant: string): { requestId: string; documentId: string; revision: string } | null;
+  // Reclaims the specified grants when their views are closed.
+  release(grants: string[]): number;
   // The file a preview URL points to. null if the grant is invalid or the path is not registered.
   resolve(grant: string, logicalPath: string): Promise<PreviewFile | null>;
   // A link in the document, for the displayed revision.
   linkOf(documentId: string, revision: string, linkId: string): Promise<RenderLink>;
   // Revokes grants of closed documents. Grants from before a close do not come back on reopen.
   pruneClosed(): void;
-  // Unregistered files the view tried to load. Only grants of the caller's own session can be inspected.
-  missingOf(sessionId: string, grant: string): string[];
+  // Unregistered files the specified view tried to load.
+  missingOf(grant: string): string[];
   readonly grantCount: number;
   // Counts of retained entries (used to check for resource leaks; daemon.diagnostics).
   retainedCounts(): Record<string, number>;
@@ -110,7 +97,6 @@ export interface RenderService {
 export interface RenderServiceOptions {
   store: StateStore;
   documents: DocumentService;
-  sessions: SessionService;
   parse: ParseService;
   previewOrigin: () => string;
   // Called when the view tries to load a new unregistered file (to notify the UI).
@@ -129,14 +115,9 @@ function decodeUtf8(bytes: Buffer): string | null {
 }
 
 export function createRenderService(options: RenderServiceOptions): RenderService {
-  const { store, documents, sessions, parse } = options;
+  const { store, documents, parse } = options;
   const grants = new Map<string, Grant>();
   const snapshots = new Map<string, Snapshot>();
-
-  // When a session is revoked, all grants it holds are revoked too.
-  sessions.onAnyRevoke((sessionId) => {
-    for (const [key, grant] of grants) if (grant.sessionId === sessionId) grants.delete(key);
-  });
 
   const snapshotOf = async (
     documentId: string,
@@ -226,14 +207,13 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     return { record, entry, snapshot };
   };
 
-  // A grant is valid only while the issuing session is active and the document is open.
+  // A grant is valid only while the document is open.
   // An interactive view is unusable once the script permission is revoked.
   const liveGrant = (key: string): Grant | null => {
     const grant = grants.get(key);
     if (!grant) return null;
     const record = documents.state.documents[grant.documentId];
     if (
-      !sessions.isActiveId(grant.sessionId) ||
       !record?.isOpen ||
       documents.openEpoch(grant.documentId) !== grant.openEpoch ||
       (grant.mode === 'interactive' &&
@@ -247,7 +227,6 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
 
   // Issues a render grant. With a requestId, the SDK is included so the HTML can send draft answers for that question.
   const issue = async (
-    sessionId: string,
     params: {
       documentId: string;
       revision?: string | undefined;
@@ -334,7 +313,6 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     // 256-bit random value. Usable only to view this document and revision, never for the management API.
     const key = randomBytes(32).toString('base64url');
     grants.set(key, {
-      sessionId,
       documentId: record.documentId,
       openEpoch,
       revision: entry.revision,
@@ -344,13 +322,11 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       bridge,
       missing: new Set(),
     });
-    // Limits how many grants a session can hold. Excess grants are revoked oldest first.
-    const owned = [...grants].filter(([, grant]) => grant.sessionId === sessionId);
-    for (const [oldKey] of owned.slice(
-      0,
-      Math.max(0, owned.length - LIMITS.renderGrantsPerSession),
-    )) {
-      grants.delete(oldKey);
+    // Bound retained views across the daemon. Excess grants are revoked oldest first.
+    while (grants.size > LIMITS.renderGrants) {
+      const oldest = grants.keys().next().value;
+      if (oldest === undefined) break;
+      grants.delete(oldest);
     }
     const filesBaseUrl = `${options.previewOrigin()}/r/${key}/files/`;
     return {
@@ -384,12 +360,12 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       return { grants: grants.size, snapshots: snapshots.size };
     },
 
-    async createGrant(sessionId, rawParams, context) {
+    async createGrant(rawParams, context) {
       const params = renderGrantParamsSchema.parse(rawParams);
-      return issue(sessionId, { ...params, requestId: null }, context);
+      return issue({ ...params, requestId: null }, context);
     },
 
-    async createGrantForRequest(sessionId, requestId, context) {
+    async createGrantForRequest(requestId, context) {
       const request = Object.hasOwn(store.payload.feedbackRequests, requestId)
         ? store.payload.feedbackRequests[requestId]
         : undefined;
@@ -407,7 +383,6 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       const interactive =
         request.renderMode === 'interactive' && documents.interactiveAllowed(request.documentId);
       return issue(
-        sessionId,
         {
           documentId: request.documentId,
           revision: request.revision,
@@ -418,9 +393,9 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       );
     },
 
-    bridgeOf(sessionId, key) {
+    bridgeOf(key) {
       const grant = liveGrant(key);
-      if (!grant?.bridge || grant.sessionId !== sessionId) return null;
+      if (!grant?.bridge) return null;
       const request = store.payload.feedbackRequests[grant.bridge.requestId];
       if (request?.status !== 'pending') return null;
       return {
@@ -430,10 +405,10 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       };
     },
 
-    release(sessionId, keys) {
+    release(keys) {
       let released = 0;
       for (const key of keys) {
-        if (grants.get(key)?.sessionId === sessionId && grants.delete(key)) released += 1;
+        if (grants.delete(key)) released += 1;
       }
       return released;
     },
@@ -462,9 +437,9 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       return { body, mime: file.mime, role: file.role, grant: key, mode: grant.mode };
     },
 
-    missingOf(sessionId, key) {
+    missingOf(key) {
       const grant = liveGrant(key);
-      if (!grant || grant.sessionId !== sessionId) return [];
+      if (!grant) return [];
       return [...grant.missing];
     },
 

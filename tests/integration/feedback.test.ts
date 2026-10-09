@@ -255,7 +255,6 @@ describe('FB-004 / FB-019 fetching answers and acknowledging', () => {
         {
           method: 'PUT',
           headers: {
-            Authorization: `Bearer ${ui.token}`,
             Origin: ui.origin,
             'Content-Type': 'application/json',
           },
@@ -294,11 +293,6 @@ describe('FB-017 / FB-018 how waiting ends, and cancel', () => {
     expect((JSON.parse(interrupted.stdout) as JsonEnvelope<never>).error.code).toBe(
       'E_INTERRUPTED',
     );
-    expect(await status(request.requestId)).toBe('pending');
-
-    // Closing the browser (ending the management UI session) does not cancel the question.
-    const ui = await connectUi(t);
-    expect((await ui.api('/session', { method: 'DELETE' })).status).toBe(200);
     expect(await status(request.requestId)).toBe('pending');
   });
 
@@ -416,13 +410,9 @@ describe('SYS-003 / SYS-013 / DOC-016 restart and wait, close --all', () => {
     await answerFromUi(ui, answered.requestId);
     expect((await t.run(['open', '-w', '.', '--json'])).exitCode).toBe(0);
     await t.run(['daemon', 'restart', '--json']);
-    // A token from before the restart is unusable with the new daemon.
+    // The new daemon remains directly accessible without a browser session.
     const restarted = await connectUi(t);
-    const { rawRequest } = await import('./ui-client.ts');
-    const stale = await rawRequest(restarted.origin, '/_/api/v1/feedback', {
-      headers: { Authorization: `Bearer ${ui.token}`, Origin: restarted.origin },
-    });
-    expect(stale.status).toBe(401);
+    expect((await restarted.api('/feedback')).status).toBe(200);
     const restored = (
       await t.run(['feedback', 'get', answered.requestId, '--json'])
     ).json<Request>().data;
@@ -556,7 +546,7 @@ describe('SYS-014 / SEC-018 concurrent operations and the log', () => {
     );
   });
 
-  it('the log contains no secrets or content even after operations involving answers, draft answers, and tokens', async () => {
+  it('the log contains no secrets or content even after operations involving answers and draft answers', async () => {
     const request = await ask();
     const ui = await connectUi(t);
     await answerFromUi(ui, request.requestId);
@@ -564,7 +554,6 @@ describe('SYS-014 / SEC-018 concurrent operations and the log', () => {
     await t.run(['daemon', 'stop', '--json']);
     const log = readFileSync(join(t.home, 'logs', 'daemon.jsonl'), 'utf8');
     expect(log).not.toContain(SECRET);
-    expect(log).not.toContain(ui.token);
     expect(log).not.toContain('採用案');
     expect(log).not.toContain('ログイン画面の確認');
   });

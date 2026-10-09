@@ -33,7 +33,6 @@ import type { FeedbackService } from '../../feedback/service.ts';
 import type { RenderService } from '../../render/render-service.ts';
 import type { SearchService } from '../../search/search-service.ts';
 import type { EventHub } from '../event-hub.ts';
-import type { SessionService } from '../session-service.ts';
 import { createEventQueue } from './event-queue.ts';
 
 const API_PREFIX = '/_/api/v1';
@@ -74,7 +73,6 @@ export interface ManagementDeps {
   daemonId: string;
   version: string;
   documents: DocumentService;
-  sessions: SessionService;
   events: EventHub;
   render: RenderService;
   search: SearchService;
@@ -104,7 +102,6 @@ export interface ManagementServer {
 
 interface HttpEnv {
   Bindings: Partial<HttpBindings>;
-  Variables: { token: string };
 }
 
 interface StaticAsset {
@@ -293,43 +290,10 @@ export async function startManagementServer(
     if (deps.isStopping()) {
       return fail(c, new VdeError('E_DAEMON_STOPPING', 'The daemon is stopping.'));
     }
-    // Only the ticket exchange at the entry point is accepted without a session.
-    if (c.req.path === `${API_PREFIX}/sessions/bootstrap` && method === 'POST') return next();
-    const authorization = c.req.header('authorization') ?? '';
-    const token = authorization.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : '';
-    if (token === '' || !deps.sessions.authenticate(token)) {
-      return fail(
-        c,
-        new VdeError('E_UNAUTHORIZED', 'Authentication is required. Open again from the CLI.'),
-      );
-    }
-    c.set('token', token);
     return next();
   });
 
   const api = new Hono<HttpEnv>();
-
-  api.post('/sessions/bootstrap', async (c) => {
-    const body = z.strictObject({ ticket: z.string().min(1).max(256) }).parse(await c.req.json());
-    const token = deps.sessions.exchange(body.ticket);
-    if (!token) {
-      return fail(
-        c,
-        new VdeError('E_UNAUTHORIZED', 'This URL has already been used or has expired.'),
-      );
-    }
-    return c.json(
-      successEnvelope(
-        { token, idleTimeoutSeconds: LIMITS.sessionIdleMs / 1000 },
-        { command: 'sessions.bootstrap' },
-      ),
-    );
-  });
-
-  api.delete('/session', (c) => {
-    deps.sessions.revoke(c.get('token'));
-    return c.json(successEnvelope({ revoked: true }, { command: 'session.delete' }));
-  });
 
   api.get('/status', (c) => {
     const state = deps.documents.state;
@@ -463,11 +427,9 @@ export async function startManagementServer(
   // Render grant for the revision and HTML mode pinned by a pending question (spec 12.2).
   api.post('/feedback/:id/render-grants', async (c) => {
     const requestId = requestIdSchema.parse(c.req.param('id'));
-    const result = await deps.render.createGrantForRequest(
-      deps.sessions.idOf(c.get('token')),
-      requestId,
-      { origin: c.req.header('origin') ?? origin },
-    );
+    const result = await deps.render.createGrantForRequest(requestId, {
+      origin: c.req.header('origin') ?? origin,
+    });
     return c.json(
       successEnvelope(result, {
         command: 'feedback.render-grant',
@@ -477,10 +439,9 @@ export async function startManagementServer(
   });
 
   // Operations from the HTML SDK (fetching and replacing the draft answer). The management UI relays them from the view iframe.
-  // The render grant is received in the body; every time, check that it is still valid, belongs to this session, and the question is pending.
-  const bridgeOf = (token: string, grant: unknown) => {
-    const found =
-      typeof grant === 'string' ? deps.render.bridgeOf(deps.sessions.idOf(token), grant) : null;
+  // The render grant is received in the body; every time, check that it is still valid and the question is pending.
+  const bridgeOf = (grant: unknown) => {
+    const found = typeof grant === 'string' ? deps.render.bridgeOf(grant) : null;
     if (!found) {
       throw new VdeError(
         'E_RENDER_GRANT_INVALID',
@@ -491,21 +452,20 @@ export async function startManagementServer(
   };
   api.post('/render-grants/bridge/ready', async (c) => {
     const body = z.strictObject({ grant: z.string().min(1).max(128) }).parse(await c.req.json());
-    const { requestId } = bridgeOf(c.get('token'), body.grant);
+    const { requestId } = bridgeOf(body.grant);
     return ok(c, 'render-grants.bridge-ready', deps.feedback.getForUi(requestId));
   });
   api.put('/render-grants/bridge/draft', async (c) => {
     const { grant, ...draft } = parseAnswersBody(await c.req.text()) as Record<string, unknown>;
-    const token = c.get('token');
-    const { requestId } = bridgeOf(token, grant);
-    // While waiting its turn to save, the grant may be released, script permission revoked, or the session expired.
+    const { requestId } = bridgeOf(grant);
+    // While waiting its turn to save, the grant may be released or script permission revoked.
     // Re-check inside the save transaction that the grant for the same question is still valid.
     return ok(
       c,
       'render-grants.bridge-draft',
       await deps.feedback.updateDraft(requestId, draft, {
         authorize: () => {
-          if (bridgeOf(token, grant).requestId !== requestId) {
+          if (bridgeOf(grant).requestId !== requestId) {
             throw new VdeError('E_RENDER_GRANT_INVALID', 'The render grant has changed.');
           }
         },
@@ -532,7 +492,7 @@ export async function startManagementServer(
     );
   });
 
-  // Issue a limited grant for viewing one revision of a document. The grant is bound to the issuing session.
+  // Issue a limited grant for viewing one revision of a document.
   api.post('/documents/:id/render-grants', async (c) => {
     const body = z
       .strictObject({ revision: z.string().optional(), mode: z.string().optional() })
@@ -540,7 +500,6 @@ export async function startManagementServer(
     // The Origin of state-changing requests was verified at the entry point to be the management UI's origin.
     // The HTML SDK only starts communicating with a parent of this origin.
     const result = await deps.render.createGrant(
-      deps.sessions.idOf(c.get('token')),
       { documentId: c.req.param('id'), ...body },
       { origin: c.req.header('origin') ?? origin },
     );
@@ -555,7 +514,7 @@ export async function startManagementServer(
   // Unregistered files the view tried to load. The grant is passed in the body, not in the URL.
   api.post('/render-grants/missing', async (c) => {
     const body = z.strictObject({ grant: z.string().min(1).max(128) }).parse(await c.req.json());
-    const missing = deps.render.missingOf(deps.sessions.idOf(c.get('token')), body.grant);
+    const missing = deps.render.missingOf(body.grant);
     return c.json(successEnvelope({ missing }, { command: 'render-grants.missing' }));
   });
 
@@ -569,12 +528,12 @@ export async function startManagementServer(
     );
   });
 
-  // Release grants whose views are no longer shown. Only grants issued by the caller's own session can be released.
+  // Release grants whose views are no longer shown. The caller supplies the keys of the dismissed views.
   api.post('/render-grants/release', async (c) => {
     const body = z
       .strictObject({ grants: z.array(z.string().min(1).max(128)).max(256) })
       .parse(await c.req.json());
-    const released = deps.render.release(deps.sessions.idOf(c.get('token')), body.grants);
+    const released = deps.render.release(body.grants);
     return c.json(successEnvelope({ released }, { command: 'render-grants.release' }));
   });
 
@@ -614,7 +573,6 @@ export async function startManagementServer(
         closed = true;
         wake();
       };
-      const token = c.get('token');
       // Writes are performed in order, and before ending the stream, wait for the requested writes to finish.
       // Closing without waiting loses the notifications emitted just before stopping.
       const queue = createEventQueue({
@@ -625,16 +583,9 @@ export async function startManagementServer(
             data: JSON.stringify(event),
           }),
         writeHeartbeat: () => stream.write(': heartbeat\n\n'),
-        // Check right before writing. Stop sending to an expired session without waiting for the next check.
-        // A session that expired while waiting its turn is also stopped here.
-        beforeWrite: () => {
-          if (deps.sessions.isActive(token)) return true;
-          drop();
-          return false;
-        },
         onError: finish,
       });
-      // Stop sending and cut the connection (session expired or revoked, or writes stalled). Skip the remaining writes,
+      // Stop sending and cut the connection when writes stall. Skip the remaining writes,
       // end the stalled write, and close the socket too (do not leave data queued for a peer that does not read).
       const drop = () => {
         queue.stop();
@@ -644,8 +595,6 @@ export async function startManagementServer(
       };
       streams.set(finish, queue);
       stream.onAbort(finish);
-      // When the session is revoked, close the connection left open too. Do not keep streaming to an expired session.
-      const stopWatchingSession = deps.sessions.onRevoke(token, drop);
       const send = (event: ServerEvent) => {
         if (!closed) queue.send(event);
       };
@@ -658,11 +607,6 @@ export async function startManagementServer(
       });
       const unsubscribe = deps.events.subscribe(send);
       const heartbeat = setInterval(() => {
-        // Keeping the connection open does not extend the session. Close once it expires.
-        if (!deps.sessions.isActive(token)) {
-          drop();
-          return;
-        }
         // Cut a connection whose receiver does not read and whose writes make no progress. The receiver reconnects and resyncs state.
         if (queue.stalledFor() >= (deps.stallMs ?? LIMITS.sseStallMs)) {
           drop();
@@ -674,7 +618,6 @@ export async function startManagementServer(
         await done;
       } finally {
         clearInterval(heartbeat);
-        stopWatchingSession();
         unsubscribe();
         await queue.settled();
         // Count it as a connection until the writes finish (do not hide unfinished connections from diagnostics).

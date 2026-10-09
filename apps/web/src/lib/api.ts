@@ -11,14 +11,12 @@ import type {
   RenderGrantResult,
   SearchResult,
   ServerEvent,
-  SessionResult,
   UiStatus,
 } from '@vde-open/shared';
 
 import { createSseParser } from './sse.ts';
 
 const API = '/_/api/v1';
-const TOKEN_KEY = 'vde-open.session';
 const READ_PAGE_BYTES = 1024 * 1024;
 const RECONNECT_MAX_MS = 10_000;
 
@@ -54,33 +52,6 @@ async function parseEnvelope<T>(response: Response): Promise<EnvelopeBody<T>> {
     );
   }
   return body;
-}
-
-// Take the ticket from the fragment of the URL the CLI opened and exchange it for a session token (spec 6.4).
-// The fragment is removed from history right after reading (the query, which names the shown document, stays).
-// The token lives only in this tab's memory and sessionStorage.
-export async function establishSession(): Promise<string | null> {
-  const match = /^#bootstrap=([A-Za-z0-9_-]+)$/.exec(window.location.hash);
-  if (match) {
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    try {
-      const response = await fetch(`${API}/sessions/bootstrap`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket: match[1] }),
-      });
-      const { data } = await parseEnvelope<SessionResult>(response);
-      window.sessionStorage.setItem(TOKEN_KEY, data.token);
-      return data.token;
-    } catch {
-      // A used or expired URL. Use the saved session if there is one.
-    }
-  }
-  return window.sessionStorage.getItem(TOKEN_KEY);
-}
-
-export function forgetSession(): void {
-  window.sessionStorage.removeItem(TOKEN_KEY);
 }
 
 export interface EventStream {
@@ -146,16 +117,12 @@ export interface Api {
   events(handlers: { onEvent: (event: ServerEvent) => void; onConnect: () => void }): EventStream;
 }
 
-export function createApi(token: string, onUnauthorized: () => void): Api {
+export function createApi(): Api {
   const request = async <T>(path: string, init: RequestInit = {}): Promise<EnvelopeBody<T>> => {
     const response = await fetch(`${API}${path}`, {
       ...init,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      },
+      headers: init.body === undefined ? {} : { 'Content-Type': 'application/json' },
     });
-    if (response.status === 401) onUnauthorized();
     return parseEnvelope<T>(response);
   };
 
@@ -230,10 +197,9 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
     async exportPdf(documentId, revision) {
       const response = await fetch(`${API}/documents/${documentId}/pdf`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ revision }),
       });
-      if (response.status === 401) onUnauthorized();
       // A failure comes back as the JSON envelope, and the PDF itself on success.
       if (!response.ok) await parseEnvelope(response);
       return response.blob();
@@ -327,17 +293,12 @@ export function createApi(token: string, onUnauthorized: () => void): Api {
       const run = async () => {
         while (!controller.signal.aborted) {
           try {
-            // Read with plain fetch, which can carry headers. Do not put the token in the URL.
+            // Read notifications with fetch so reconnects and cancellation share the same lifecycle.
             const response = await fetch(`${API}/events`, {
-              headers: { Authorization: `Bearer ${token}` },
               // Do not cache the notification stream (so the browser cache does not make a second connection to the same URL wait).
               cache: 'no-store',
               signal: controller.signal,
             });
-            if (response.status === 401) {
-              onUnauthorized();
-              return;
-            }
             if (!response.ok || !response.body) throw new Error('events unavailable');
             attempt = 0;
             onConnect();
