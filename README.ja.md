@@ -22,7 +22,7 @@ npm install -g vde-open  # これでも導入できる
 - projectごとに導入しないでください。daemonはuserごとに1つなので、projectごとに版が違うと、同じdaemonに違う版のCLIがつながります。
 - 導入は、`.zshrc`などのshellの設定を変えず、buildやscriptも実行しません（依存はすべて同梱しています）。
 
-このrepositoryのcloneから導入するときは、次のとおりです（`mise.toml`でNode.js 24.21.0に固定しています）。
+このrepositoryのcloneから導入するときは、次のとおりです（`mise.toml`でNode.js 24.22.1に固定しています）。
 
 ```bash
 pnpm install --frozen-lockfile

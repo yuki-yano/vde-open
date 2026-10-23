@@ -22,7 +22,7 @@ npm install -g vde-open  # also works
 - Do not install it per project. There is one daemon per user, so projects with different versions would talk to the same daemon.
 - Installing does not change shell files such as `.zshrc` and runs no build or install scripts (every dependency is bundled).
 
-To install from a clone of this repository (Node.js 24.21.0 is pinned in `mise.toml`):
+To install from a clone of this repository (Node.js 24.22.1 is pinned in `mise.toml`):
 
 ```bash
 pnpm install --frozen-lockfile
