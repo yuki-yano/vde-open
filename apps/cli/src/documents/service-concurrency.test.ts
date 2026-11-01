@@ -326,7 +326,7 @@ describe('registration of new documents by watch rules', () => {
       code: 'E_LIMIT_EXCEEDED',
       details: { limit: 'openSourceBytes' },
     });
-    // Stops when 128MiB is exceeded (the 13th file). Not all 20 are read.
+    // Stops when 128MiB is exceeded. Not all 20 are read.
     expect(reads).toHaveLength(Math.floor(LIMITS.openSourceBytes / LIMITS.documentBytes) + 1);
     expect(store.payload.openOrder).toEqual([]);
   });

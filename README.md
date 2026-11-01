@@ -109,7 +109,7 @@ Recognized extensions include PNG/APNG, JPEG (`jpg`, `jpeg`, `jpe`, `jif`, `jfif
 
 The browser decodes the original file without conversion. Supported formats depend on the browser and OS. Unsupported or damaged images show an error. SVG is displayed as an image; scripts and external references cannot run.
 
-Images are searchable by title and path (`vo search diagram --mode path`). Text extraction, `vo read`, and PDF export are for Markdown and HTML; images have no OCR. The existing 10 MiB per-file limit also applies to images.
+Images are searchable by title and path (`vo search diagram --mode path`). Text extraction, `vo read`, and PDF export are for Markdown and HTML; images have no OCR. The 50 MiB per-file limit also applies to images.
 
 ## Exporting to PDF
 

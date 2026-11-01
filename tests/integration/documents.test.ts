@@ -11,6 +11,7 @@ import { join, sep } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { LIMITS } from '../../packages/shared/src/index.ts';
 import { gitDir, worktree } from '../../apps/cli/src/documents/git.fixture.ts';
 import { cliEntry, createTestHome, fixture, type TestHome } from './harness.ts';
 
@@ -300,7 +301,7 @@ describe('CLI-011 some of several arguments cannot be opened', () => {
 
   it('registers nothing if one exceeds the size limit', async () => {
     t.write('a.md', '# a\n');
-    t.write('huge.md', Buffer.alloc(10 * 1024 * 1024 + 1, 0x61));
+    t.write('huge.md', Buffer.alloc(LIMITS.documentBytes + 1, 0x61));
     const result = await t.run(['open', 'a.md', 'huge.md', '--json']);
     expect(result.exitCode).toBe(7);
     const error = result.json().error;

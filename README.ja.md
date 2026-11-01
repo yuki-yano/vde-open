@@ -109,7 +109,7 @@ PNG/APNG、JPEG（`jpg`・`jpeg`・`jpe`・`jif`・`jfif`・`pjpeg`・`pjp`）�
 
 画像は変換せず、元のfileをbrowserが読み込みます。表示できる形式はbrowserとOSによって異なり、特にJPEG XL・TIFF・HEIC/HEIFは対応環境が限られます。未対応の形式や壊れた画像はerrorを表示します。SVGも画像として表示し、scriptや外部参照は動かしません。
 
-画像はtitleとpathで検索できます（`vo search diagram --mode path`）。文字の取り出し、`vo read`、PDF出力はMarkdownとHTMLが対象で、画像のOCRは行いません。画像にも既存の1fileあたり10MiBの上限を適用します。
+画像はtitleとpathで検索できます（`vo search diagram --mode path`）。文字の取り出し、`vo read`、PDF出力はMarkdownとHTMLが対象で、画像のOCRは行いません。画像にも1fileあたり50MiBの上限を適用します。
 
 ## PDF出力
 

@@ -5,7 +5,7 @@ const GiB = 1024 * MiB;
 // Initial limits from spec 7.4. Changes are recorded in an ADR.
 export const LIMITS = {
   openDocuments: 2000,
-  documentBytes: 10 * MiB,
+  documentBytes: 50 * MiB,
   openSourceBytes: 128 * MiB,
   metadataStateBytes: 32 * MiB,
   blobStoreBytes: 1 * GiB,

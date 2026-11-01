@@ -1,11 +1,6 @@
 import { readFileSync, renameSync, unlinkSync } from 'node:fs';
 
-import {
-  LIMITS,
-  type DocumentSummary,
-  type OpenResult,
-  type SearchResult,
-} from '../../packages/shared/src/index.ts';
+import type { DocumentSummary, OpenResult, SearchResult } from '../../packages/shared/src/index.ts';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 
 import { createTestHome, type TestHome } from './harness.ts';
@@ -164,10 +159,15 @@ it('automatically refreshes a saved image while preserving its earlier revision'
   ).toContain('width="64"');
 });
 
-it('applies the source byte limit to images and does not publish an oversized image', async () => {
-  t.write('huge.png', Buffer.alloc(LIMITS.documentBytes + 1));
+it('accepts a 50 MiB image and does not publish an image one byte larger', async () => {
+  const bytes = Buffer.alloc(50 * 1024 * 1024);
+  png.copy(bytes);
+  t.write('large.png', bytes);
+  const doc = await open('large.png');
+
+  t.write('huge.png', Buffer.alloc(bytes.byteLength + 1));
   const result = (await t.run(['open', 'huge.png', '--json'])).json();
   expect(result.error.code).toBe('E_LIMIT_EXCEEDED');
   const list = (await t.run(['list', '--json'])).json<{ documents: DocumentSummary[] }>();
-  expect(list.data.documents).toHaveLength(0);
+  expect(list.data.documents.map((document) => document.documentId)).toEqual([doc.documentId]);
 });
