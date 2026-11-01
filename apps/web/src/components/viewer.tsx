@@ -31,7 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { DocumentLocation } from '@/components/document-location';
+import { DocumentLocation, DocumentPathCopyButton } from '@/components/document-location';
 import { CopyButton } from '@/components/copy-button';
 import { DetailsPopover } from '@/components/details-popover';
 import { HtmlViewBar, ScriptLimits } from '@/components/html-view-bar';
@@ -585,9 +585,7 @@ function TextViewer({
           </p>
         </div>
         <div className="flex items-center gap-1">
-          {document.displayPath !== null && (
-            <CopyButton label="document path" text={document.displayPath} />
-          )}
+          <DocumentPathCopyButton document={document} />
           <CopyButton
             label="document ID"
             text={document.documentId}

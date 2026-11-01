@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Workspace } from '@/App';
 import type { Api } from '@/lib/api';
+import { inRepository, inWorktree } from '@/lib/document.fixture';
 import { writeHeadingToUrl, type HeadingInUrl } from '@/lib/location';
 
 import { Viewer } from './viewer.tsx';
@@ -310,8 +311,36 @@ describe('copying the document path and ID (spec 13.2)', () => {
     expect(copyResult()).toBe('Copied the document path.');
     button('Copy document ID').click();
     await until(() => copyResult() === 'Copied the document ID.');
-    expect(copied).toEqual(['a.html', 'doc_1']);
+    expect(copied).toEqual(['/a.html', 'doc_1']);
     expect(copyResult()).toBe('Copied the document ID.');
+  });
+
+  it.each([
+    ['main checkout', inRepository('/repos/app', 'docs/設計 メモ.html')],
+    ['linked worktree', inWorktree('/repos/app', '/checkouts/feature', 'docs/設計 メモ.html')],
+  ])('copies the repository-relative path in a %s', async (_, source) => {
+    const copied: string[] = [];
+    mockClipboard((text) => {
+      copied.push(text);
+      return Promise.resolve();
+    });
+    root.render(
+      <Viewer
+        api={api}
+        document={documentOf({
+          displayPath: '../docs/設計 メモ.html',
+          canonicalPath: source.canonicalPath,
+          repository: source.repository,
+        })}
+      />,
+    );
+    await until(() => shownText() !== '');
+    expect(button('Copy document path').title).toBe(
+      'Copy path relative to repository root (docs/設計 メモ.html)',
+    );
+    button('Copy document path').click();
+    await until(() => copyResult() !== '');
+    expect(copied).toEqual(['docs/設計 メモ.html']);
   });
 
   it('when copying fails, shows the reason instead of reporting success', async () => {

@@ -2,6 +2,7 @@ import type { DocumentSummary } from '@vde-open/shared';
 import { CircleAlert, GitBranch } from 'lucide-react';
 import { createContext, useContext } from 'react';
 
+import { CopyButton } from '@/components/copy-button';
 import {
   placementOf,
   REPOSITORY_REASON,
@@ -16,6 +17,26 @@ export const RepositoryLabelsContext = createContext<Labels>({
   repository: new Map(),
   worktree: new Map(),
 });
+
+// Copy the same repository-relative location shown in the header, without depending on the CLI's cwd.
+export function DocumentPathCopyButton({ document }: { document: DocumentSummary }) {
+  const placement = placementOf(document);
+  if (placement.kind === 'input') return null;
+  const relative = placement.kind === 'repository';
+  const path = relative ? placement.repository.pathInCheckout.join('/') : document.canonicalPath;
+  if (path === null) return null;
+  return (
+    <CopyButton
+      label="document path"
+      text={path}
+      title={
+        relative
+          ? `Copy path relative to repository root (${visible(path)})`
+          : `Copy absolute document path (${visible(path)})`
+      }
+    />
+  );
+}
 
 // Where the shown document is, in full: the repository, the worktree, and the path within it.
 // The list shortens these; here they wrap instead, so the whole location can be read on touch devices too.

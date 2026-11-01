@@ -3,7 +3,7 @@ import { Hash, Pause, Play, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { CopyButton } from '@/components/copy-button';
-import { DocumentLocation } from '@/components/document-location';
+import { DocumentLocation, DocumentPathCopyButton } from '@/components/document-location';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { ViewerProps } from '@/components/viewer';
@@ -109,9 +109,7 @@ function ImageHeader({
           {revision && <span title={revision}> · Revision {revision.slice(4, 12)}</span>}
         </p>
       </div>
-      {document.displayPath !== null && (
-        <CopyButton label="document path" text={document.displayPath} />
-      )}
+      <DocumentPathCopyButton document={document} />
       <CopyButton
         label="document ID"
         text={document.documentId}

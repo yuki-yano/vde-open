@@ -294,7 +294,7 @@ test('code and the document path and ID can be copied (spec 13.2)', async ({ pag
   // What is copied is the shown code (without the newline before the closing fence).
   const code = 'const answer = 42;\nconsole.log(`answer: ${answer}`);';
   t.write('docs/code.md', `# コードの例\n\n\`\`\`ts\n${code}\n\`\`\`\n\n本文\n`);
-  const opened = await t.json<{ documents: Array<{ documentId: string; displayPath: string }> }>([
+  const opened = await t.json<{ documents: Array<{ documentId: string; canonicalPath: string }> }>([
     'open',
     'docs/code.md',
   ]);
@@ -317,7 +317,7 @@ test('code and the document path and ID can be copied (spec 13.2)', async ({ pag
 
   await page.getByRole('button', { name: 'Copy document path' }).click();
   await expect(result.filter({ hasText: 'Copied the document path.' })).toHaveCount(1);
-  expect(await clipboard()).toBe(document.displayPath);
+  expect(await clipboard()).toBe(document.canonicalPath);
 
   await page.getByRole('button', { name: 'Copy document ID' }).click();
   await expect(result.filter({ hasText: 'Copied the document ID.' })).toHaveCount(1);

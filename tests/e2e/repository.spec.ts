@@ -101,6 +101,64 @@ test('DOC-017: each document shows its repository, worktree, path, and format, i
   );
 });
 
+test('copies paths relative to the repository root for Markdown, HTML, images, and linked worktrees', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const work = realpathSync(t.work);
+  const repo = join(work, 'project');
+  gitDir(join(repo, '.git'));
+  worktree(join(repo, '.git'), join(work, 'checkout'), 'feature');
+  const entries = [
+    {
+      file: 'project/docs/設計 メモ.md',
+      content: '# Repository note\n',
+      title: 'Repository note',
+      relative: 'docs/設計 メモ.md',
+    },
+    {
+      file: 'project/docs/view.html',
+      content: '<!doctype html><title>HTML note</title><p>Note</p>',
+      title: 'HTML note',
+      relative: 'docs/view.html',
+    },
+    {
+      file: 'project/images/map.svg',
+      content: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="24"/>',
+      title: 'map.svg',
+      relative: 'images/map.svg',
+    },
+    {
+      file: 'checkout/docs/worktree.md',
+      content: '# Worktree note\n',
+      title: 'Worktree note',
+      relative: 'docs/worktree.md',
+    },
+    {
+      file: 'project/README.md',
+      content: '# Repository readme\n',
+      title: 'Repository readme',
+      relative: 'README.md',
+    },
+  ];
+  const files = entries.map(({ file, content }) => t.write(file, content));
+  await t.json(['open', ...files]);
+  await page.goto(await t.uiUrl());
+  for (const entry of entries) {
+    await sidebarOf(page).getByRole('button', { name: entry.title, exact: true }).click();
+    const copy = page.getByRole('button', { name: 'Copy document path', exact: true });
+    await expect(copy).toHaveAttribute(
+      'title',
+      `Copy path relative to repository root (${entry.relative})`,
+    );
+    await copy.click();
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(entry.relative);
+  }
+});
+
 for (const layout of [
   { name: '180px', width: 180 },
   { name: '260px', width: 260 },
