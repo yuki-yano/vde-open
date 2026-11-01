@@ -73,6 +73,14 @@ test('Markdown tables keep readable columns and scroll by keyboard without widen
       '| --- | --- | --- | --- | --- | --- |',
       `| Markdownの幅 | ${description} | \`${token}\` | 開発担当 | 対応済み | ブラウザで表示を確認 |`,
       '',
+      '| 項目 | 説明 |',
+      '| --- | --- |',
+      `| 幅の調整 | ${description} |`,
+      '',
+      `| ${Array.from({ length: 16 }, (_, index) => `列${index + 1}`).join(' | ')} |`,
+      `| ${Array.from({ length: 16 }, () => '---').join(' | ')} |`,
+      `| ${Array.from({ length: 16 }, () => '内容').join(' | ')} |`,
+      '',
       '| 少ない列 | 数値 |',
       '| ---: | :---: |',
       '| 右揃え | 123 |',
@@ -110,18 +118,53 @@ test('Markdown tables keep readable columns and scroll by keyboard without widen
         .evaluate((element) => element.scrollWidth - element.clientWidth),
     ).toBe(0);
   }
-  await page.getByRole('button', { name: 'Wide view', exact: true }).click();
+  const wide = page.getByRole('button', { name: 'Wide view', exact: true });
+  const proseTable = page.getByRole('table').nth(1);
+  const proseCell = proseTable.locator('td').last();
+  const standardProseWidth = (await proseCell.boundingBox())!.width;
+  const standardProseHeight = (await proseCell.boundingBox())!.height;
+  const alignedTable = page.getByRole('table').last();
+  const shortTableWidth = (await alignedTable.boundingBox())!.width;
+  await wide.click();
+  // The content area is still narrower than standard view, so columns must stay readable.
+  expect((await proseCell.boundingBox())!.width).toBeCloseTo(standardProseWidth, 0);
+  await page.setViewportSize({ width: 1920, height: 900 });
+  await expect
+    .poll(() => page.locator('article').evaluate((element) => element.clientWidth))
+    .toBeGreaterThan(960);
+  expect((await proseCell.boundingBox())!.width).toBeGreaterThan(standardProseWidth + 200);
+  expect((await proseCell.boundingBox())!.width).toBeLessThanOrEqual(769);
+  expect((await proseCell.boundingBox())!.height).toBeLessThan(standardProseHeight);
+  expect((await alignedTable.boundingBox())!.width).toBeCloseTo(shortTableWidth, 0);
+  // Mixed prose and long identifiers fit the wider viewport without clipping their content.
+  expect(await viewport.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
   expect(
     await page
       .getByTestId('document-body')
       .evaluate((element) => element.scrollWidth - element.clientWidth),
   ).toBe(0);
-  const alignedTable = page.getByRole('table').last();
+  const manyColumns = page.getByRole('region', { name: 'Scrollable table' }).nth(2);
+  expect(await manyColumns.evaluate((element) => element.scrollWidth)).toBeGreaterThan(
+    await manyColumns.evaluate((element) => element.clientWidth),
+  );
+  await manyColumns.focus();
+  await manyColumns.press('ArrowRight');
+  await expect.poll(() => manyColumns.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(1920);
   expect((await alignedTable.boundingBox())!.width).toBeLessThan(
     (await page.locator('article').boundingBox())!.width,
   );
   await expect(alignedTable.locator('td').first()).toHaveCSS('text-align', 'right');
   await expect(alignedTable.locator('td').last()).toHaveCSS('text-align', 'center');
+  await wide.click();
+  expect((await proseCell.boundingBox())!.width).toBeCloseTo(standardProseWidth, 0);
+  await wide.click();
+  await page.setViewportSize({ width: 480, height: 900 });
+  expect((await proseCell.boundingBox())!.width).toBeCloseTo(standardProseWidth, 0);
+  expect(await viewport.evaluate((element) => element.scrollWidth)).toBeGreaterThan(
+    await viewport.evaluate((element) => element.clientWidth),
+  );
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(480);
 });
 
 test('outline resizing captures drags across the HTML iframe, stops on release, and persists after reload', async ({

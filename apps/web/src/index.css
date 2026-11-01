@@ -90,6 +90,7 @@
 }
 .markdown-body[data-width='wide'] {
   max-width: none;
+  container: markdown-wide / inline-size;
 }
 .markdown-body :is(h1, h2, h3, h4, h5, h6) {
   margin: 1.6em 0 0.6em;
@@ -166,6 +167,16 @@
   border: 1px solid var(--border);
   text-align: left;
   vertical-align: top;
+}
+/* Expand prose columns only when wide view has more room than the standard view. */
+@container markdown-wide (width > 60rem) {
+  .markdown-body table {
+    width: auto;
+    overflow-wrap: anywhere;
+  }
+  .markdown-body :is(th, td) {
+    max-width: 48rem;
+  }
 }
 .markdown-body th {
   background: var(--muted);
