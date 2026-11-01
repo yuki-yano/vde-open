@@ -12,7 +12,7 @@
 
 | 主体 | 扱い |
 |---|---|
-| CLI・Agent（同じOSのuser） | IPCの鍵（runtime directoryの中、本人だけが読める）で、daemonと相互に確かめる |
+| CLI・Agent（同じOSのuser） | IPCの鍵（state root配下、本人だけが読める）で、daemonと相互に確かめる |
 | 管理画面 | 認証なし。`127.0.0.1`のURLを直接開く。Host・Origin・`Sec-Fetch-Site`を確かめる。状態を変えるrequestはJSONだけ |
 | 文書の表示（iframe） | 信頼しない。管理画面と別のport（origin）で配信し、`sandbox`とCSPで制限する。管理APIを直接利用できない |
 | 文書の中のscript（interactive） | 信頼しない。利用者が明示的に許可したHTMLだけで動かす。読み込めるのは登録したfileだけ。HTMLから行えるのは回答案の取得と置き換えだけで、確定はできない |

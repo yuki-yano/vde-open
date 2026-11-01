@@ -12,7 +12,7 @@
 
 | Party | Treatment |
 |---|---|
-| CLI and agents (the same OS user) | Mutual check with the daemon using the IPC key (inside the runtime directory, readable only by the user) |
+| CLI and agents (the same OS user) | Mutual check with the daemon using the IPC key (under the state root, readable only by the user) |
 | Management UI | No authentication. Open the `127.0.0.1` URL directly. Host, Origin, and `Sec-Fetch-Site` are checked. State-changing requests accept JSON only |
 | Document view (iframe) | Not trusted. Served on a separate port (origin) from the management UI and restricted with `sandbox` and CSP. It cannot call the management API directly |
 | Scripts in documents (interactive) | Not trusted. They run only in HTML that the user explicitly allowed. They can load only registered files. From HTML, they can only get and replace the draft answer; they cannot submit it |

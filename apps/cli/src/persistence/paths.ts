@@ -37,14 +37,14 @@ export function resolveStateRoot(environment: PathEnvironment): string {
 }
 
 export interface RuntimeLocation {
-  // Owner-only directory that holds the socket and the IPC key.
+  // Owner-only directory that holds the socket (the key is kept under the state root).
   runtimeDir: string;
   // Path of the Unix domain socket, or the named pipe name on Windows.
   socketPath: string;
   keyPath: string;
 }
 
-// Place it at a short fixed location keyed by hash so a long state root still fits the socket path length limit.
+// Keep Unix sockets short even with a long state root. Keep the key out of temporary-file cleanup.
 export function resolveRuntimeLocation(
   stateRoot: string,
   environment: PathEnvironment,
@@ -63,7 +63,7 @@ export function resolveRuntimeLocation(
   return {
     runtimeDir,
     socketPath: join(runtimeDir, 'ipc.sock'),
-    keyPath: join(runtimeDir, 'ipc.key'),
+    keyPath: join(stateRoot, 'ipc.key'),
   };
 }
 

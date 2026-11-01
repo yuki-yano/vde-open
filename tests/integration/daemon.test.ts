@@ -155,6 +155,29 @@ describe('starting and stopping the daemon', () => {
     await t.run(['daemon', 'stop', '--json']);
     expect(await listIds()).toEqual(before);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'keeps CLI access and restart working after temporary runtime files are cleaned',
+    async () => {
+      t.write('a.md', '# a\n');
+      expect((await t.run(['open', 'a.md', '--json'])).exitCode).toBe(0);
+      const before = await listIds();
+      const first = await status();
+      const { runtimeDir } = runtimeLocation();
+
+      // Temporary-file cleanup can remove regular files while leaving the live Unix socket.
+      for (const entry of readdirSync(runtimeDir, { withFileTypes: true })) {
+        if (entry.isFile()) rmSync(join(runtimeDir, entry.name));
+      }
+
+      expect(await status()).toMatchObject({ state: 'running', daemonId: first.daemonId });
+      const restarted = await t.run(['daemon', 'restart', '--json']);
+      expect(restarted.exitCode, restarted.stdout + restarted.stderr).toBe(0);
+      expect(restarted.json<Status>().data).toMatchObject({ state: 'running', openDocuments: 1 });
+      expect(restarted.json<Status>().data.daemonId).not.toBe(first.daemonId);
+      expect(await listIds()).toEqual(before);
+    },
+  );
 });
 
 describe('SYS-006 the lock owner is alive', () => {
@@ -201,6 +224,23 @@ describe('SYS-006 the lock owner is alive', () => {
 });
 
 describe('SYS-007 runtime left by a stopped owner', () => {
+  it.skipIf(process.platform === 'win32')(
+    'repairs a stale IPC key even when the temporary runtime directory is missing',
+    async () => {
+      mkdirSync(t.home, { mode: 0o700 });
+      writeLock({ pid: deadPid(), ownerId: 'daemon_dead', startedAt: new Date().toISOString() });
+      const { keyPath, runtimeDir } = runtimeLocation();
+      writeFileSync(keyPath, 'stale-key', { mode: 0o600 });
+      expect(existsSync(runtimeDir)).toBe(false);
+
+      const repair = await t.run(['doctor', '--repair', '--yes', '--json']);
+      expect(repair.exitCode, repair.stdout + repair.stderr).toBe(0);
+      expect(repair.json<Doctor>().data.repairs).toEqual(['stale-runtime-removed']);
+      expect(existsSync(keyPath)).toBe(false);
+      expect(lockIsHeld()).toBe(false);
+    },
+  );
+
   it('reclaims after confirming the owner has stopped, and can start', async () => {
     mkdirSync(t.home, { mode: 0o700 });
     const location = runtimeLocation();

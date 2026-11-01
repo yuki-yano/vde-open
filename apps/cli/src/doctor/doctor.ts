@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import {
   IPC_PROTOCOL_VERSION,
@@ -252,15 +252,14 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorResult> {
         await removeWithRetry(join(stateRoot, POINTER_FILE));
         removed = true;
       }
-      if ((await inspectPrivateDirectory(location.runtimeDir, secure)) === 'ok') {
-        for (const path of [
-          ...(environment.platform === 'win32' ? [] : [location.socketPath]),
-          location.keyPath,
-        ]) {
-          if ((await lstat(path).catch(() => null)) !== null) {
-            await removeWithRetry(path);
-            removed = true;
-          }
+      for (const path of [
+        ...(environment.platform === 'win32' ? [] : [location.socketPath]),
+        location.keyPath,
+      ]) {
+        if ((await inspectPrivateDirectory(dirname(path), secure)) !== 'ok') continue;
+        if ((await lstat(path).catch(() => null)) !== null) {
+          await removeWithRetry(path);
+          removed = true;
         }
       }
       if (hadStaleOwner || removed) repairs.push('stale-runtime-removed');
