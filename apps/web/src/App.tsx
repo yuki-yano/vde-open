@@ -293,6 +293,10 @@ export function Workspace({ api }: { api: Api }) {
     () => documents.find((document) => document.documentId === activeId) ?? null,
     [documents, activeId],
   );
+  const title = active === null ? 'vo' : `vo - ${active.title}`;
+  useEffect(() => {
+    document.title = title;
+  }, [title]);
   const labels = useMemo(() => buildLabels(documents), [documents]);
 
   const savedVersion = useRef(0);
