@@ -484,8 +484,8 @@ test('SEC-007 / SEC-013: registered JSON and modules load by relative reference,
   );
 
   // The files that could not be loaded, and how to register them, are shown in the UI.
-  const diagnostics = ui.getByTestId('render-diagnostics');
-  await diagnostics.locator('summary').click();
+  await ui.getByTestId('render-diagnostics').click();
+  const diagnostics = ui.getByRole('dialog', { name: 'Differences from the original document' });
   await expect(diagnostics).toContainText('The view tried to load unregistered.json');
   await expect(diagnostics).toContainText('The view tried to load missing.js');
   await expect(diagnostics).toContainText('--asset');

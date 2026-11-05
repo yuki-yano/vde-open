@@ -247,8 +247,8 @@ test('UX-005: what cannot be shown is reported with the target, reason, and fix,
   );
   await t.json(['open', 'page.html']);
   await page.goto(await t.uiUrl());
-  const diagnostics = page.getByTestId('render-diagnostics');
-  await diagnostics.locator('summary').click();
+  await page.getByTestId('render-diagnostics').click();
+  const diagnostics = page.getByRole('dialog', { name: 'Differences from the original document' });
   await expect(diagnostics).toContainText('https://example.com/a.png');
   await expect(diagnostics).toContainText('External URL');
   await expect(diagnostics).toContainText('reference it with a relative path to show it');

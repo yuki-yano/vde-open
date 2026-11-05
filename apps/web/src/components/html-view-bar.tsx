@@ -1,4 +1,5 @@
 import { CircleAlert, Info } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import { DetailsPopover } from '@/components/details-popover';
 import { Button } from '@/components/ui/button';
@@ -37,6 +38,7 @@ export function HtmlViewBar({
   onRunScripts,
   onStopScripts,
   onReload,
+  children,
 }: {
   mode: 'static' | 'interactive';
   bridge: BridgeStatus;
@@ -46,13 +48,14 @@ export function HtmlViewBar({
   onRunScripts: () => void;
   onStopScripts: () => void;
   onReload: () => void;
+  children: ReactNode;
 }) {
   const running = mode === 'interactive';
   const closed = bridge.status === 'closed';
   const connection = connectionLabel(bridge);
   return (
     <div
-      className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-1 border-b bg-muted/50 px-3 py-1 text-[0.8rem]"
+      className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-0.5 border-b bg-muted/50 px-3 py-0.5 text-xs"
       data-testid="html-view-bar"
     >
       <span className="font-medium">Document content</span>
@@ -84,6 +87,7 @@ export function HtmlViewBar({
             Reload view
           </Button>
         )}
+        {children}
         <DetailsPopover
           title="Document view"
           trigger={

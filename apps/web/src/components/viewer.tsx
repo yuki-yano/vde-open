@@ -218,11 +218,7 @@ function TextViewer({
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [failure, setFailure] = useState<LoadFailure | null>(null);
   const [pendingLink, setPendingLink] = useState<PendingLink | null>(null);
-  const [linkError, setLinkError] = useState<{
-    linkId: string;
-    revision: string;
-    message: string;
-  } | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const savedScroll = useRef(0);
 
@@ -381,11 +377,7 @@ function TextViewer({
           return;
         }
         setPendingLink(null);
-        setLinkError({
-          linkId,
-          revision,
-          message: reason instanceof Error ? reason.message : 'Could not open the link.',
-        });
+        setLinkError(reason instanceof Error ? reason.message : 'Could not open the link.');
       }
     },
     [api, document.documentId],
@@ -549,11 +541,11 @@ function TextViewer({
         ]
       : []),
     ...(error ? [{ label: 'Could not load document', message: error }] : []),
-    ...(isMarkdown && linkError
+    ...(linkError
       ? [
           {
             label: 'Could not open link',
-            message: linkError.message,
+            message: linkError,
             dismiss: () => setLinkError(null),
           },
         ]
@@ -562,6 +554,74 @@ function TextViewer({
       ? [{ label: 'Script change failed', message: modeError, dismiss: () => setModeError(null) }]
       : []),
   ];
+  // Shown in the HTML view bar with a frame. Without one (Markdown, Source), in the notices row.
+  const renderDetailsInNotices = frameUrl === null && (diagnostics.length > 0 || links.length > 0);
+  const renderDetails = (
+    <>
+      {diagnostics.length > 0 && (
+        <DetailsPopover
+          title="Differences from the original document"
+          trigger={
+            <Button variant="ghost" size="xs" data-testid="render-diagnostics">
+              Differences ({diagnostics.length})
+            </Button>
+          }
+        >
+          <ul className="flex list-disc flex-col gap-1 pl-5 text-muted-foreground">
+            {diagnostics.map((diagnostic) => (
+              <li key={`${diagnostic.code}:${diagnostic.target ?? ''}`} className="break-words">
+                {describeDiagnostic(diagnostic)}
+              </li>
+            ))}
+          </ul>
+        </DetailsPopover>
+      )}
+      {links.length > 0 && (
+        <DetailsPopover
+          title="Links in this document"
+          trigger={
+            <Button variant="ghost" size="xs" data-testid="render-links">
+              Links ({links.length})
+            </Button>
+          }
+        >
+          <ul className="flex flex-col gap-1">
+            {links.map((link) => (
+              <li key={link.linkId} className="flex flex-wrap items-baseline gap-x-2">
+                {link.kind === 'external' && (
+                  <a
+                    className="underline underline-offset-2"
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {link.text || link.href}
+                  </a>
+                )}
+                {link.kind === 'document' && (
+                  <Button
+                    variant="link"
+                    size="xs"
+                    className="h-auto p-0"
+                    onClick={() => {
+                      if (grant) void openLink(link.linkId, grant.revision);
+                    }}
+                  >
+                    {link.text || link.href}
+                  </Button>
+                )}
+                {link.kind === 'other' && <span>{link.text || link.href}</span>}
+                <span className="text-xs break-all text-muted-foreground">
+                  {link.href}
+                  {link.kind === 'other' && ' (this kind of link cannot be opened)'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </DetailsPopover>
+      )}
+    </>
+  );
 
   return (
     <section
@@ -736,10 +796,10 @@ function TextViewer({
       {(pdfExport.error || linkError) && (
         <span role="alert" className="sr-only">
           {pdfExport.error}
-          {linkError?.message}
+          {linkError}
         </span>
       )}
-      {contentNotices.length > 0 && (
+      {(contentNotices.length > 0 || renderDetailsInNotices) && (
         <div
           className="flex flex-wrap items-center gap-1 border-b px-3 py-1"
           data-testid="document-notices"
@@ -768,93 +828,10 @@ function TextViewer({
               )}
             </DetailsPopover>
           ))}
+          {renderDetailsInNotices && renderDetails}
           <span role="status" className="sr-only">
             {contentNotices.map((item) => item.message).join(' ')}
           </span>
-        </div>
-      )}
-
-      {(diagnostics.length > 0 || links.length > 0) && (
-        <div className="flex flex-col border-b text-sm">
-          {diagnostics.length > 0 && (
-            <details className="px-4 py-2" data-testid="render-diagnostics">
-              <summary className="cursor-pointer">
-                Differences from the original document ({diagnostics.length} kinds)
-              </summary>
-              {/* Even with many items, do not push the document view out of the way. */}
-              <ul className="mt-2 flex max-h-40 list-disc flex-col gap-1 overflow-y-auto pl-5 text-muted-foreground">
-                {diagnostics.map((diagnostic) => (
-                  <li key={`${diagnostic.code}:${diagnostic.target ?? ''}`} className="break-words">
-                    {describeDiagnostic(diagnostic)}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {links.length > 0 && (
-            <details className="border-t px-4 py-2 first:border-t-0" data-testid="render-links">
-              <summary className="cursor-pointer">Links in this document ({links.length})</summary>
-              <ul className="mt-2 flex max-h-40 flex-col gap-1 overflow-y-auto">
-                {links.map((link) => (
-                  <li key={link.linkId} className="flex flex-wrap items-baseline gap-x-2">
-                    {link.kind === 'external' && (
-                      <a
-                        className="underline underline-offset-2"
-                        href={link.href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {link.text || link.href}
-                      </a>
-                    )}
-                    {link.kind === 'document' && (
-                      <DetailsPopover
-                        title="Could not open link"
-                        enabled={linkError?.linkId === link.linkId}
-                        trigger={
-                          <Button
-                            variant="link"
-                            size="xs"
-                            className="h-auto p-0"
-                            onClick={() => {
-                              if (grant && linkError?.linkId !== link.linkId)
-                                void openLink(link.linkId, grant.revision);
-                            }}
-                          >
-                            {linkError?.linkId === link.linkId && (
-                              <CircleAlert aria-hidden="true" className="text-destructive" />
-                            )}
-                            {link.text || link.href}
-                          </Button>
-                        }
-                      >
-                        <p>{linkError?.message}</p>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              if (linkError) void openLink(linkError.linkId, linkError.revision);
-                            }}
-                          >
-                            Try again
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setLinkError(null)}>
-                            Dismiss
-                          </Button>
-                        </div>
-                      </DetailsPopover>
-                    )}
-                    {link.kind === 'other' && <span>{link.text || link.href}</span>}
-                    <span className="text-xs break-all text-muted-foreground">
-                      {link.href}
-                      {link.kind === 'other' && ' (this kind of link cannot be opened)'}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
         </div>
       )}
 
@@ -873,7 +850,9 @@ function TextViewer({
               onRunScripts={() => setConfirmingInteractive(true)}
               onStopScripts={() => changeMode('static')}
               onReload={() => setFrameNonce((value) => value + 1)}
-            />
+            >
+              {renderDetails}
+            </HtmlViewBar>
             <iframe
               // Recreated for every view. The previous view is not kept.
               key={frameUrl}

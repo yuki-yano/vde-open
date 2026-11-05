@@ -137,8 +137,8 @@ test('P3 gate / SEC-005: in the Static view, the document scripts, event attribu
   hits = [];
 
   // What was removed, and why, can be checked in the management UI.
-  const diagnostics = page.getByTestId('render-diagnostics');
-  await diagnostics.locator('summary').click();
+  await page.getByTestId('html-view-bar').getByTestId('render-diagnostics').click();
+  const diagnostics = page.getByRole('dialog', { name: 'Differences from the original document' });
   await expect(diagnostics).toContainText('Removed 3 scripts');
   await expect(diagnostics).toContainText('Removed 1 inline SVG');
   await expect(diagnostics).toContainText('Removed 4 embedded elements');
@@ -186,8 +186,8 @@ test('SEC-019: links in the document open from the list, and unregistered docume
 }) => {
   await openHostile(page);
   const sidebar = page.getByRole('navigation', { name: 'Open documents' });
-  const links = page.getByTestId('render-links');
-  await links.locator('summary').click();
+  await page.getByTestId('html-view-bar').getByTestId('render-links').click();
+  const links = page.getByRole('dialog', { name: 'Links in this document' });
   await expect(links.getByRole('link', { name: '外部へのlink' })).toHaveAttribute(
     'rel',
     'noopener noreferrer',
@@ -200,10 +200,12 @@ test('SEC-019: links in the document open from the list, and unregistered docume
   await expect(dialog).toContainText('neighbor.md');
   await dialog.getByRole('button', { name: "Don't open" }).click();
   await expect(dialog).toBeHidden();
+  await expect(page.getByTestId('render-links')).toBeFocused();
   await expect(sidebar.getByRole('button', { name: '隣の文書', exact: true })).toHaveCount(0);
   expect((await t.json<{ totalDocuments: number }>(['list'])).totalDocuments).toBe(1);
 
   // Confirming adds it to the list and switches the view.
+  await page.getByTestId('render-links').click();
   await links.getByRole('button', { name: '隣の文書' }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Add to list and open' }).click();
   await expect(sidebar.getByRole('button', { name: '隣の文書', exact: true })).toBeVisible();
@@ -219,9 +221,11 @@ test('SEC-019: if the document is updated while the confirmation is shown, the d
   t.write('site/second.md', '# 更新後の行き先\n');
   await t.json(['open', 'site/index.html']);
   await page.goto(await t.uiUrl());
-  const links = page.getByTestId('render-links');
-  await links.locator('summary').click();
-  await links.getByRole('button', { name: 'link' }).click();
+  await page.getByTestId('render-links').click();
+  await page
+    .getByRole('dialog', { name: 'Links in this document' })
+    .getByRole('button', { name: 'link' })
+    .click();
   const dialog = page.getByRole('alertdialog');
   await expect(dialog).toContainText('first.md');
 
@@ -236,6 +240,37 @@ test('SEC-019: if the document is updated while the confirmation is shown, the d
   const sidebar = page.getByRole('navigation', { name: 'Open documents' });
   await expect(sidebar.getByRole('button', { name: '確認した文書', exact: true })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: '更新後の行き先', exact: true })).toHaveCount(0);
+});
+
+test('SEC-019: a link that fails to open is reported in the notices row and can be opened again', async ({
+  page,
+}) => {
+  t.write('site/index.html', '<a href="first.md">link</a>');
+  t.write('site/first.md', '# 開く文書\n');
+  await t.json(['open', 'site/index.html']);
+  await page.goto(await t.uiUrl());
+  const openRoute = /\/_\/api\/v1\/documents\/[^/]+\/links\/[^/]+\/open/;
+  await page.route(openRoute, (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: { code: 'E_INTERNAL', message: 'failed' } }),
+    }),
+  );
+  await page.getByTestId('render-links').click();
+  const link = page
+    .getByRole('dialog', { name: 'Links in this document' })
+    .getByRole('button', { name: 'link' });
+  await link.click();
+  const notice = page
+    .getByTestId('document-notices')
+    .getByRole('button', { name: 'Could not open link' });
+  await expect(notice).toBeVisible();
+
+  await page.unroute(openRoute);
+  await link.click();
+  await expect(page.getByRole('alertdialog')).toContainText('first.md');
+  await expect(notice).toHaveCount(0);
 });
 
 test('Markdown images show only registered local files, and relative links are confirmed before opening', async ({
@@ -260,11 +295,12 @@ test('Markdown images show only registered local files, and relative links are c
   // Images that cannot be shown become placeholder text. No outbound request is made.
   await expect(page.locator('article [data-blocked-image]')).toHaveText(['[image: 無い]']);
   await expect(page.locator('article')).toContainText('外部');
-  const diagnostics = page.getByTestId('render-diagnostics');
-  await diagnostics.locator('summary').click();
+  await page.getByTestId('document-notices').getByTestId('render-diagnostics').click();
+  const diagnostics = page.getByRole('dialog', { name: 'Differences from the original document' });
   await expect(diagnostics).toContainText('img/missing.png was not found');
   await expect(diagnostics).toContainText(`External URL (${origin}/remote.png) is not loaded`);
   expect(hits).toEqual([]);
+  await diagnostics.getByRole('button', { name: 'Close details' }).click();
 
   await page.locator('article').getByRole('button', { name: '次の文書' }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Add to list and open' }).click();
@@ -330,7 +366,7 @@ test('render grants are refetched only when needed, and the previous grant is re
   const inner = page.frameLocator('[data-testid="document-frame"]');
   const diagnostics = page.getByTestId('render-diagnostics');
   await expect(inner.locator('#h')).toHaveText('参照のない文書');
-  await expect(diagnostics).toContainText('Differences from the original document');
+  await expect(diagnostics).toContainText('Differences');
 
   // The first fetch happens once. Even with the note included, it is not a reason to refetch, and the fetched grant is not released.
   await page.waitForTimeout(700);

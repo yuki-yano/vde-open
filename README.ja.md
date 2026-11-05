@@ -80,7 +80,7 @@ ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skill
 - 既定（static）では、scriptを動かしません。script、event属性、iframe・object・embed、base、自動の移動（meta refresh）、formの送信先、外部の画像・CSS・fontを取り除きます。linkは表示の中では押せず、「Links in this document」の一覧から開きます。
 - 読み込めるのは、文書が参照する、assets-root（既定は文書のあるdirectory）の中のfileだけです。`.env`や`.git`など名前が「.」で始まるfileは読み込みません。範囲は`--assets-root`、個別のfileは`--asset`で指定します。
 - `--html-mode interactive`を指定したHTMLだけ、scriptを動かします。自分やAgentが用意した、信頼できるHTMLだけで使ってください。scriptが読み込めるのは登録したfileだけで、管理画面・管理API・fileには触れられませんが、表示の中でのpageの移動など、すべての外部への通信を止めるものではありません。daemonを起動し直すと、管理画面で許可し直すまで静的表示になります。
-- 元の文書と表示が違う点は、管理画面の「Differences from the original document」に、対象・理由・対処とともに表示します。
+- 元の文書と表示が違う点は、管理画面の「Differences」に、対象・理由・対処とともに表示します。
 
 ## Markdownの表示
 
@@ -149,7 +149,7 @@ vo feedback ack <requestId> --submission-id <id> --json
 | `vo`で別のcommandが動く | `vde-open`を使うか、PATHの順番を確かめる |
 | daemonの再起動後、以前のURLで画面が開かない | `vo ui`で現在のURLを開く（再起動でportが変わる場合がある） |
 | 終了コード8（daemonへ接続できない・起動できない） | `vo daemon status`で確かめ、`vo doctor`で残ったfileを調べる |
-| 画像やCSSが表示されない | 「Differences from the original document」を開き、`--assets-root`・`--asset`で登録する |
+| 画像やCSSが表示されない | 「Differences」を開き、`--assets-root`・`--asset`で登録する |
 | 検索で見つからない | `vo list --json`で、文書が開いていて`searchState`が`ready`かを確かめる |
 | Export PDFで、Google ChromeかMicrosoft Edgeが必要と表示される | Chrome・Edgeの131以降を入れるか、`VDE_OPEN_BROWSER`にChromium系browserの絶対pathを指定して`vo daemon restart`を実行する |
 

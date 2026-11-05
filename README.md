@@ -80,7 +80,7 @@ ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skill
 - By default (static), scripts do not run. Scripts, event attributes, iframe/object/embed, base, automatic navigation (meta refresh), form targets, and external images, CSS, and fonts are removed. Links cannot be clicked inside the view; open them from "Links in this document".
 - Only files that the document references, inside the assets root (by default the document's directory), can be loaded. Files whose names start with "." such as `.env` and `.git` are never loaded. Set the scope with `--assets-root` and individual files with `--asset`.
 - Scripts run only in HTML opened with `--html-mode interactive`. Use it only with HTML that you or the agent prepared and trust: scripts can load only registered files and cannot reach the management UI, the management API, or other files, but this does not block every outbound request (navigation inside the view, for example). After the daemon restarts, the HTML is static until you allow scripts again in the management UI.
-- "Differences from the original document" in the management UI lists what the view changed, why, and what to do.
+- "Differences" in the management UI lists what the view changed, why, and what to do.
 
 ## Markdown display
 
@@ -149,7 +149,7 @@ The person answers in the answer panel of the management UI. The answers are sub
 | `vo` runs a different command | Use `vde-open`, or check the order of `PATH` |
 | An earlier URL stops working after the daemon restarts | Open the current URL with `vo ui` (the port may change on restart) |
 | Exit code 8 (cannot connect to or start the daemon) | Check with `vo daemon status`, and look for leftover files with `vo doctor` |
-| Images or CSS are not shown | Open "Differences from the original document" and register them with `--assets-root` or `--asset` |
+| Images or CSS are not shown | Open "Differences" and register them with `--assets-root` or `--asset` |
 | Search does not find a document | Check with `vo list --json` that the document is open and its `searchState` is `ready` |
 | Export PDF says Google Chrome or Microsoft Edge is needed | Install Chrome or Edge 131 or later, or set `VDE_OPEN_BROWSER` to the absolute path of a Chromium-based browser and run `vo daemon restart` |
 
