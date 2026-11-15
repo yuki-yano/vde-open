@@ -34,6 +34,37 @@ export function emptyAnswerOf(field: QuestionField, required: boolean): '' | [] 
 // Display text for an option. An empty-string option is made visible too.
 export const optionLabel = (option: string): string => (option === '' ? '(empty)' : option);
 
+export interface Choice {
+  value: string;
+  // '' when the agent gave no description.
+  description: string;
+  recommended: boolean;
+}
+
+const toChoices = (
+  values: string[],
+  descriptions: string[] = [],
+  recommended: string[],
+): Choice[] =>
+  values.map((value, index) => ({
+    value,
+    description: descriptions[index] ?? '',
+    recommended: recommended.includes(value),
+  }));
+
+// The options of a single or multiple choice field, with the agent's descriptions and recommendation.
+export function choicesOf(field: QuestionField): Choice[] | undefined {
+  if (field.type === 'array') {
+    return toChoices(field.items.enum, field.items.enumDescriptions, field.recommended ?? []);
+  }
+  if (field.type !== 'string' || field.enum === undefined) return undefined;
+  return toChoices(
+    field.enum,
+    field.enumDescriptions,
+    field.recommended === undefined ? [] : [field.recommended],
+  );
+}
+
 // Display text for a value in the answer summary. Values are shown as text.
 export function displayValue(field: QuestionField, value: AnswerValue | undefined): string {
   if (value === undefined) return 'Not answered';

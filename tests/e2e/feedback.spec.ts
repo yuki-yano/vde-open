@@ -96,6 +96,76 @@ test('FB-001: shows the question as a native form, does not preselect required o
   await expect(panel.getByTestId('feedback-status')).toHaveText('The agent retrieved the answers');
 });
 
+test('choice fields show option descriptions and the recommendation without preselecting it; the answer is the chosen value', async ({
+  page,
+}) => {
+  const question = {
+    schemaVersion: 1,
+    title: '採用案の判断',
+    fieldOrder: ['layout', 'targets', 'region'],
+    answerSchema: {
+      type: 'object',
+      properties: {
+        layout: {
+          type: 'string',
+          title: '採用案',
+          enum: ['A', 'B', 'C'],
+          enumDescriptions: ['今の配置を保つ', '', '2段組にする'],
+          recommended: 'C',
+        },
+        targets: {
+          type: 'array',
+          title: '対象',
+          maxItems: 2,
+          uniqueItems: true,
+          items: { type: 'string', enum: ['header', 'footer'], enumDescriptions: ['上部', ''] },
+          recommended: ['footer'],
+        },
+        region: {
+          type: 'string',
+          title: '地域',
+          enum: ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7'],
+          enumDescriptions: ['', '2番目', '3番目', '', '', '', ''],
+          recommended: 'r3',
+        },
+      },
+      required: ['layout', 'region'],
+      additionalProperties: false,
+    },
+  };
+  t.write('q.json', JSON.stringify(question));
+  const { request } = await t.json<{ request: Request }>(['ask', 'q.json']);
+  await page.goto(await t.uiUrl());
+  const panel = panelOf(page);
+  const recommended = panel.getByRole('radio', { name: 'C', exact: true });
+  await expect(recommended).toHaveAccessibleDescription('Recommended 2段組にする');
+  await expect(panel.getByRole('radio', { name: 'A', exact: true })).toHaveAccessibleDescription(
+    '今の配置を保つ',
+  );
+  await expect(
+    panel.getByRole('checkbox', { name: 'footer', exact: true }),
+  ).toHaveAccessibleDescription('Recommended');
+  // The recommendation is only shown. Nothing is selected and no draft answer is saved.
+  for (const radio of await panel.getByRole('radio').all()) await expect(radio).not.toBeChecked();
+  const select = panel.getByRole('combobox');
+  await expect(select).toHaveValue('none');
+  await expect(select.getByRole('option', { name: 'r3 (Recommended)' })).toHaveCount(1);
+  await expect(
+    panel.getByRole('list', { name: 'Option descriptions' }).getByRole('listitem'),
+  ).toHaveText([/^r2\s*2番目$/, /^r3\s*Recommended\s*3番目$/]);
+  await expect(panel.getByTestId('feedback-status')).toHaveText('Not answered');
+
+  await recommended.click();
+  await select.selectOption({ label: 'r3 (Recommended)' });
+  await expect(panel.getByTestId('feedback-status')).toHaveText('Draft answer saved');
+  await panel.getByRole('button', { name: 'Send answers to the agent' }).click();
+  await expect(panel.getByTestId('feedback-status')).toHaveText(
+    'Submitted. Waiting for the agent to retrieve it',
+  );
+  const answered = await t.json<Request>(['feedback', 'get', request.requestId]);
+  expect(answered.submission?.answers).toEqual({ layout: 'C', region: 'r3' });
+});
+
 test("FB-015 prerequisite: while awaiting an answer, the question's revision stays shown; a newer revision asks for older-revision confirmation; Enter does not submit", async ({
   page,
 }) => {

@@ -75,6 +75,9 @@ vo feedback forget <requestId> --yes                      # 終わった質問�
 ```
 
 - 質問定義の形は、`packages/shared/schemas/questionnaire.schema.json`のとおり。fieldはstring・boolean・number・integer・選択肢・選択肢の複数選択だけ。重複したkey、未知のkeyword、`$ref`、入れ子は受け付けない（`E_QUESTIONNAIRE_INVALID`、終了コード2）。
+- 選択肢ごとの説明と推奨は、選択肢（`string`と`enum`）に`enumDescriptions`と`recommended`を付けて示す。`enumDescriptions`は、`enum`の値ごとの説明を同じ順に並べた配列。説明は各2000文字以内で、空文字は説明なしを表す。`recommended`は`enum`の値の1つ。複数選択（`array`と`items.enum`）では、説明を`items.enumDescriptions`に書き、`recommended`は値の配列にする。
+- `recommended`は、そのfieldへの有効な回答でなければならない。`minLength`・`maxLength`・`minItems`・`maxItems`と重複の禁止も守る。`enum`のないfieldへの指定、選択肢の数と合わない説明の数、無効な`recommended`は`E_QUESTIONNAIRE_INVALID`になる。質問定義の全体は64KiB以内。
+- 回答panelは、各選択肢の下に説明と「Recommended」を表示する。選択肢が7件以上の単一選択はselectになり、説明はselectの下に一覧で出る。複数選択は件数によらずチェックボックス。推奨は初期選択にしないので、人が選ぶまでfieldは未回答のまま。回答の値は、選んだ`enum`の文字列。
 - **passwordやAPI keyなどの秘密を入力してもらう用途には使わない。** 回答はstateに保存され、Agentへそのまま返る。
 - 質問は、作ったときの文書の版に固定される。人は管理UIで回答を入力し、「Send answers to the agent」で確定する。送信の前の入力（回答案）は、Agentには返らない。
 - `wait`は、確定（`submitted`）か中止（`cancelled`）で終わる（どちらも終了コード0）。時間切れ（`E_TIMEOUT`、終了コード6）と中断（終了コード130）では、質問は回答待ちのまま。続けて待つなら、同じrequestIdで`wait`し直す。

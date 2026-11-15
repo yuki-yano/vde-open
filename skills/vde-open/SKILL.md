@@ -61,7 +61,13 @@ vo close docs/design.md --json                # remove from the list (the file i
      "answerSchema": {
        "type": "object",
        "properties": {
-         "layout": { "type": "string", "title": "Layout to adopt", "enum": ["A", "B"] },
+         "layout": {
+           "type": "string",
+           "title": "Layout to adopt",
+           "enum": ["A", "B"],
+           "enumDescriptions": ["Keep the current header", "Move search into the header"],
+           "recommended": "B"
+         },
          "comment": { "type": "string", "title": "What to change", "maxLength": 4000 }
        },
        "required": ["layout"],
@@ -69,6 +75,8 @@ vo close docs/design.md --json                # remove from the list (the file i
      }
    }
    ```
+
+   `enumDescriptions` (optional) gives one description per `enum` value, in the same order. `""` means no description. `recommended` (optional) must be a valid answer to the field. For multiple choice, put the descriptions in `items.enumDescriptions` and give `recommended` as an array. The panel shows them under each option and marks the recommendation with "Recommended", but never preselects it. Both keys need `enum`. Without it, `ask` fails with `E_QUESTIONNAIRE_INVALID`.
 
 2. Ask, wait, then acknowledge:
 

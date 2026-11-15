@@ -33,6 +33,8 @@ const enumValues = z
   .refine((values) => new Set(values).size === values.length, {
     message: 'The choices contain duplicates.',
   });
+// Descriptions of the choices, in the order of enum (the keyword VS Code settings use). '' means no description.
+const enumDescriptions = z.array(fieldDescription).max(32);
 const lengthLimit = z.number().int().min(0).max(LIMITS.answerStringLength);
 const finite = z.number().refine(Number.isFinite, { message: 'The number must be finite.' });
 
@@ -43,6 +45,9 @@ const stringFieldSchema = z.strictObject({
   minLength: lengthLimit.optional(),
   maxLength: lengthLimit.optional(),
   enum: enumValues.optional(),
+  enumDescriptions: enumDescriptions.optional(),
+  // The choice the agent recommends. Only shown; never preselected.
+  recommended: z.string().optional(),
 });
 
 const booleanFieldSchema = z.strictObject({
@@ -66,7 +71,12 @@ const arrayFieldSchema = z.strictObject({
   minItems: z.number().int().min(0).max(32).optional(),
   maxItems: z.number().int().min(0).max(32),
   uniqueItems: z.literal(true),
-  items: z.strictObject({ type: z.literal('string'), enum: enumValues }),
+  items: z.strictObject({
+    type: z.literal('string'),
+    enum: enumValues,
+    enumDescriptions: enumDescriptions.optional(),
+  }),
+  recommended: z.array(z.string()).optional(),
 });
 
 export const questionFieldSchema = z.discriminatedUnion('type', [
@@ -153,6 +163,44 @@ export const questionnaireSchema = z
           code: 'custom',
           path,
           message: 'minItems is greater than the number of choices.',
+        });
+      }
+      if (field.type !== 'string' && field.type !== 'array') continue;
+      const [choices, descriptions, descriptionsPath] =
+        field.type === 'string'
+          ? [field.enum, field.enumDescriptions, [...path, 'enumDescriptions']]
+          : [
+              field.items.enum,
+              field.items.enumDescriptions,
+              [...path, 'items', 'enumDescriptions'],
+            ];
+      if (choices === undefined) {
+        if (descriptions !== undefined || field.recommended !== undefined) {
+          context.addIssue({
+            code: 'custom',
+            path,
+            message: 'enumDescriptions and recommended need enum.',
+          });
+        }
+        continue;
+      }
+      if (descriptions !== undefined && descriptions.length !== choices.length) {
+        context.addIssue({
+          code: 'custom',
+          path: descriptionsPath,
+          message: 'enumDescriptions must have one entry per choice.',
+        });
+      }
+      if (
+        field.recommended !== undefined &&
+        validateAnswers(questionnaire, { [name]: field.recommended }, { complete: true }).some(
+          (issue) => issue.field === name,
+        )
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: [...path, 'recommended'],
+          message: 'recommended is not a valid answer to this field.',
         });
       }
     }

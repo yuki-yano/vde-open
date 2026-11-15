@@ -5,7 +5,7 @@ import {
   type FeedbackForUi,
   type QuestionField,
 } from '@vde-open/shared';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { CircleAlert } from 'lucide-react';
 
 import {
@@ -18,6 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DetailsPopover } from '@/components/details-popover';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -27,11 +28,13 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError, type Api } from '@/lib/api';
 import {
+  choicesOf,
   describeIssues,
   emptyAnswerOf,
   optionLabel,
   summarize,
   withAnswer,
+  type Choice,
 } from '@/lib/feedback-form';
 
 // Up to this many options are shown as radios; more are shown as a select.
@@ -71,6 +74,46 @@ function FieldInput(props: FieldProps) {
         {field.type === 'array' ? 'Answer with none selected' : 'Answer with an empty value'}
       </Label>
     </>
+  );
+}
+
+const RecommendedMark = () => <Badge variant="outline">Recommended</Badge>;
+
+// The id of the text under an option ("Recommended" and the agent's description), or undefined when there is none.
+// Built from the position because an option can be an empty string or contain spaces.
+const detailsIdOf = (fieldId: string, index: number, choice: Choice) =>
+  choice.recommended || choice.description !== ''
+    ? `${fieldId}-option-${String(index)}`
+    : undefined;
+
+// An option of a choice field. The text under the option name is outside the label, so it is the control's
+// accessible description (aria-describedby) and the accessible name stays the option name.
+function ChoiceRow({
+  choice,
+  detailsId,
+  children,
+}: {
+  choice: Choice;
+  detailsId: string | undefined;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <Label className="font-normal">
+        {children}
+        {optionLabel(choice.value)}
+      </Label>
+      {detailsId !== undefined && (
+        <div id={detailsId} className="flex flex-col items-start gap-1 pl-6 text-xs">
+          {choice.recommended && <RecommendedMark />}
+          {choice.description !== '' && (
+            <p className="break-words whitespace-pre-wrap text-muted-foreground">
+              {choice.description}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -114,26 +157,30 @@ function FieldControl({ name, field, value, disabled, onChange }: FieldProps) {
       const selected = Array.isArray(value) ? value : [];
       return (
         <div className="flex flex-col gap-2" role="group" aria-labelledby={`${id}-label`}>
-          {field.items.enum.map((option) => (
-            <Label key={option} className="font-normal">
-              <Checkbox
-                checked={selected.includes(option)}
-                disabled={disabled}
-                onCheckedChange={(checked) => {
-                  const next = checked
-                    ? [...selected, option]
-                    : selected.filter((item) => item !== option);
-                  onChange(next.length === 0 ? undefined : next);
-                }}
-              />
-              {optionLabel(option)}
-            </Label>
-          ))}
+          {choicesOf(field)?.map((choice, index) => {
+            const detailsId = detailsIdOf(id, index, choice);
+            return (
+              <ChoiceRow key={choice.value} choice={choice} detailsId={detailsId}>
+                <Checkbox
+                  checked={selected.includes(choice.value)}
+                  disabled={disabled}
+                  aria-describedby={detailsId}
+                  onCheckedChange={(checked) => {
+                    const next = checked
+                      ? [...selected, choice.value]
+                      : selected.filter((item) => item !== choice.value);
+                    onChange(next.length === 0 ? undefined : next);
+                  }}
+                />
+              </ChoiceRow>
+            );
+          })}
         </div>
       );
     }
     case 'string': {
-      if (field.enum !== undefined && field.enum.length <= RADIO_LIMIT) {
+      const choices = choicesOf(field);
+      if (choices !== undefined && choices.length <= RADIO_LIMIT) {
         return (
           <RadioGroup
             aria-labelledby={`${id}-label`}
@@ -141,37 +188,62 @@ function FieldControl({ name, field, value, disabled, onChange }: FieldProps) {
             disabled={disabled}
             onValueChange={(next) => onChange(typeof next === 'string' ? next : undefined)}
           >
-            {field.enum.map((option) => (
-              <Label key={option} className="font-normal">
-                <RadioGroupItem value={option} />
-                {optionLabel(option)}
-              </Label>
-            ))}
+            {choices.map((choice, index) => {
+              const detailsId = detailsIdOf(id, index, choice);
+              return (
+                <ChoiceRow key={choice.value} choice={choice} detailsId={detailsId}>
+                  <RadioGroupItem value={choice.value} aria-describedby={detailsId} />
+                </ChoiceRow>
+              );
+            })}
           </RadioGroup>
         );
       }
-      if (field.enum !== undefined) {
+      if (choices !== undefined) {
         // Options are referenced by position, so an empty-string option is not confused with "not selected".
-        const options = field.enum;
-        const selected = typeof value === 'string' ? options.indexOf(value) : -1;
+        const selected =
+          typeof value === 'string' ? choices.findIndex((choice) => choice.value === value) : -1;
+        const described = choices.filter(
+          (choice) => choice.description !== '' || choice.recommended,
+        );
         return (
-          <select
-            id={id}
-            className="h-9 rounded-md border bg-transparent px-2 text-sm"
-            disabled={disabled}
-            value={selected === -1 ? 'none' : String(selected)}
-            onChange={(event) => {
-              const index = Number(event.target.value);
-              onChange(event.target.value === 'none' ? undefined : options[index]);
-            }}
-          >
-            <option value="none">Select an option</option>
-            {options.map((option, index) => (
-              <option key={option} value={String(index)}>
-                {optionLabel(option)}
-              </option>
-            ))}
-          </select>
+          <>
+            <select
+              id={id}
+              className="h-9 rounded-md border bg-transparent px-2 text-sm"
+              disabled={disabled}
+              value={selected === -1 ? 'none' : String(selected)}
+              onChange={(event) => {
+                const index = Number(event.target.value);
+                onChange(event.target.value === 'none' ? undefined : choices[index]?.value);
+              }}
+            >
+              <option value="none">Select an option</option>
+              {choices.map((choice, index) => (
+                <option key={choice.value} value={String(index)}>
+                  {`${optionLabel(choice.value)}${choice.recommended ? ' (Recommended)' : ''}`}
+                </option>
+              ))}
+            </select>
+            {described.length > 0 && (
+              // A select cannot show descriptions, so they are listed below it to compare before choosing.
+              <ul aria-label="Option descriptions" className="flex flex-col gap-2 text-xs">
+                {described.map((choice) => (
+                  <li key={choice.value} className="flex flex-col gap-1">
+                    <span className="flex flex-wrap items-center gap-2 font-medium">
+                      {optionLabel(choice.value)}
+                      {choice.recommended && <RecommendedMark />}
+                    </span>
+                    {choice.description !== '' && (
+                      <span className="break-words whitespace-pre-wrap text-muted-foreground">
+                        {choice.description}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         );
       }
       const long = field.maxLength === undefined || field.maxLength > TEXTAREA_LENGTH;
