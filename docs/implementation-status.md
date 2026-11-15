@@ -526,6 +526,16 @@ HTML文書にも「Export PDF」を追加した。印刷専用workerの`html-pri
 
 HTMLの実browserでの印刷はmacOSのみ確認した。Linux・Windowsでの実印刷は、この変更では未確認。
 
+## 選択肢の説明と推奨、回答待ちの一覧（2026-11-15）
+
+- 目的: 複数のAgentが並行して人に判断を求めるとき、人が自分の番の質問を1か所で見つけ、選択肢ごとの説明とAgentの推奨を比べてから選べるようにする。
+- 質問定義: 単一選択に`enumDescriptions`と`recommended`、複数選択に`items.enumDescriptions`と`recommended`（配列）を足した。`recommended`はそのfieldへの有効な回答でなければならず、既存の回答の検証で確かめる。回答の値は今までどおり`enum`の文字列。決定はADR-0018。
+- 回答panel: ラジオ・チェックボックスは選択肢名の下に「Recommended」と説明を出し、`aria-describedby`で結ぶ。7件以上のselectでは、optionに「(Recommended)」を付け、説明のある選択肢と推奨の選択肢をselectの下に一覧で出す。推奨は初期選択にも回答案にもしない。
+- 回答待ちの一覧: サイドバーの上部に「Waiting for your answer」を置き、`GET /feedback?status=pending`を文書一覧と`documentId`で突き合わせて出す。各行は質問のtitle、文書、位置、経過時間。押すとその文書を表示する。取り直しは`feedbackSignal`の契機で、`createRefresher`で1件ずつ行う。失敗したときは前回の結果を残して失敗を示す。文書の並べ替えの外に置き、高さの上限を超えると区画の中だけscrollする。新しいAPIは作っていない。
+- 設計の確認: 実装の前にCodexの設計レビューを1回受け、selectの説明の扱い、`recommended`の検証、一覧の取り直しと失敗の表示、並べ替えとの分離を決めた。
+- 確認: `pnpm format:check`、`pnpm lint`、`pnpm typecheck`、`pnpm test`（80 files、929件）、`pnpm build`、`pnpm test:e2e`（100件）が成功。専用の`VDE_OPEN_HOME`で起動したdaemonで、説明と推奨の表示（ラジオ・select・複数選択）、一覧の表示・行の選択・送信後に一覧から消えること・幅800のdrawer・幅180のサイドバーを撮影して確かめた。
+- 既知の点: `apps/web/src/components/sidebar.tsx`は1,062行になった。一覧を別fileへ移すには`LocationLine`・`ROW_FOCUS`・`rowIn`も移す必要があり、この変更では分けていない。幅180pxで一覧の見出しが「Waiting for your an…」と切れる（件数は残る）。
+
 ## 全体のDoD（仕様17.1）
 
 機能完了条件:

@@ -40,6 +40,7 @@ import {
   type Theme,
 } from '@/lib/preferences';
 import { createRefresher } from '@/lib/refresher';
+import { usePendingFeedback } from '@/lib/use-pending-feedback';
 
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 480;
@@ -175,8 +176,10 @@ export function Workspace({ api }: { api: Api }) {
   const [width, setWidth] = usePreference<number>('sidebar-width', SIDEBAR_DEFAULT, isWidth);
   const { theme, setTheme, palette, setPalette } = useAppearance();
   const lastEvent = useRef<{ daemonId: string; sequence: number } | null>(null);
-  // How many question-change notifications have been received. The answer panel refetches the question each time this changes.
+  // How many question-change notifications have been received. The answer panel and the list of questions awaiting
+  // an answer refetch each time this changes.
   const [feedbackSignal, setFeedbackSignal] = useState(0);
+  const pendingFeedback = usePendingFeedback(api, feedbackSignal);
   // How many notifications that the view tried to load an unregistered file have been received.
   const [renderSignal, setRenderSignal] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -469,6 +472,7 @@ export function Workspace({ api }: { api: Api }) {
           <Sidebar
             documents={documents}
             labels={labels}
+            pending={pendingFeedback}
             activeId={activeId}
             view={view}
             onViewChange={setView}
