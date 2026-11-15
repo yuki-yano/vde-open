@@ -1,10 +1,12 @@
 import type { DocumentSummary } from '@vde-open/shared';
-import { useCallback, useState } from 'react';
+import { useCallback, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 
 import { FeedbackPanel } from '@/components/feedback-panel';
+import { PaneResizeHandle } from '@/components/pane-resize-handle';
 import { Viewer, type SectionTarget } from '@/components/viewer';
 import type { Api } from '@/lib/api';
 import type { HeadingInUrl, HeadingRestore } from '@/lib/location';
+import { usePreference } from '@/lib/preferences';
 import { useFeedback } from '@/lib/use-feedback';
 
 interface DocumentWorkspaceProps {
@@ -74,6 +76,18 @@ export function DocumentSwitcher({
   );
 }
 
+const ANSWER_MIN = 280;
+const ANSWER_MAX = 640;
+const ANSWER_DEFAULT = 360;
+// The document keeps at least this width beside the answer panel; the panel narrows first.
+const DOCUMENT_MIN = 320;
+const HANDLE = 8;
+const isAnswerWidth = (value: unknown): value is number =>
+  typeof value === 'number' &&
+  Number.isInteger(value) &&
+  value >= ANSWER_MIN &&
+  value <= ANSWER_MAX;
+
 // The document view plus the answer panel for the question on that document. Recreated when the document changes (the caller passes a key).
 export function DocumentWorkspace({
   api,
@@ -96,10 +110,33 @@ export function DocumentWorkspace({
   // If a question is awaiting an answer, do not show the document until it is fetched. The question decides which revision
   // to show and whether to accept draft answers from the HTML (if it cannot be fetched, show the document's current revision).
   const waitingForRequest = pendingId !== null && request === null && error === null;
+  const [preferredWidth, setAnswerWidth] = usePreference<number>(
+    'answer-width',
+    ANSWER_DEFAULT,
+    isAnswerWidth,
+  );
+  const panelId = useId();
+  const row = useRef<HTMLDivElement>(null);
+  const [rowWidth, setRowWidth] = useState(0);
+  useLayoutEffect(() => {
+    const element = row.current;
+    if (!element) return undefined;
+    const measure = () => setRowWidth(element.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const maxWidth = Math.max(ANSWER_MIN, Math.min(ANSWER_MAX, rowWidth - HANDLE - DOCUMENT_MIN));
+  const width = Math.min(preferredWidth, maxWidth);
 
   return (
     // Below 900px, stack the document view and the answer panel vertically. The panel sits outside the view, so the HTML cannot cover it.
-    <div className="flex min-w-0 flex-1 flex-col min-[900px]:flex-row">
+    <div
+      ref={row}
+      className="flex min-w-0 flex-1 flex-col min-[900px]:flex-row"
+      style={{ '--answer-width': `${String(width)}px` } as CSSProperties}
+    >
       <Viewer
         api={api}
         document={document}
@@ -114,13 +151,32 @@ export function DocumentWorkspace({
         {...(onHeadingShown ? { onHeadingShown } : {})}
       />
       {request ? (
-        <FeedbackPanel key={request.requestId} api={api} request={request} reload={reload} />
+        <>
+          <PaneResizeHandle
+            label="Resize answer panel"
+            controls={panelId}
+            width={width}
+            min={ANSWER_MIN}
+            max={maxWidth}
+            onResize={(next) =>
+              setAnswerWidth(Math.round(Math.min(maxWidth, Math.max(ANSWER_MIN, next))))
+            }
+            className="hidden min-[900px]:block"
+          />
+          <FeedbackPanel
+            key={request.requestId}
+            id={panelId}
+            api={api}
+            request={request}
+            reload={reload}
+          />
+        </>
       ) : (
         error !== null &&
         requestId !== null && (
           <aside
             aria-label="Answer the question"
-            className="w-full shrink-0 border-t px-4 py-4 min-[900px]:w-96 min-[900px]:border-t-0 min-[900px]:border-l"
+            className="w-full shrink-0 border-t px-3 py-3 min-[900px]:w-(--answer-width) min-[900px]:border-t-0 min-[900px]:border-l"
           >
             <p role="alert" className="text-sm text-destructive">
               Could not fetch the question ({error}).

@@ -180,16 +180,11 @@ test('UX-003: on a narrow screen the list becomes a drawer, and a huge HTML does
   );
   await t.json(['ask', 'q.json', '--view', 'huge.html']);
   await page.goto(await t.uiUrl());
-  // The page does not overflow horizontally, and all header controls (list, search, color scheme) are on screen.
-  await expect(page.getByRole('button', { name: 'Light' })).toBeVisible();
+  // The page does not overflow horizontally, and the bar's controls (list, search) are on screen.
+  // The color scheme is in the list drawer (checked in themes.spec.ts).
+  await expect(page.getByRole('button', { name: 'Document list' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
-  for (const name of [
-    'Document list',
-    'Search open documents',
-    'Light',
-    'Dark',
-    'Match OS setting',
-  ]) {
+  for (const name of ['Document list', 'Search open documents']) {
     const box = await page.getByRole('button', { name }).boundingBox();
     expect(box, name).not.toBeNull();
     if (box) expect(box.x + box.width, name).toBeLessThanOrEqual(375);
@@ -229,6 +224,7 @@ test("UX-004: view settings such as the color scheme stay in the browser, and op
     .getByRole('navigation', { name: 'Open documents' })
     .locator('[data-part="title"]');
   await expect(titles).toHaveText(['A', 'B']);
+  await page.getByRole('button', { name: 'Appearance' }).click();
   await page.getByRole('button', { name: 'Dark' }).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
   // A document closed from the CLI is gone from the list after reloading. The view setting remains.

@@ -10,11 +10,14 @@ export function DetailsPopover({
   title,
   children,
   enabled = true,
+  className = 'w-96',
 }: {
   trigger: ReactElement;
   title: string;
   children: ReactNode;
   enabled?: boolean;
+  // The popup width.
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   if (!enabled && open) setOpen(false);
@@ -27,7 +30,9 @@ export function DetailsPopover({
       />
       <Popover.Portal>
         <Popover.Positioner sideOffset={6} align="end" className="z-50">
-          <Popover.Popup className="max-h-(--available-height) w-96 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border bg-popover p-4 text-sm text-popover-foreground shadow-lg outline-none">
+          <Popover.Popup
+            className={`max-h-(--available-height) max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border bg-popover p-3 text-sm text-popover-foreground shadow-lg outline-none ${className}`}
+          >
             <div className="mb-2 flex items-center justify-between gap-3">
               <Popover.Title className="font-medium">{title}</Popover.Title>
               <Popover.Close

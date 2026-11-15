@@ -60,8 +60,9 @@ function image() {
   return container.querySelector<HTMLImageElement>('img');
 }
 function button(label: string): HTMLButtonElement {
+  // Icon-only buttons are found by aria-label.
   const found = [...container.querySelectorAll('button')].find(
-    (item) => item.textContent?.trim() === label,
+    (item) => item.textContent?.trim() === label || item.getAttribute('aria-label') === label,
   );
   if (!found) throw new Error(`Button "${label}" not found`);
   return found;

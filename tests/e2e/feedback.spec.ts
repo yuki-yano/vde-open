@@ -163,8 +163,8 @@ test('cancelling a question from the management UI reaches the agent as cancelle
   const { request } = await t.json<{ request: Request }>(['ask', 'q.json']);
   await page.goto(await t.uiUrl());
   const panel = panelOf(page);
-  await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await page.getByRole('button', { name: 'Cancel question' }).click();
+  await panel.getByRole('button', { name: 'Cancel question', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel question' }).click();
   await expect(panel.getByTestId('feedback-status')).toHaveText('Cancelled');
   const waited = await t.json<Request & { cancellation: { reason: string } }>([
     'feedback',

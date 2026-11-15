@@ -5,21 +5,13 @@ import {
   ChevronsLeftRight,
   CircleAlert,
   FileDown,
-  Hash,
+  LoaderCircle,
   Pause,
   Play,
   RefreshCw,
+  TableOfContents,
 } from 'lucide-react';
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type PointerEvent,
-} from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
   AlertDialog,
@@ -31,33 +23,48 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { DocumentLocation, DocumentPathCopyButton } from '@/components/document-location';
 import { CopyButton } from '@/components/copy-button';
+import { DocumentHeader, ToolbarDivider } from '@/components/document-header';
 import { DetailsPopover } from '@/components/details-popover';
 import { HtmlViewBar, ScriptLimits } from '@/components/html-view-bar';
 import { ImageViewer } from '@/components/image-viewer';
+import { PaneResizeHandle } from '@/components/pane-resize-handle';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import {
+  segmentedGroup,
+  segmentedItem,
+  ToggleGroup,
+  ToggleGroupItem,
+} from '@/components/ui/toggle-group';
 import { ApiError, type Api } from '@/lib/api';
 import { describeDiagnostic } from '@/lib/diagnostics';
 import type { HeadingInUrl, HeadingRestore } from '@/lib/location';
 import { pdfExports, usePdfExport } from '@/lib/pdf-export';
 import {
   isMarkdownWidth,
+  isOutlineVisibility,
   isViewMode,
   usePreference,
   type MarkdownWidth,
+  type OutlineVisibility,
   type ViewMode,
 } from '@/lib/preferences';
 import { useBridge } from '@/lib/use-bridge';
 import { useMarkdown } from '@/lib/use-markdown';
 import { useMissingAssets } from '@/lib/use-missing-assets';
 import { useRenderGrant } from '@/lib/use-render-grant';
+import { cn } from '@/lib/utils';
+
+// Icon toggles show their pressed state.
+const PRESSABLE = 'aria-pressed:bg-muted aria-pressed:text-foreground';
 
 const OUTLINE_MIN = 160;
 const OUTLINE_MAX = 480;
-const OUTLINE_DEFAULT = 240;
+const OUTLINE_DEFAULT = 200;
+// The document keeps at least this width beside the outline: the outline narrows, then hides, first.
+const DOCUMENT_MIN = 480;
+const HANDLE = 8;
 const isOutlineWidth = (value: unknown): value is number =>
   typeof value === 'number' &&
   Number.isInteger(value) &&
@@ -172,10 +179,17 @@ function TextViewer({
   const outlineId = useId();
   const panes = useRef<HTMLDivElement>(null);
   const [paneWidth, setPaneWidth] = useState(0);
-  const outlineDrag = useRef<{ pointerId: number; x: number; width: number } | null>(null);
-  // Reserve 240px for the document and 8px for the handle, including when the answer panel is open.
-  const maxOutlineWidth = Math.max(OUTLINE_MIN, Math.min(OUTLINE_MAX, paneWidth - 248));
+  const [outlineVisibility, setOutlineVisibility] = usePreference<OutlineVisibility>(
+    'outline',
+    'shown',
+    isOutlineVisibility,
+  );
+  const maxOutlineWidth = Math.max(
+    OUTLINE_MIN,
+    Math.min(OUTLINE_MAX, paneWidth - HANDLE - DOCUMENT_MIN),
+  );
   const outlineWidth = Math.min(preferredOutlineWidth, maxOutlineWidth);
+  const outlineFits = paneWidth >= DOCUMENT_MIN + HANDLE + OUTLINE_MIN;
   useLayoutEffect(() => {
     const element = panes.current;
     if (!element) return undefined;
@@ -187,24 +201,6 @@ function TextViewer({
   }, []);
   const resizeOutline = (next: number) => {
     setOutlineWidth(Math.round(Math.min(maxOutlineWidth, Math.max(OUTLINE_MIN, next))));
-  };
-  const startOutlineResize = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || !event.isPrimary) return;
-    event.preventDefault();
-    event.currentTarget.focus();
-    outlineDrag.current = { pointerId: event.pointerId, x: event.clientX, width: outlineWidth };
-    // Keep receiving moves over the document iframe until pointerup or pointercancel.
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-  const moveOutlineResize = (event: PointerEvent<HTMLDivElement>) => {
-    const drag = outlineDrag.current;
-    if (
-      !drag ||
-      drag.pointerId !== event.pointerId ||
-      !event.currentTarget.hasPointerCapture(event.pointerId)
-    )
-      return;
-    resizeOutline(drag.width + drag.x - event.clientX);
   };
   // The revision at the time updates were paused. While paused, do not replace it with newer revisions.
   const [pinnedRevision, setPinnedRevision] = useState<string | null>(null);
@@ -267,6 +263,8 @@ function TextViewer({
   const outline = loaded?.outline ?? [];
   const outlineError = loaded?.outlineError ?? null;
   const error = failure !== null && failure.revision === shownRevision ? failure.message : null;
+  // An outline of one heading has nothing to move between.
+  const hasOutline = outline.length > 1 || outlineError !== null;
 
   const isMarkdown = document.format === 'markdown';
   const wantsPreview = mode === 'preview';
@@ -629,40 +627,21 @@ function TextViewer({
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
       aria-label="Document view"
     >
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2">
-        <div className="min-w-0 flex-1 basis-56">
-          <h1 className="truncate text-base font-semibold">{document.title}</h1>
-          {/* Not truncated: the list shortens the location, so the whole of it is readable here. */}
-          <p
-            className="text-xs [overflow-wrap:anywhere] text-muted-foreground"
-            title={document.canonicalPath ?? undefined}
-            data-testid="document-location"
-          >
-            <DocumentLocation document={document} />
-            {shownRevision && (
-              <span title={shownRevision}> · Revision {shownRevision.slice(4, 12)}</span>
-            )}
-          </p>
-        </div>
-        <div className="flex items-center gap-1">
-          <DocumentPathCopyButton document={document} />
-          <CopyButton
-            label="document ID"
-            text={document.documentId}
-            icon={Hash}
-            title={`Copy document ID (${document.documentId})`}
-          />
-        </div>
-        <Badge variant="outline">{isMarkdown ? 'Markdown' : 'HTML'}</Badge>
+      <DocumentHeader document={document}>
         {fixed ? (
-          <Badge variant="secondary">Showing the question's revision</Badge>
+          <Badge
+            variant="secondary"
+            title={`Showing revision ${shownRevision?.slice(4, 12) ?? ''}, which the question is about`}
+          >
+            Question's revision
+          </Badge>
         ) : (
           paused &&
           (stale ? (
             <DetailsPopover
               title="A newer revision is available"
               trigger={
-                <Button variant="ghost" size="xs">
+                <Button variant="ghost" size="xs" className="text-link">
                   <CircleAlert aria-hidden="true" />
                   Update available
                 </Button>
@@ -688,17 +667,25 @@ function TextViewer({
             }
             setMode(next);
           }}
-          size="sm"
+          spacing={0.5}
+          className={segmentedGroup}
           aria-label="View"
         >
-          <ToggleGroupItem value="preview">Preview</ToggleGroupItem>
-          <ToggleGroupItem value="source">Source</ToggleGroupItem>
+          <ToggleGroupItem value="preview" className={segmentedItem}>
+            Preview
+          </ToggleGroupItem>
+          <ToggleGroupItem value="source" className={segmentedItem}>
+            Source
+          </ToggleGroupItem>
         </ToggleGroup>
+        <ToolbarDivider />
         {isMarkdown && wantsPreview && (
           <Button
-            variant={markdownWidth === 'wide' ? 'secondary' : 'outline'}
-            size="sm"
+            variant="ghost"
+            size="icon-sm"
+            className={PRESSABLE}
             aria-pressed={markdownWidth === 'wide'}
+            aria-label="Wide view"
             title={
               markdownWidth === 'wide'
                 ? 'Return to standard Markdown width'
@@ -707,31 +694,47 @@ function TextViewer({
             onClick={() => setMarkdownWidth(markdownWidth === 'wide' ? 'standard' : 'wide')}
           >
             <ChevronsLeftRight aria-hidden="true" />
-            Wide view
+          </Button>
+        )}
+        {hasOutline && outlineFits && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className={PRESSABLE}
+            aria-pressed={outlineVisibility === 'shown'}
+            aria-label="Outline"
+            title={outlineVisibility === 'shown' ? 'Hide the outline' : 'Show the outline'}
+            onClick={() => setOutlineVisibility(outlineVisibility === 'shown' ? 'hidden' : 'shown')}
+          >
+            <TableOfContents aria-hidden="true" />
           </Button>
         )}
         <Button
-          variant="outline"
-          size="sm"
+          variant="ghost"
+          size="icon-sm"
+          className={PRESSABLE}
           aria-pressed={paused}
+          aria-label={paused ? 'Resume updates' : 'Pause updates'}
           disabled={fixed}
           title={
             fixed
               ? "A question is awaiting an answer, so the question's revision is shown"
-              : undefined
+              : paused
+                ? 'Resume updates'
+                : 'Pause updates (keep showing this revision)'
           }
           onClick={() => setPinnedRevision(paused ? null : document.revision)}
         >
           {paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
-          {paused ? 'Resume updates' : 'Pause updates'}
         </Button>
         <Button
           variant="ghost"
-          size="sm"
+          size="icon-sm"
+          aria-label="Refresh"
+          title="Read the file again"
           onClick={() => void api.refresh(document.documentId).catch(() => undefined)}
         >
           <RefreshCw aria-hidden="true" />
-          Refresh
         </Button>
         <DetailsPopover
           title="PDF export failed"
@@ -739,12 +742,17 @@ function TextViewer({
           trigger={
             <Button
               variant="ghost"
-              size="sm"
+              size="icon-sm"
+              aria-label="Export PDF"
+              aria-busy={pdfExport.exporting}
+              className={pdfExport.error ? 'text-destructive' : undefined}
               disabled={pdfExport.exporting || loaded === null}
               title={
-                isMarkdown
-                  ? undefined
-                  : 'Exports static HTML; scripts and interactive changes are not included'
+                pdfExport.exporting
+                  ? 'Exporting…'
+                  : isMarkdown
+                    ? 'Export PDF'
+                    : 'Export PDF (static HTML; scripts and interactive changes are not included)'
               }
               onClick={() => {
                 // The shown revision. The daemon prints it with a headless browser; no print dialog is shown.
@@ -753,21 +761,12 @@ function TextViewer({
               }}
             >
               {pdfExport.error ? (
-                <CircleAlert aria-hidden="true" className="text-destructive" />
+                <CircleAlert aria-hidden="true" />
+              ) : pdfExport.exporting ? (
+                <LoaderCircle aria-hidden="true" className="animate-spin" />
               ) : (
                 <FileDown aria-hidden="true" />
               )}
-              <span className="inline-grid">
-                <span className="invisible col-start-1 row-start-1" aria-hidden="true">
-                  Export PDF
-                </span>
-                <span className="invisible col-start-1 row-start-1" aria-hidden="true">
-                  Exporting…
-                </span>
-                <span className="col-start-1 row-start-1">
-                  {pdfExport.exporting ? 'Exporting…' : 'Export PDF'}
-                </span>
-              </span>
             </Button>
           }
         >
@@ -791,7 +790,7 @@ function TextViewer({
             </Button>
           </div>
         </DetailsPopover>
-      </header>
+      </DocumentHeader>
 
       {(pdfExport.error || linkError) && (
         <span role="alert" className="sr-only">
@@ -904,52 +903,29 @@ function TextViewer({
             )}
           </div>
         )}
-        {(outline.length > 0 || outlineError !== null) && (
+        {hasOutline && outlineVisibility === 'shown' && (
           <>
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize outline"
-              aria-controls={outlineId}
-              aria-valuemin={OUTLINE_MIN}
-              aria-valuemax={maxOutlineWidth}
-              aria-valuenow={outlineWidth}
-              tabIndex={0}
-              className="relative hidden w-2 shrink-0 touch-none cursor-col-resize before:absolute before:inset-y-0 before:left-1/2 before:w-px before:bg-border hover:bg-muted hover:before:bg-primary/60 focus-visible:bg-primary/10 focus-visible:before:bg-primary focus-visible:outline-none active:bg-primary/10 active:before:bg-primary lg:block"
-              onPointerDown={startOutlineResize}
-              onPointerMove={moveOutlineResize}
-              onLostPointerCapture={() => {
-                outlineDrag.current = null;
-              }}
-              onKeyDown={(event) => {
-                const next =
-                  event.key === 'ArrowLeft'
-                    ? outlineWidth + 16
-                    : event.key === 'ArrowRight'
-                      ? outlineWidth - 16
-                      : event.key === 'Home'
-                        ? OUTLINE_MIN
-                        : event.key === 'End'
-                          ? maxOutlineWidth
-                          : null;
-                if (next === null) return;
-                event.preventDefault();
-                resizeOutline(next);
-              }}
+            <PaneResizeHandle
+              label="Resize outline"
+              controls={outlineId}
+              width={outlineWidth}
+              min={OUTLINE_MIN}
+              max={maxOutlineWidth}
+              onResize={resizeOutline}
+              style={outlineFits ? undefined : { display: 'none' }}
             />
             <aside
               id={outlineId}
-              style={{ width: outlineWidth }}
-              className="hidden shrink-0 overflow-y-auto px-3 py-4 lg:block"
+              style={{ width: outlineWidth, display: outlineFits ? undefined : 'none' }}
+              className="shrink-0 overflow-y-auto py-3 pr-2"
               aria-label="Outline"
             >
-              <h2 className="mb-2 text-xs font-medium text-muted-foreground">Outline</h2>
               {outlineError !== null && (
-                <p className="text-xs text-destructive" role="alert">
+                <p className="px-2 text-xs text-destructive" role="alert">
                   Could not fetch the outline ({outlineError}).
                 </p>
               )}
-              <ul className="flex flex-col gap-0.5 text-sm">
+              <ul className="flex flex-col text-sm">
                 {outline.map((item) => {
                   const jumpable = canJump(item);
                   return (
@@ -959,7 +935,10 @@ function TextViewer({
                     >
                       <button
                         type="button"
-                        className="w-full truncate rounded px-2 py-1 text-left hover:bg-muted disabled:opacity-50"
+                        className={cn(
+                          'w-full truncate rounded px-2 py-1 text-left hover:bg-foreground/5 disabled:opacity-50',
+                          item.level > 1 && 'text-muted-foreground hover:text-foreground',
+                        )}
                         disabled={!jumpable}
                         title={
                           jumpable

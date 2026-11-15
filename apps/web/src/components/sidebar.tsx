@@ -16,6 +16,8 @@ import {
   Folder,
   FolderGit2,
   GitBranch,
+  List,
+  ListTree,
   MessageCircleQuestionMark,
   RefreshCw,
   X,
@@ -30,14 +32,19 @@ import {
   useState,
   type KeyboardEvent,
   type MouseEvent,
+  type ReactNode,
   type RefObject,
 } from 'react';
 
 import { DetailsPopover } from '@/components/details-popover';
 import { FormatIcon } from '@/components/format-icon';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import {
+  segmentedGroup,
+  segmentedItem,
+  ToggleGroup,
+  ToggleGroupItem,
+} from '@/components/ui/toggle-group';
 import type { SidebarView } from '@/lib/preferences';
 import {
   buildLabels,
@@ -65,6 +72,9 @@ export interface SidebarProps {
   onSelect: (documentId: string) => void;
   onClose: (documentId: string) => void;
   onReorder: (order: string[]) => void;
+  // Controls shown in the list's top row: search before the layout toggle, settings after it.
+  search?: ReactNode;
+  settings?: ReactNode;
 }
 
 const STATE_LABEL: Record<string, { label: string; icon: LucideIcon }> = {
@@ -74,44 +84,35 @@ const STATE_LABEL: Record<string, { label: string; icon: LucideIcon }> = {
   error: { label: 'error', icon: CircleAlert },
 };
 
-// Badges show their text when the list is wide enough. They shrink to an icon on narrow lists (under 13rem, the same
-// width), and while the row shows its remove button, so the title keeps room.
-// The text stays for screen readers.
-const BADGE_COMPACT = 'px-0.5 @min-[13rem]/list:px-2 @min-[13rem]/list:row-open:px-0.5';
-const BADGE_ICON = '@min-[13rem]/list:hidden @min-[13rem]/list:row-open:inline';
-const BADGE_TEXT = 'sr-only @min-[13rem]/list:not-sr-only @min-[13rem]/list:row-open:sr-only';
-// Always an icon (the text stays for screen readers).
-const BADGE_ALWAYS_COMPACT = { badge: 'px-0.5', icon: '', text: 'sr-only' };
-
+// Badges are icons so the title keeps its room. The text stays for screen readers and in the tooltip.
 function StatusBadges({ document }: { document: DocumentSummary }) {
   const state = document.sourceState === 'ready' ? null : STATE_LABEL[document.sourceState];
   const StateIcon = state?.icon ?? CircleAlert;
-  // With a question as well, the state badge stays an icon so the title keeps room. The question keeps its text.
-  const stateStyle =
-    document.pendingRequestIds.length > 0
-      ? BADGE_ALWAYS_COMPACT
-      : { badge: BADGE_COMPACT, icon: BADGE_ICON, text: BADGE_TEXT };
+  const label = state?.label ?? document.sourceState;
   return (
     <>
       {document.sourceState !== 'ready' && (
-        <Badge
-          variant="outline"
-          className={cn('shrink-0', stateStyle.badge)}
-          title={state?.label ?? document.sourceState}
+        <span
+          className={cn(
+            // 20px badges in an 18px line; the margin keeps rows with and without badges the same height.
+            '-my-px flex size-5 shrink-0 items-center justify-center',
+            document.sourceState === 'updating' ? 'text-muted-foreground' : 'text-destructive',
+          )}
+          title={label}
         >
-          <StateIcon className={stateStyle.icon} aria-hidden="true" />
-          <span className={stateStyle.text}>{state?.label ?? document.sourceState}</span>
-        </Badge>
+          <StateIcon className="size-3.5" aria-hidden="true" />
+          <span className="sr-only">{label}</span>
+        </span>
       )}
       {document.pendingRequestIds.length > 0 && (
-        <Badge
-          className={cn('shrink-0', BADGE_COMPACT)}
+        <span
+          className="-my-px flex size-5 shrink-0 items-center justify-center rounded-full bg-link text-background"
           data-testid="pending-question"
           title="A question is awaiting your answer"
         >
-          <MessageCircleQuestionMark className={BADGE_ICON} aria-hidden="true" />
-          <span className={BADGE_TEXT}>Question</span>
-        </Badge>
+          <MessageCircleQuestionMark className="size-3.5" aria-hidden="true" />
+          <span className="sr-only">Question</span>
+        </span>
       )}
     </>
   );
@@ -313,10 +314,10 @@ function FlatRow({
       ref={ref}
       data-drag-source={isDragSource || undefined}
       className={cn(
-        'group/row relative rounded-md [contain-intrinsic-size:auto_3.125rem]',
+        'group/row relative rounded-md [contain-intrinsic-size:auto_2.75rem]',
         OFFSCREEN_ROW,
         count > 1 && 'cursor-grab active:cursor-grabbing',
-        active ? 'bg-accent text-accent-foreground' : 'hover:bg-muted',
+        active ? 'bg-selection' : 'hover:bg-foreground/5',
         isDragSource &&
           'bg-primary/10 outline-2 -outline-offset-2 outline-dashed outline-primary [&>button]:opacity-0 [&>span]:opacity-0',
       )}
@@ -334,7 +335,7 @@ function FlatRow({
         ref={handleRef}
         type="button"
         className={cn(
-          'group/button flex w-full min-w-0 flex-col gap-0.5 rounded-md py-1.5 pr-2 pl-2 text-left text-sm',
+          'group/button flex w-full min-w-0 flex-col gap-0.5 rounded-md py-1 pr-2 pl-2 text-left text-sm',
           count > 1 && 'cursor-grab active:cursor-grabbing',
           ROW_FOCUS,
         )}
@@ -413,19 +414,19 @@ function TreeDocumentRow({
   return (
     <li
       role="treeitem"
-      className={cn('[contain-intrinsic-size:auto_2.25rem]', OFFSCREEN_ROW)}
+      className={cn('[contain-intrinsic-size:auto_1.625rem]', OFFSCREEN_ROW)}
       style={{ paddingLeft: `${String(depth * 0.75)}rem` }}
     >
       <div
         className={cn(
           'group/row flex items-center gap-1 rounded-md pr-1',
-          active ? 'bg-accent text-accent-foreground' : 'hover:bg-muted',
+          active ? 'bg-selection' : 'hover:bg-foreground/5',
         )}
       >
         <button
           type="button"
           className={cn(
-            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-sm',
             ROW_FOCUS,
           )}
           aria-current={active ? 'true' : undefined}
@@ -459,7 +460,7 @@ function TreeDocumentRow({
 }
 
 // Rows of repositories and worktrees stay at the top while their documents scroll by (two rows of h-7).
-const STICKY_ROW = 'sticky flex h-7 items-center gap-2 bg-background px-2 text-xs';
+const STICKY_ROW = 'sticky flex h-7 items-center gap-2 bg-chrome px-2 text-xs';
 
 function Tree({
   nodes,
@@ -692,7 +693,17 @@ function DragCatalogGuard({
 }
 
 export function Sidebar(props: SidebarProps) {
-  const { documents, activeId, view, onViewChange, onSelect, onClose, onReorder } = props;
+  const {
+    documents,
+    activeId,
+    view,
+    onViewChange,
+    onSelect,
+    onClose,
+    onReorder,
+    search,
+    settings,
+  } = props;
   const [dragDocuments, setDragDocuments] = useState<DocumentSummary[] | null>(null);
   const [reorderMessage, setReorderMessage] = useState<string | null>(null);
   const order = documents.map((document) => document.documentId);
@@ -715,8 +726,9 @@ export function Sidebar(props: SidebarProps) {
         pressedOn.current = (event.target as Element).closest('button');
       }}
     >
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <h2 className="text-sm font-medium">Open documents ({documents.length})</h2>
+      <h2 className="sr-only">Open documents ({documents.length})</h2>
+      <div className="@container/top flex h-11 shrink-0 items-center gap-1 border-b px-2">
+        {search}
         {reorderMessage && (
           <DetailsPopover
             title="Order not changed"
@@ -744,23 +756,40 @@ export function Sidebar(props: SidebarProps) {
             if (next === 'flat' || next === 'tree') onViewChange(next);
           }}
           size="sm"
+          spacing={0.5}
+          className={segmentedGroup}
           aria-label="List layout"
         >
-          <ToggleGroupItem value="flat">Flat</ToggleGroupItem>
-          <ToggleGroupItem value="tree">Tree</ToggleGroupItem>
+          <ToggleGroupItem
+            value="flat"
+            aria-label="Flat"
+            title="Flat list"
+            className={cn(segmentedItem, 'px-1')}
+          >
+            <List aria-hidden="true" />
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            value="tree"
+            aria-label="Tree"
+            title="Group by repository"
+            className={cn(segmentedItem, 'px-1')}
+          >
+            <ListTree aria-hidden="true" />
+          </ToggleGroupItem>
         </ToggleGroup>
+        {settings}
       </div>
       <div
         ref={list}
         className={cn(
-          '@container/list min-h-0 flex-1 overflow-y-auto p-2',
+          '@container/list min-h-0 flex-1 overflow-y-auto p-1.5',
           // Rows that scroll into view stay below the sticky repository and worktree rows.
           view === 'tree' && 'scroll-pt-14',
         )}
       >
         {documents.length === 0 ? (
           <p className="px-2 py-4 text-sm text-muted-foreground">
-            No documents are open. Run <code>vo &lt;file&gt;</code> in the CLI to show them here.
+            No documents are open. Run <code>vo &lt;file&gt;</code> to open one.
           </p>
         ) : view === 'tree' ? (
           <Tree nodes={tree} depth={0} labels={labels} props={{ activeId, onSelect, onClose }} />

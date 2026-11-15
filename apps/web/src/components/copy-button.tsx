@@ -30,7 +30,7 @@ export function CopyButton({
         trigger={
           <Button
             variant={code ? 'outline' : 'ghost'}
-            size={code ? 'xs' : 'icon-sm'}
+            size={code ? 'xs' : 'icon-xs'}
             aria-label={`Copy ${label}`}
             title={failed ? `${result.message} Click for details.` : (title ?? `Copy ${label}`)}
             disabled={pending}

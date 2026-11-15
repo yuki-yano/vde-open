@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { colorPalettes } from './preferences';
 
 // Contrast of the list's colors, computed from the tokens in index.css (WCAG 2.2 relative luminance).
-// Icons need 3:1 (1.4.11 non-text contrast) and the second line of a row 4.5:1 (1.4.3), against the
-// background and against the selected row (hover uses the same color).
+// Icons need 3:1 (1.4.11 non-text contrast) and the second line of a row 4.5:1 (1.4.3), against every
+// surface a row can sit on.
 
 const css = readFileSync(new URL('../themes.css', import.meta.url), 'utf8');
 
@@ -66,8 +66,9 @@ function contrast(tokens: Map<string, string>, foreground: string, background: s
 }
 
 describe.each(themes)('%s theme', (_name, tokens) => {
-  // The list sits on the background. The selected row uses accent and a hovered row muted.
-  const backgrounds = ['--background', '--accent', '--muted'];
+  // The list sits on chrome (the drawer and tree rows on the background), the selected row on selection,
+  // and a hovered row on muted at most.
+  const backgrounds = ['--background', '--chrome', '--selection', '--muted'];
 
   it.each(['--format-markdown', '--format-html', '--muted-foreground'])(
     '%s icons reach 3:1',

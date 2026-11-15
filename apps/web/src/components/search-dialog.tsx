@@ -1,4 +1,5 @@
 import type { SearchHit, SearchResult } from '@vde-open/shared';
+import { Search } from 'lucide-react';
 import { useEffect, useId, useState, type KeyboardEvent } from 'react';
 
 import {
@@ -109,77 +110,100 @@ export function SearchDialog({ api, open, onOpenChange, onSelect }: SearchDialog
         }
       }}
     >
-      <DialogContent className="top-[15%] translate-y-0 sm:max-w-xl">
-        <DialogHeader>
+      <DialogContent className="top-[12%] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-xl">
+        <DialogHeader className="sr-only">
           <DialogTitle>Search open documents</DialogTitle>
           <DialogDescription>
             Only documents that are currently open are searched. Closed documents and other files
             are not.
           </DialogDescription>
         </DialogHeader>
-        <Input
-          aria-label="Search query"
-          aria-controls={listId}
-          aria-activedescendant={hits.length > 0 ? `${listId}-${String(active)}` : undefined}
-          placeholder="Words or a file name"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setSelected(0);
-          }}
-          onKeyDown={onKeyDown}
-        />
-        <div role="status" aria-live="polite" className="text-xs text-muted-foreground">
-          {trimmed === ''
-            ? 'Type to search the open documents. Use ↑↓ to select and Enter to jump.'
-            : shown === null
-              ? 'Searching…'
-              : shown.error !== null
-                ? `Search failed (${shown.error}).`
-                : `${String(hits.length)} ${hits.length === 1 ? 'result' : 'results'}${
-                    shown.result?.incomplete === true
-                      ? ' (some documents are not indexed yet, so not all documents were searched)'
-                      : ''
-                  }`}
+        <div className="flex items-center gap-2 border-b pr-10 pl-3">
+          <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <Input
+            aria-label="Search query"
+            aria-controls={listId}
+            aria-activedescendant={hits.length > 0 ? `${listId}-${String(active)}` : undefined}
+            placeholder="Search open documents"
+            className="h-11 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setSelected(0);
+            }}
+            onKeyDown={onKeyDown}
+          />
         </div>
         <div
           id={listId}
           role="listbox"
           aria-label="Search results"
-          className="flex max-h-80 flex-col gap-1 overflow-y-auto"
+          className="flex max-h-[min(24rem,60svh)] flex-col overflow-y-auto p-1.5 empty:hidden"
         >
-          {hits.map((hit, index) => (
-            <div
-              key={`${hit.documentId}:${hit.sectionId}`}
-              id={`${listId}-${String(index)}`}
-              role="option"
-              aria-selected={index === active}
-              className="cursor-pointer rounded-md px-3 py-2 text-sm aria-selected:bg-muted"
-              tabIndex={-1}
-              onMouseEnter={() => setSelected(index)}
-              onClick={() => choose(hit)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  choose(hit);
-                }
-              }}
-            >
-              <p className="truncate font-medium">
-                {hit.title}
-                {hit.headingPath.length > 0 && (
-                  <span className="font-normal text-muted-foreground">
-                    {' '}
-                    — {hit.headingPath.join(' › ')}
-                  </span>
-                )}
-              </p>
-              <p className="line-clamp-2 text-xs text-muted-foreground">{hit.excerpt}</p>
-              {hit.displayPath && (
-                <p className="truncate text-xs text-muted-foreground">{hit.displayPath}</p>
-              )}
-            </div>
-          ))}
+          {hits.map((hit, index) => {
+            // The first heading is usually the title itself.
+            const path =
+              hit.headingPath[0] === hit.title ? hit.headingPath.slice(1) : hit.headingPath;
+            return (
+              <div
+                key={`${hit.documentId}:${hit.sectionId}`}
+                id={`${listId}-${String(index)}`}
+                role="option"
+                aria-selected={index === active}
+                className="cursor-pointer rounded-md px-2.5 py-1.5 aria-selected:bg-selection"
+                tabIndex={-1}
+                onMouseEnter={() => setSelected(index)}
+                onClick={() => choose(hit)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    choose(hit);
+                  }
+                }}
+              >
+                <div className="flex items-baseline gap-3">
+                  <p className="min-w-0 flex-1 truncate text-sm">
+                    <span className="font-medium">{hit.title}</span>
+                    {path.length > 0 && (
+                      <span className="text-muted-foreground"> › {path.join(' › ')}</span>
+                    )}
+                  </p>
+                  {hit.displayPath && (
+                    <p className="max-w-[45%] shrink-0 truncate text-xs text-muted-foreground">
+                      {hit.displayPath}
+                    </p>
+                  )}
+                </div>
+                <p className="truncate text-xs text-muted-foreground">{hit.excerpt}</p>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t bg-chrome px-3 py-1.5 text-xs text-muted-foreground">
+          <p role="status" aria-live="polite" className="min-w-0">
+            {trimmed === ''
+              ? 'Searches open documents only'
+              : shown === null
+                ? 'Searching…'
+                : shown.error !== null
+                  ? `Search failed (${shown.error})`
+                  : `${String(hits.length)} ${hits.length === 1 ? 'result' : 'results'}${
+                      shown.result?.incomplete === true
+                        ? ', some documents are still being indexed'
+                        : ''
+                    }`}
+          </p>
+          <p className="hidden shrink-0 gap-3 sm:flex" aria-hidden="true">
+            <span>
+              <kbd className="font-sans">↑↓</kbd> Select
+            </span>
+            <span>
+              <kbd className="font-sans">↵</kbd> Open
+            </span>
+            <span>
+              <kbd className="font-sans">Esc</kbd> Close
+            </span>
+          </p>
         </div>
       </DialogContent>
     </Dialog>

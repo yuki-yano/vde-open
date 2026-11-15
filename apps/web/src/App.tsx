@@ -259,7 +259,7 @@ export function Workspace({ api }: { api: Api }) {
       const previous = lastEvent.current;
       lastEvent.current = { daemonId: event.daemonId, sequence: event.sequence };
       if (event.type === 'daemon-stopping') {
-        setNotice('The daemon has stopped. Run the CLI to open it again.');
+        setNotice('The daemon stopped. Run vo to start it again.');
         return;
       }
       // Switch the shown document only on an explicit focus request. The list is fetched again below.
@@ -339,64 +339,19 @@ export function Workspace({ api }: { api: Api }) {
     setWidth(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, event.clientX)));
   };
 
-  return (
-    <div className="flex h-svh flex-col bg-background text-foreground">
-      {/* On narrow screens, hide button labels and show only icons (the names stay for screen readers). */}
-      <header className="flex min-w-0 items-center justify-between gap-2 border-b px-4 py-2 sm:gap-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="min-[900px]:hidden"
-          aria-expanded={drawerOpen}
-          aria-controls="document-list"
-          onClick={() => setDrawerOpen((open) => !open)}
-        >
-          {drawerOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
-          <span className="max-sm:sr-only">Document list</span>
+  const openSearch = () => setSearchOpen(true);
+  const appearance = (
+    <DetailsPopover
+      title="Appearance"
+      className="w-72"
+      trigger={
+        <Button variant="ghost" size="icon-sm" aria-label="Appearance" title="Appearance">
+          <Palette aria-hidden="true" />
         </Button>
-        <p className="shrink-0 text-sm font-semibold">vde-open</p>
-        <Button
-          variant="outline"
-          size="sm"
-          className="ml-auto"
-          onClick={() => setSearchOpen(true)}
-          aria-keyshortcuts="Meta+K Control+K"
-        >
-          <Search aria-hidden="true" />
-          <span className="max-sm:sr-only">Search open documents</span>
-          <kbd className="ml-1 text-xs text-muted-foreground max-sm:hidden">⌘K</kbd>
-        </Button>
-        <DetailsPopover
-          title="Color palette"
-          trigger={
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label="Color palette"
-              title={`Color palette: ${colorPalettes.find((item) => item.value === palette)?.label}`}
-            >
-              <Palette aria-hidden="true" />
-            </Button>
-          }
-        >
-          <label htmlFor="color-palette" className="font-medium">
-            Palette
-          </label>
-          <select
-            id="color-palette"
-            value={palette}
-            onChange={(event) => {
-              if (isColorPalette(event.target.value)) setPalette(event.target.value);
-            }}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {colorPalettes.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </DetailsPopover>
+      }
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-medium">Theme</span>
         <ToggleGroup
           value={[theme]}
           onValueChange={(value) => {
@@ -406,19 +361,68 @@ export function Workspace({ api }: { api: Api }) {
           size="sm"
           aria-label="Color scheme"
         >
-          <ToggleGroupItem value="light" aria-label="Light">
+          <ToggleGroupItem value="light" aria-label="Light" title="Light">
             <Sun aria-hidden="true" />
           </ToggleGroupItem>
-          <ToggleGroupItem value="dark" aria-label="Dark">
+          <ToggleGroupItem value="dark" aria-label="Dark" title="Dark">
             <Moon aria-hidden="true" />
           </ToggleGroupItem>
-          <ToggleGroupItem value="system" aria-label="Match OS setting">
+          <ToggleGroupItem value="system" aria-label="Match OS setting" title="Match OS setting">
             <Monitor aria-hidden="true" />
           </ToggleGroupItem>
         </ToggleGroup>
-      </header>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <label htmlFor="color-palette" className="font-medium">
+          Palette
+        </label>
+        <select
+          id="color-palette"
+          value={palette}
+          onChange={(event) => {
+            if (isColorPalette(event.target.value)) setPalette(event.target.value);
+          }}
+          className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {colorPalettes.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    </DetailsPopover>
+  );
+
+  return (
+    <div className="flex h-svh flex-col bg-background text-foreground">
+      {/* Below 900px the list is a drawer. Its toggle and search sit outside the document view, so they stay
+          usable with no document shown and while documents switch. */}
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b bg-chrome px-2 min-[900px]:hidden">
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-expanded={drawerOpen}
+          aria-controls="document-list"
+          onClick={() => setDrawerOpen((open) => !open)}
+        >
+          {drawerOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
+          Document list
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="ml-auto"
+          aria-label="Search open documents"
+          title="Search open documents (⌘K)"
+          aria-keyshortcuts="Meta+K Control+K"
+          onClick={openSearch}
+        >
+          <Search aria-hidden="true" />
+        </Button>
+      </div>
       {notice && (
-        <p role="status" className="border-b bg-muted px-4 py-2 text-sm">
+        <p role="status" className="border-b bg-muted px-3 py-1.5 text-sm">
           {notice}
         </p>
       )}
@@ -426,7 +430,7 @@ export function Workspace({ api }: { api: Api }) {
         {/* Below 900px, the list becomes a drawer (do not cram three panes side by side; spec 13.2). */}
         <div
           id="document-list"
-          className={`${drawerOpen ? 'block' : 'hidden'} absolute inset-y-0 left-0 z-20 w-72 max-w-[85vw] shrink-0 border-r bg-background shadow-lg min-[900px]:static min-[900px]:block min-[900px]:max-w-none min-[900px]:shadow-none`}
+          className={`${drawerOpen ? 'block' : 'hidden'} absolute inset-y-0 left-0 z-20 w-72 max-w-[85vw] shrink-0 border-r bg-chrome shadow-lg min-[900px]:static min-[900px]:block min-[900px]:max-w-none min-[900px]:shadow-none`}
           style={{ width: drawerOpen ? undefined : width }}
         >
           <Sidebar
@@ -441,13 +445,32 @@ export function Workspace({ api }: { api: Api }) {
             }}
             onClose={(documentId) => void api.close(documentId).then(load, load)}
             onReorder={reorder}
+            search={
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-w-0 flex-1 justify-start bg-background font-normal"
+                aria-label="Search open documents"
+                aria-keyshortcuts="Meta+K Control+K"
+                onClick={openSearch}
+              >
+                <Search aria-hidden="true" className="text-muted-foreground" />
+                <span className="hidden truncate text-muted-foreground @min-[13rem]/top:inline">
+                  Search
+                </span>
+                <kbd className="ml-auto hidden font-sans text-xs text-muted-foreground @min-[14rem]/top:inline">
+                  ⌘K
+                </kbd>
+              </Button>
+            }
+            settings={appearance}
           />
         </div>
         <div
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize document list"
-          className="hidden w-1 shrink-0 cursor-col-resize hover:bg-border min-[900px]:block"
+          className="hidden w-1 shrink-0 cursor-col-resize hover:bg-ring/40 min-[900px]:block"
           onPointerDown={startResize}
           onPointerMove={resize}
         />
@@ -466,7 +489,7 @@ export function Workspace({ api }: { api: Api }) {
           </RepositoryLabelsContext>
         ) : (
           <main className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-            Select a document from the list on the left to show it here.
+            Choose a document from the list to show it here
           </main>
         )}
       </div>

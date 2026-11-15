@@ -1,9 +1,8 @@
 import type { DocumentSummary } from '@vde-open/shared';
-import { Hash, Pause, Play, RefreshCw } from 'lucide-react';
+import { Pause, Play, RefreshCw, Scan } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
-import { CopyButton } from '@/components/copy-button';
-import { DocumentLocation, DocumentPathCopyButton } from '@/components/document-location';
+import { DocumentHeader, ToolbarDivider } from '@/components/document-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { ViewerProps } from '@/components/viewer';
@@ -96,58 +95,55 @@ function ImageHeader({
   onTogglePause: () => void;
   onRefresh: () => void;
 }) {
+  const paused = pinnedRevision !== null;
   return (
-    <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2">
-      <div className="min-w-0 flex-1 basis-56">
-        <h1 className="truncate text-base font-semibold">{document.title}</h1>
-        <p
-          className="text-xs [overflow-wrap:anywhere] text-muted-foreground"
-          title={document.canonicalPath ?? undefined}
-          data-testid="document-location"
-        >
-          <DocumentLocation document={document} />
-          {revision && <span title={revision}> · Revision {revision.slice(4, 12)}</span>}
-        </p>
-      </div>
-      <DocumentPathCopyButton document={document} />
-      <CopyButton
-        label="document ID"
-        text={document.documentId}
-        icon={Hash}
-        title={`Copy document ID (${document.documentId})`}
-      />
-      <Badge variant="outline">Image</Badge>
+    <DocumentHeader document={document}>
       {fixedRevision !== null ? (
-        <Badge variant="secondary">Showing the question's revision</Badge>
-      ) : pinnedRevision !== null ? (
+        <Badge
+          variant="secondary"
+          title={`Showing revision ${revision?.slice(4, 12) ?? ''}, which the question is about`}
+        >
+          Question's revision
+        </Badge>
+      ) : paused ? (
         <Badge variant="secondary">
           {pinnedRevision === document.revision ? 'Updates paused' : 'Update available'}
         </Badge>
       ) : null}
       <Button
-        variant={actualSize ? 'secondary' : 'outline'}
-        size="sm"
+        variant="ghost"
+        size="icon-sm"
+        className="aria-pressed:bg-muted aria-pressed:text-foreground"
         aria-pressed={actualSize}
+        aria-label="Actual size"
+        title={actualSize ? 'Fit the image to the view' : 'Show the image at its original size'}
         onClick={onToggleSize}
-        title="Switch between original dimensions and fitting the image to the view"
       >
-        Actual size
+        <Scan aria-hidden="true" />
       </Button>
+      <ToolbarDivider />
       <Button
-        variant="outline"
-        size="sm"
-        aria-pressed={pinnedRevision !== null}
+        variant="ghost"
+        size="icon-sm"
+        className="aria-pressed:bg-muted aria-pressed:text-foreground"
+        aria-pressed={paused}
+        aria-label={paused ? 'Resume updates' : 'Pause updates'}
+        title={paused ? 'Resume updates' : 'Pause updates (keep showing this revision)'}
         disabled={fixedRevision !== null}
         onClick={onTogglePause}
       >
-        {pinnedRevision !== null ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
-        {pinnedRevision !== null ? 'Resume updates' : 'Pause updates'}
+        {paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
       </Button>
-      <Button variant="ghost" size="sm" onClick={onRefresh}>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Refresh"
+        title="Read the file again"
+        onClick={onRefresh}
+      >
         <RefreshCw aria-hidden="true" />
-        Refresh
       </Button>
-    </header>
+    </DocumentHeader>
   );
 }
 
@@ -217,7 +213,7 @@ function ImageSourceNotice({ state }: { state: DocumentSummary['sourceState'] })
         : null;
   if (sourceNotice === null) return null;
   return (
-    <p role="status" className="border-b px-4 py-2 text-sm text-muted-foreground">
+    <p role="status" className="border-b px-3 py-1 text-xs text-muted-foreground">
       {sourceNotice}
     </p>
   );

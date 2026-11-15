@@ -118,6 +118,8 @@ test('Markdown tables keep readable columns and scroll by keyboard without widen
         .evaluate((element) => element.scrollWidth - element.clientWidth),
     ).toBe(0);
   }
+  // One heading shows no outline, so at 1200px the content area is still narrower than 60rem.
+  await page.setViewportSize({ width: 1200, height: 900 });
   const wide = page.getByRole('button', { name: 'Wide view', exact: true });
   const proseTable = page.getByRole('table').nth(1);
   const proseCell = proseTable.locator('td').last();
@@ -173,14 +175,14 @@ test('outline resizing captures drags across the HTML iframe, stops on release, 
   await page.setViewportSize({ width: 1440, height: 900 });
   t.write(
     'outline.html',
-    '<!doctype html><html><head><title>Resizable outline</title></head><body><h1>Resizable outline</h1><p>Document content</p></body></html>',
+    '<!doctype html><html><head><title>Resizable outline</title></head><body><h1>Resizable outline</h1><p>Document content</p><h2>Section</h2></body></html>',
   );
   await t.json(['open', 'outline.html']);
   await page.goto(await t.uiUrl());
   const outline = page.getByRole('complementary', { name: 'Outline', exact: true });
   const handle = page.getByRole('separator', { name: 'Resize outline', exact: true });
   await expect(handle).toBeVisible();
-  await expect(outline).toHaveCSS('width', '240px');
+  await expect(outline).toHaveCSS('width', '200px');
   const frame = page.getByTestId('document-frame');
   await expect(
     page.frameLocator('[data-testid="document-frame"]').getByText('Document content'),
@@ -192,20 +194,20 @@ test('outline resizing captures drags across the HTML iframe, stops on release, 
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x - 100, y, { steps: 5 });
-  await expect(outline).toHaveCSS('width', '340px');
+  await expect(outline).toHaveCSS('width', '300px');
   await page.mouse.up();
   await page.mouse.move(x - 180, y);
-  await expect(outline).toHaveCSS('width', '340px');
+  await expect(outline).toHaveCSS('width', '300px');
   await expect(frame).toHaveAttribute('src', frameUrl!);
   await page.reload();
-  await expect(outline).toHaveCSS('width', '340px');
+  await expect(outline).toHaveCSS('width', '300px');
 });
 
 test('outline resizing supports keys, protects the document beside an answer panel, and hides on narrow screens', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  t.write('outline.md', '# Resizable outline\n\nDocument content\n');
+  t.write('outline.md', '# Resizable outline\n\nDocument content\n\n## Section\n');
   t.write(
     'question.json',
     JSON.stringify({
@@ -231,21 +233,114 @@ test('outline resizing supports keys, protects the document beside an answer pan
   await expect(outline).toHaveCSS('width', '176px');
   await handle.press('ArrowRight');
   await expect(outline).toHaveCSS('width', '160px');
+  // The document keeps 480px beside the outline: 1440 - list 264 - answers 368 - handle 8 - 480.
   await handle.press('End');
-  await expect(outline).toHaveCSS('width', '480px');
+  await expect(outline).toHaveCSS('width', '320px');
+  // At 1100px the document has 468px, less than the 480px it keeps, so the outline steps aside.
   await page.setViewportSize({ width: 1100, height: 900 });
-  await expect.poll(async () => (await outline.boundingBox())?.width ?? 0).toBeLessThan(480);
+  await expect(outline).toBeHidden();
+  await expect(handle).toBeHidden();
   expect((await page.getByTestId('document-body').boundingBox())!.width).toBeGreaterThanOrEqual(
-    240,
+    460,
   );
   await expect(page.getByRole('complementary', { name: 'Answer the question' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(1100);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(outline).toHaveCSS('width', '480px');
+  await expect(outline).toHaveCSS('width', '320px');
   await page.setViewportSize({ width: 900, height: 900 });
   await expect(handle).toBeHidden();
   await expect(outline).toBeHidden();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(900);
+});
+
+test('the answer panel resizes by drags across the HTML iframe and by keys, keeps the document 320px wide, and persists', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  t.write(
+    'question.json',
+    JSON.stringify({
+      schemaVersion: 1,
+      title: 'Review',
+      fieldOrder: ['answer'],
+      answerSchema: {
+        type: 'object',
+        properties: { answer: { type: 'string', title: 'Answer', enum: ['Yes', 'No'] } },
+        required: ['answer'],
+        additionalProperties: false,
+      },
+    }),
+  );
+  t.write('panel.html', '<!doctype html><title>Panel</title><h1>Panel</h1><p>Document content</p>');
+  await t.json(['ask', 'question.json', '--view', 'panel.html']);
+  await page.goto(await t.uiUrl());
+  const panel = page.getByRole('complementary', { name: 'Answer the question' });
+  const handle = page.getByRole('separator', { name: 'Resize answer panel', exact: true });
+  await expect(panel).toHaveCSS('width', '360px');
+  await expect(
+    page.frameLocator('[data-testid="document-frame"]').getByText('Document content'),
+  ).toBeVisible();
+  const box = (await handle.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  // The drag moves over the document iframe, where only pointer capture keeps it going.
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 100, y, { steps: 5 });
+  await expect(panel).toHaveCSS('width', '460px');
+  await page.mouse.up();
+  await page.mouse.move(x - 180, y);
+  await expect(panel).toHaveCSS('width', '460px');
+  await page.reload();
+  await expect(panel).toHaveCSS('width', '460px');
+  await handle.press('Home');
+  await expect(panel).toHaveCSS('width', '280px');
+  await handle.press('ArrowLeft');
+  await expect(panel).toHaveCSS('width', '296px');
+  await handle.press('End');
+  await expect(panel).toHaveCSS('width', '640px');
+  // The document keeps 320px: 1100 - list 264 - handle 8 - 320 leaves the panel 508px.
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect(panel).toHaveCSS('width', '508px');
+  expect(
+    (await page.getByRole('region', { name: 'Document view' }).boundingBox())!.width,
+  ).toBeGreaterThanOrEqual(320);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(1100);
+  // Below 900px the panel sits under the document at full width, without a handle.
+  await page.setViewportSize({ width: 800, height: 900 });
+  await expect(handle).toBeHidden();
+  await expect(panel).toHaveCSS('width', '800px');
+});
+
+test('the document toolbar wraps inside a narrow document pane instead of covering the answer panel', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.addInitScript(() => localStorage.setItem('vde-open.pref.sidebar-width', '480'));
+  t.write(
+    'question.json',
+    JSON.stringify({
+      schemaVersion: 1,
+      title: 'Review',
+      fieldOrder: ['answer'],
+      answerSchema: {
+        type: 'object',
+        properties: { answer: { type: 'string', title: 'Answer', enum: ['Yes', 'No'] } },
+        required: ['answer'],
+        additionalProperties: false,
+      },
+    }),
+  );
+  t.write('narrow.md', '# Narrow pane\n\nDocument content\n');
+  await t.json(['ask', 'question.json', '--view', 'narrow.md']);
+  await page.goto(await t.uiUrl());
+  const view = page.getByRole('region', { name: 'Document view' });
+  await expect(view.getByText("Question's revision")).toBeVisible();
+  const bounds = (await view.boundingBox())!;
+  for (const button of await view.locator('header button').all()) {
+    const box = (await button.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width + 0.5);
+  }
 });
 
 test('switching Markdown keeps the current preview until the next one is ready, without showing source or loading placeholders', async ({

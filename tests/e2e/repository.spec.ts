@@ -78,7 +78,9 @@ test('DOC-017: each document shows its repository, worktree, path, and format, i
     rowOf(page, title)
       .locator('svg[data-format]')
       .evaluate((icon) => getComputedStyle(icon).color);
+  await page.getByRole('button', { name: 'Appearance' }).click();
   await page.getByRole('button', { name: 'Light' }).click();
+  await page.getByRole('button', { name: 'Close details' }).click();
   expect(await color('Design')).toBe('rgb(9, 105, 218)');
   expect(await color('View')).toBe('rgb(196, 74, 0)');
 

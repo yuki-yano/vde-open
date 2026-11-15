@@ -11,8 +11,14 @@ test.afterEach(async () => {
 });
 
 async function choosePalette(page: Page, value: string) {
-  await page.getByRole('button', { name: 'Color palette', exact: true }).click();
+  await page.getByRole('button', { name: 'Appearance', exact: true }).click();
   await page.getByRole('combobox', { name: 'Palette', exact: true }).selectOption(value);
+  await page.getByRole('button', { name: 'Close details' }).click();
+}
+
+async function chooseMode(page: Page, name: 'Light' | 'Dark' | 'Match OS setting') {
+  await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+  await page.getByRole('button', { name, exact: true }).click();
   await page.getByRole('button', { name: 'Close details' }).click();
 }
 
@@ -53,9 +59,7 @@ test('all palettes style the UI and Markdown in both modes and survive reloads',
     await choosePalette(page, palette.value);
     await expect(html).toHaveAttribute('data-color-palette', palette.value);
     for (const mode of ['light', 'dark'] as const) {
-      await page
-        .getByRole('button', { name: mode === 'light' ? 'Light' : 'Dark', exact: true })
-        .click();
+      await chooseMode(page, mode === 'light' ? 'Light' : 'Dark');
       await expect(page.locator('body')).toHaveCSS('background-color', palette[mode]);
       await expect(page.locator('article')).toHaveCSS(
         'color',
@@ -66,7 +70,7 @@ test('all palettes style the UI and Markdown in both modes and survive reloads',
       await expect(html).toHaveAttribute('data-color-palette', palette.value);
       await expect(page.locator('body')).toHaveCSS('background-color', palette[mode]);
       await expect(keyword).toBeVisible();
-      for (const name of ['Search open documents', 'Color palette']) {
+      for (const name of ['Search open documents', 'Appearance']) {
         await expect(page.getByRole('button', { name })).toHaveCSS(
           'color',
           await page.locator('body').evaluate((element) => getComputedStyle(element).color),
@@ -97,14 +101,14 @@ test('palette and explicit mode are independent, while System follows OS changes
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(html).toHaveClass(/dark/);
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(29, 32, 33)');
-  await page.getByRole('button', { name: 'Light', exact: true }).click();
+  await chooseMode(page, 'Light');
   await expect(html).not.toHaveClass(/dark/);
   await choosePalette(page, 'catppuccin');
   await expect(html).not.toHaveClass(/dark/);
   await page.emulateMedia({ colorScheme: 'light' });
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(html).not.toHaveClass(/dark/);
-  await page.getByRole('button', { name: 'Match OS setting' }).click();
+  await chooseMode(page, 'Match OS setting');
   await expect(html).toHaveClass(/dark/);
   await page.emulateMedia({ colorScheme: 'light' });
   await expect(html).not.toHaveClass(/dark/);
@@ -126,7 +130,9 @@ test('palette controls fit narrow screens and restore keyboard focus', async ({
   t.write('mobile.md', '# Narrow screen\n');
   await t.json(['open', 'mobile.md']);
   await page.goto(await t.uiUrl());
-  const trigger = page.getByRole('button', { name: 'Color palette', exact: true });
+  // Below 900px the settings are in the list drawer.
+  await page.getByRole('button', { name: 'Document list', exact: true }).click();
+  const trigger = page.getByRole('button', { name: 'Appearance', exact: true });
   await trigger.focus();
   await trigger.press('Enter');
   const select = page.getByRole('combobox', { name: 'Palette', exact: true });
@@ -140,19 +146,15 @@ test('palette controls fit narrow screens and restore keyboard focus', async ({
   if (testInfo.project.name === 'chromium') {
     await page.screenshot({ path: testInfo.outputPath('narrow-palette.png') });
   }
-  await select.press('Escape');
-  await expect(select).toBeHidden();
-  await expect(trigger).toBeFocused();
-  for (const name of [
-    'Document list',
-    'Search open documents',
-    'Color palette',
-    'Light',
-    'Dark',
-    'Match OS setting',
-  ]) {
+  const within = async (name: string) => {
     const bounds = await page.getByRole('button', { name, exact: true }).boundingBox();
     expect(bounds!.x).toBeGreaterThanOrEqual(0);
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(375);
-  }
+  };
+  for (const name of ['Appearance', 'Light', 'Dark', 'Match OS setting']) await within(name);
+  await select.press('Escape');
+  await expect(select).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await page.getByRole('button', { name: 'Document list', exact: true }).click();
+  for (const name of ['Document list', 'Search open documents']) await within(name);
 });

@@ -84,9 +84,9 @@ ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skill
 
 ## Markdown display
 
-Use "Color palette" in the management header to choose Standard (the default), GitHub, Gruvbox, Catppuccin, or GitHub High Contrast. Light, Dark, and Match OS setting are separate controls. Both preferences are saved in the browser. The palette applies to the management UI and Markdown, including code highlighting; HTML keeps its own styling and PDFs keep their print styling.
+Use "Appearance" (the palette icon above the document list) to choose Standard (the default), GitHub, Gruvbox, Catppuccin, or GitHub High Contrast. Light, Dark, and Match OS setting are separate controls in the same popover. Both preferences are saved in the browser. The palette applies to the management UI and Markdown, including code highlighting; HTML keeps its own styling and PDFs keep their print styling.
 
-"Wide view" in the document header expands Markdown to the available width. Press it again to return to the standard width. The width preference is saved in the browser. Tables keep their column widths and scroll horizontally when they do not fit. To scroll with the keyboard, focus the table and press the left or right arrow key.
+"Wide view" (the ↔ icon) in the document header expands Markdown to the available width. Press it again to return to the standard width. The width preference is saved in the browser. Tables keep their column widths and scroll horizontally when they do not fit. To scroll with the keyboard, focus the table and press the left or right arrow key.
 
 ### Display limits
 
@@ -113,7 +113,7 @@ Images are searchable by title and path (`vo search diagram --mode path`). Text 
 
 ## Exporting to PDF
 
-"Export PDF" in the header of a document saves the shown revision as a PDF, without a print dialog.
+"Export PDF" (the download icon) in the header of a document saves the shown revision as a PDF, without a print dialog.
 
 - Markdown PDFs are A4 on a white background. Every page has the document title in the header and the page number ("3 / 12") in the footer, and the headings become PDF bookmarks.
 - The daemon prints it with the Google Chrome or Microsoft Edge (131 or later) installed on the machine; nothing is downloaded. To use another Chromium-based browser or another location, set `VDE_OPEN_BROWSER` for the daemon to the absolute path of the executable, then run `vo daemon restart`.

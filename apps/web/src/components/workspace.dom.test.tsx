@@ -161,7 +161,7 @@ describe('FB-015 showing the revision awaiting an answer', () => {
     await settle();
     expect(shownText()).toBe('本文 1');
     expect(contentRequests).toEqual([REV1]);
-    expect(container.textContent).toContain("Showing the question's revision");
+    expect(container.textContent).toContain("Question's revision");
   });
 
   it("shows the question's revision even if updates were paused before the question", async () => {

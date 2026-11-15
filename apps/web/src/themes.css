@@ -3,7 +3,9 @@
    https://primer.style/product/primitives/ (GitHub and GitHub High Contrast)
    https://github.com/morhetz/gruvbox (hard background)
    https://catppuccin.com/palette/ (Latte and Mocha)
-   Some colors are adjusted for readable text on their actual surfaces. */
+   Some colors are adjusted for readable text on their actual surfaces.
+   --chrome (toolbars and the list) mixes muted into the background; --selection (the selected row) mixes in
+   the link color, kept light enough for muted text to reach 4.5:1 on it. */
 :root {
   color-scheme: light;
   --background: #ffffff;
@@ -12,6 +14,8 @@
   --primary-foreground: #fafafa;
   --muted: #f5f5f5;
   --muted-foreground: #6b6b6b;
+  --chrome: #f9f9f9;
+  --selection: #e6f0fb;
   --accent: #f5f5f5;
   --border: #e5e5e5;
   --ring: #737373;
@@ -62,6 +66,8 @@
   --primary-foreground: #171717;
   --muted: #262626;
   --muted-foreground: #a3a3a3;
+  --chrome: #191919;
+  --selection: #253645;
   --accent: #262626;
   --border: #404040;
   --ring: #a3a3a3;
@@ -87,6 +93,8 @@
   --primary-foreground: #ffffff;
   --muted: #f6f8fa;
   --muted-foreground: #59636e;
+  --chrome: #fafbfc;
+  --selection: #ddeafa;
   --accent: #ddf4ff;
   --border: #d1d9e0;
   --ring: #0969da;
@@ -112,6 +120,8 @@
   --primary-foreground: #ffffff;
   --muted: #151b23;
   --muted-foreground: #9198a1;
+  --chrome: #11171e;
+  --selection: #1a2f4b;
   --accent: #1c2d41;
   --border: #3d444d;
   --ring: #4493f8;
@@ -137,6 +147,8 @@
   --primary-foreground: #f9f5d7;
   --muted: #f2e5bc;
   --muted-foreground: #665c54;
+  --chrome: #f5ebc7;
+  --selection: #d7e1ca;
   --accent: #ebdbb2;
   --border: #bdae93;
   --ring: #076678;
@@ -162,6 +174,8 @@
   --primary-foreground: #1d2021;
   --muted: #282828;
   --muted-foreground: #bdae93;
+  --chrome: #232425;
+  --selection: #35403e;
   --accent: #3c3836;
   --border: #665c54;
   --ring: #83a598;
@@ -187,6 +201,8 @@
   --primary-foreground: #eff1f5;
   --muted: #e6e9ef;
   --muted-foreground: #5c5f77;
+  --chrome: #eaecf1;
+  --selection: #d5dff1;
   --accent: #e6e9ef;
   --border: #ccd0da;
   --ring: #8839ef;
@@ -212,6 +228,8 @@
   --primary-foreground: #1e1e2e;
   --muted: #313244;
   --muted-foreground: #a6adc8;
+  --chrome: #28293a;
+  --selection: #363f5b;
   --accent: #313244;
   --border: #45475a;
   --ring: #b4befe;
@@ -237,6 +255,8 @@
   --primary-foreground: #ffffff;
   --muted: #e6eaef;
   --muted-foreground: #454c54;
+  --chrome: #f0f2f5;
+  --selection: #dce4f0;
   --accent: #d2e5ff;
   --border: #454c54;
   --ring: #023b95;
@@ -262,6 +282,8 @@
   --primary-foreground: #ffffff;
   --muted: #151b23;
   --muted-foreground: #b7bdc8;
+  --chrome: #0c1117;
+  --selection: #1d2f44;
   --accent: #1a2d42;
   --border: #b7bdc8;
   --ring: #74b9ff;

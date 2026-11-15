@@ -6,7 +6,7 @@ import {
   type QuestionField,
 } from '@vde-open/shared';
 import { useEffect, useRef, useState } from 'react';
-import { CircleAlert } from 'lucide-react';
+import { CircleAlert, MessageCircleQuestionMark } from 'lucide-react';
 
 import {
   AlertDialog,
@@ -33,6 +33,7 @@ import {
   summarize,
   withAnswer,
 } from '@/lib/feedback-form';
+import { cn } from '@/lib/utils';
 
 // Up to this many options are shown as radios; more are shown as a select.
 const RADIO_LIMIT = 6;
@@ -189,6 +190,8 @@ function FieldControl({ name, field, value, disabled, onChange }: FieldProps) {
 }
 
 interface FeedbackPanelProps {
+  // The id the resize handle beside the panel controls.
+  id?: string;
   api: Api;
   request: FeedbackForUi;
   reload: () => void;
@@ -196,7 +199,7 @@ interface FeedbackPanelProps {
 
 // The panel for answering a question. Answers are finalized only with the submit button in the management UI (spec 11.8).
 // Input is saved automatically as a draft answer. The server takes the content to finalize from the saved draft.
-export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
+export function FeedbackPanel({ id, api, request, reload }: FeedbackPanelProps) {
   const { requestId, questionnaire } = request;
   const pending = request.status === 'pending';
   // The latest draft answer on the server that this panel knows of (either fetched or saved by this panel).
@@ -232,6 +235,11 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
   const shown = pending ? answers : (request.submission?.answers ?? request.draftAnswers);
   const issues = validateAnswers(questionnaire, shown, { complete: true });
   const summary = summarize(questionnaire, shown);
+  // A missing required answer is shown in the summary row; other issues are listed below it.
+  const missing = new Set(
+    issues.filter((issue) => issue.code === 'required').map((issue) => issue.field),
+  );
+  const otherIssues = issues.filter((issue) => issue.code !== 'required');
 
   const failWith = (reason: unknown, fallback: string) => {
     if (!(reason instanceof ApiError)) {
@@ -351,92 +359,135 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
 
   return (
     <aside
+      id={id}
       aria-label="Answer the question"
-      className="flex max-h-[50svh] w-full shrink-0 flex-col border-t bg-background min-[900px]:max-h-none min-[900px]:w-96 min-[900px]:border-t-0 min-[900px]:border-l"
+      className="flex max-h-[50svh] w-full shrink-0 flex-col border-t bg-background min-[900px]:max-h-none min-[900px]:w-(--answer-width) min-[900px]:border-t-0"
       data-testid="feedback-panel"
     >
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <p className="text-xs text-muted-foreground">Question from the agent</p>
-        <h2 className="mt-1 text-base font-semibold break-words">{questionnaire.title}</h2>
-        {questionnaire.instructions && (
-          <p className="mt-2 text-sm whitespace-pre-wrap text-muted-foreground">
-            {questionnaire.instructions}
-          </p>
-        )}
-        {newer && (
-          <div role="alert" className="mt-3 rounded-md border border-warning/50 p-3 text-sm">
-            <p>A newer revision is available. This answer is for the older revision shown.</p>
-            {confirmedRevision !== null && !confirmed && (
-              <p className="mt-1">
-                The document was updated again after you confirmed. Confirm again.
+      {/* Below 900px the fields and the summary scroll together above the actions, so a short screen still
+          reaches every field and nothing covers the focused one. Wider, the wrapper steps aside: the fields
+          scroll alone and the summary stays next to the submit button. */}
+      <div className="min-h-0 flex-1 overflow-y-auto min-[900px]:contents">
+        <div className="min-[900px]:min-h-0 min-[900px]:flex-1 min-[900px]:overflow-y-auto">
+          <div className="flex min-h-11 items-start gap-2 border-b bg-chrome px-3 py-2.5">
+            <MessageCircleQuestionMark
+              className="mt-px size-4 shrink-0 text-link"
+              aria-hidden="true"
+            />
+            <p className="sr-only">Question from the agent</p>
+            <h2 className="text-sm font-semibold break-words">{questionnaire.title}</h2>
+          </div>
+          <div className="px-3 py-3">
+            {questionnaire.instructions && (
+              <p className="mb-4 text-sm whitespace-pre-wrap text-muted-foreground">
+                {questionnaire.instructions}
               </p>
             )}
-            <Label className="mt-2 font-normal">
-              <Checkbox
-                checked={confirmed}
-                onCheckedChange={(checked) =>
-                  setConfirmedRevision(checked ? request.currentRevision : null)
-                }
-              />
-              I confirm that this answer is for the older revision
-            </Label>
-          </div>
-        )}
-        <div className="mt-4 flex flex-col gap-5">
-          {questionnaire.fieldOrder.map((name) => {
-            const field = questionnaire.answerSchema.properties[name];
-            if (!field) return null;
-            const required = questionnaire.answerSchema.required.includes(name);
-            return (
-              <div key={name} className="flex flex-col gap-2" data-field={name}>
-                <p id={`feedback-${name}-label`} className="text-sm font-medium">
-                  <label htmlFor={`feedback-${name}`}>{field.title}</label>
-                  {required && <span className="ml-1 text-xs text-destructive">(required)</span>}
-                </p>
-                {field.description && (
-                  <p className="text-xs whitespace-pre-wrap text-muted-foreground">
-                    {field.description}
+            {newer && (
+              <div role="alert" className="mb-4 rounded-md border border-warning/50 p-2.5 text-sm">
+                <p>A newer revision is available. This answer is for the older revision shown.</p>
+                {confirmedRevision !== null && !confirmed && (
+                  <p className="mt-1">
+                    The document was updated again after you confirmed. Confirm again.
                   </p>
                 )}
-                <FieldInput
-                  name={name}
-                  field={field}
-                  required={required}
-                  value={shown[name]}
-                  disabled={!pending || phase === 'submitting'}
-                  onChange={(value) => change(name, value)}
-                />
+                <Label className="mt-2 font-normal">
+                  <Checkbox
+                    checked={confirmed}
+                    onCheckedChange={(checked) =>
+                      setConfirmedRevision(checked ? request.currentRevision : null)
+                    }
+                  />
+                  I confirm that this answer is for the older revision
+                </Label>
               </div>
-            );
-          })}
+            )}
+            <div className="flex flex-col gap-4">
+              {questionnaire.fieldOrder.map((name) => {
+                const field = questionnaire.answerSchema.properties[name];
+                if (!field) return null;
+                const required = questionnaire.answerSchema.required.includes(name);
+                return (
+                  <div key={name} className="flex flex-col gap-1.5" data-field={name}>
+                    <p id={`feedback-${name}-label`} className="text-sm font-medium">
+                      <label htmlFor={`feedback-${name}`}>{field.title}</label>
+                      {required && (
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">
+                          (required)
+                        </span>
+                      )}
+                    </p>
+                    {field.description && (
+                      <p className="text-xs whitespace-pre-wrap text-muted-foreground">
+                        {field.description}
+                      </p>
+                    )}
+                    <FieldInput
+                      name={name}
+                      field={field}
+                      required={required}
+                      value={shown[name]}
+                      disabled={!pending || phase === 'submitting'}
+                      onChange={(value) => change(name, value)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        <div className="border-t bg-chrome px-3 pt-2.5" data-testid="feedback-footer">
+          <div className="flex items-baseline justify-between gap-2 text-xs">
+            <p className="font-medium">Answers to send</p>
+            <p className="text-muted-foreground" title={request.revision}>
+              For revision <code className="font-mono">{request.revision.slice(4, 12)}</code>
+            </p>
+          </div>
+          <dl
+            className="mt-1 text-xs min-[900px]:max-h-28 min-[900px]:overflow-y-auto"
+            aria-label="Answer summary"
+          >
+            {summary.map((item) => {
+              const required = pending && missing.has(item.name);
+              return (
+                <div key={item.name} className="flex gap-2 py-px">
+                  <dt className="w-24 shrink-0 truncate text-muted-foreground">{item.title}</dt>
+                  <dd
+                    className={cn(
+                      'min-w-0 break-words',
+                      required
+                        ? 'text-destructive'
+                        : item.value === 'Not answered' && 'text-muted-foreground',
+                    )}
+                  >
+                    {required ? 'Required' : item.value}
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
+          {pending && otherIssues.length > 0 && (
+            <ul className="mt-1 text-xs text-destructive" aria-label="Required before submitting">
+              {describeIssues(questionnaire, otherIssues).map((issue) => (
+                <li key={`${issue.name}:${issue.text}`}>{issue.text}</li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
-      <div className="border-t px-4 py-3" data-testid="feedback-footer">
-        <p className="text-xs text-muted-foreground">Submitting to</p>
-        <p className="text-sm font-medium break-words">{questionnaire.title}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Target revision <code className="font-mono">{request.revision.slice(4, 16)}</code>
-        </p>
-        <dl className="mt-2 max-h-40 overflow-y-auto text-xs" aria-label="Answer summary">
-          {summary.map((item) => (
-            <div key={item.name} className="flex gap-2 py-0.5">
-              <dt className="w-24 shrink-0 truncate text-muted-foreground">{item.title}</dt>
-              <dd className="min-w-0 break-words">{item.value}</dd>
-            </div>
-          ))}
-        </dl>
-        {pending && issues.length > 0 && (
-          <ul
-            className="mt-2 text-xs text-muted-foreground"
-            aria-label="Required before submitting"
-          >
-            {describeIssues(questionnaire, issues).map((issue) => (
-              <li key={`${issue.name}:${issue.text}`}>{issue.text}</li>
-            ))}
-          </ul>
+      <div className="shrink-0 border-t bg-chrome px-3 pt-2.5 pb-2.5 min-[900px]:border-t-0">
+        {pending && (
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" className="grow" disabled={blocked} onClick={submit}>
+              Send answers to the agent
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setConfirmingCancel(true)}>
+              Cancel question
+            </Button>
+          </div>
         )}
-        <div className="mt-2 flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1">
-          <p role="status" className="text-xs" data-testid="feedback-status">
+        <div className={cn('flex min-h-5 flex-wrap items-center gap-x-2', pending && 'mt-1.5')}>
+          <p role="status" className="text-xs text-muted-foreground" data-testid="feedback-status">
             {statusText}
           </p>
           {message && (
@@ -458,16 +509,6 @@ export function FeedbackPanel({ api, request, reload }: FeedbackPanelProps) {
             </span>
           )}
         </div>
-        {pending && (
-          <div className="mt-3 flex gap-2">
-            <Button type="button" className="flex-1" disabled={blocked} onClick={submit}>
-              Send answers to the agent
-            </Button>
-            <Button type="button" variant="outline" onClick={() => setConfirmingCancel(true)}>
-              Cancel
-            </Button>
-          </div>
-        )}
       </div>
       <AlertDialog open={confirmingCancel} onOpenChange={setConfirmingCancel}>
         <AlertDialogContent>

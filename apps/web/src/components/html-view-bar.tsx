@@ -1,4 +1,4 @@
-import { CircleAlert, Info } from 'lucide-react';
+import { CircleAlert, Info, SquareDashed } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { DetailsPopover } from '@/components/details-popover';
@@ -55,16 +55,21 @@ export function HtmlViewBar({
   const connection = connectionLabel(bridge);
   return (
     <div
-      className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-0.5 border-b bg-muted/50 px-3 py-0.5 text-xs"
+      className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-0.5 border-b bg-chrome px-3 py-0.5 text-xs"
       data-testid="html-view-bar"
     >
-      <span className="font-medium">Document content</span>
-      <span className="text-muted-foreground" data-testid="html-mode">
-        {running
-          ? 'Scripts running'
-          : pinnedStatic
-            ? 'Scripts off for this question'
-            : 'Scripts off'}
+      {/* Required: what the frame holds and whether its scripts run. Each part may move to its own line
+          but is never cut; the optional parts and buttons wrap first. */}
+      <span className="flex flex-wrap items-center gap-x-1.5 [&>*]:whitespace-nowrap">
+        <SquareDashed className="size-3.5 text-muted-foreground" aria-hidden="true" />
+        <span className="font-medium">Document content</span>
+        <span className="text-muted-foreground" data-testid="html-mode">
+          {running
+            ? 'Scripts running'
+            : pinnedStatic
+              ? 'Scripts off for this question'
+              : 'Scripts off'}
+        </span>
       </span>
       {needsPermission && <span className="text-destructive">Permission cleared</span>}
       {connection !== null && (
@@ -81,7 +86,7 @@ export function HtmlViewBar({
           Script change failed
         </span>
       )}
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto flex items-center gap-0.5">
         {closed && bridge.reason !== 'request-closed' && (
           <Button size="xs" variant="ghost" onClick={onReload}>
             Reload view
@@ -91,13 +96,18 @@ export function HtmlViewBar({
         <DetailsPopover
           title="Document view"
           trigger={
-            <Button size="xs" variant="ghost">
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Details"
+              title="About this view"
+              className={closed || modeError ? 'text-destructive' : undefined}
+            >
               {closed || modeError ? (
                 <CircleAlert aria-hidden="true" />
               ) : (
                 <Info aria-hidden="true" />
               )}
-              Details
             </Button>
           }
         >

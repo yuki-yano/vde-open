@@ -82,4 +82,10 @@ function ToggleGroupItem({
   );
 }
 
-export { ToggleGroup, ToggleGroupItem };
+// A segmented control: the pressed item is raised on a recessed track. Pass spacing={0.5} to the group
+// (spacing 0 squares the inner corners).
+const segmentedGroup = 'rounded-md bg-foreground/[0.06] p-0.5';
+const segmentedItem =
+  'h-6 min-w-6 rounded-[5px] px-2 text-xs font-medium text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-xs dark:aria-pressed:bg-foreground/15';
+
+export { ToggleGroup, ToggleGroupItem, segmentedGroup, segmentedItem };

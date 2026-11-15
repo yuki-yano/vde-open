@@ -84,9 +84,9 @@ ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skill
 
 ## Markdownの表示
 
-管理画面のheaderにある「Color palette」で、Standard（初期値）、GitHub、Gruvbox、Catppuccin、GitHub High Contrastから配色を選べます。明るさは「Light」「Dark」「Match OS setting」で別に選びます。どちらの設定もbrowserに保存します。配色は管理画面とMarkdownの本文・コードに適用し、HTMLの独自の配色やPDFの印刷用の配色は変えません。
+文書一覧の上にある「Appearance」（パレットのicon）で、Standard（初期値）、GitHub、Gruvbox、Catppuccin、GitHub High Contrastから配色を選べます。明るさは同じpopoverの「Light」「Dark」「Match OS setting」で別に選びます。どちらの設定もbrowserに保存します。配色は管理画面とMarkdownの本文・コードに適用し、HTMLの独自の配色やPDFの印刷用の配色は変えません。
 
-文書のheaderの「Wide view」で、本文を表示領域いっぱいに広げられます。もう一度押すと標準幅に戻ります。幅の設定はbrowserに保存します。表は列幅を確保し、表示領域に収まらないときは表の中を横にスクロールできます。keyboardでは表にfocusを合わせ、左右の矢印keyでスクロールできます。
+文書のheaderの「Wide view」（↔のicon）で、本文を表示領域いっぱいに広げられます。もう一度押すと標準幅に戻ります。幅の設定はbrowserに保存します。表は列幅を確保し、表示領域に収まらないときは表の中を横にスクロールできます。keyboardでは表にfocusを合わせ、左右の矢印keyでスクロールできます。
 
 ### 表示の制限
 
@@ -113,7 +113,7 @@ PNG/APNG、JPEG（`jpg`・`jpeg`・`jpe`・`jif`・`jfif`・`pjpeg`・`pjp`）�
 
 ## PDF出力
 
-文書のheaderの「Export PDF」で、表示中の版を、印刷のdialogを挟まずにPDFとして保存します。
+文書のheaderの「Export PDF」（downloadのicon）で、表示中の版を、印刷のdialogを挟まずにPDFとして保存します。
 
 - MarkdownのPDFは白背景のA4です。全pageのheaderに文書名、footerにpage番号（「3 / 12」）を入れ、見出しをPDFのしおりにします。
 - daemonが、その環境に入っているGoogle ChromeかMicrosoft Edge（131以降）で印刷します。何もdownloadしません。別のChromium系browserや、別の場所にあるbrowserを使うときは、daemonの環境変数`VDE_OPEN_BROWSER`に実行fileの絶対pathを指定し、`vo daemon restart`を実行します。
