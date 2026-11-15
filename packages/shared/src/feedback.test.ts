@@ -182,6 +182,119 @@ describe('FB-002 validation of the question definition', () => {
     ).toBe(false);
   });
 
+  it('choice fields accept option descriptions and a recommendation that is a valid answer', () => {
+    const pick = (field: object) => ({
+      type: 'string',
+      title: 'x',
+      enum: ['a', 'bb', 'cc'],
+      ...field,
+    });
+    const tags = (field: object) => ({
+      ...sample.answerSchema.properties['tags'],
+      items: { type: 'string', enum: ['header', 'footer', 'body'] },
+      ...field,
+    });
+    const issuePaths = (value: unknown) =>
+      parse(value).error?.issues.map((issue) => issue.path.join('.'));
+    const at = (name: string, suffix: string) => `answerSchema.properties.${name}${suffix}`;
+
+    expect(
+      parse(
+        withField('pick', pick({ enumDescriptions: ['First', '', 'Third'], recommended: 'bb' })),
+      ).success,
+    ).toBe(true);
+    expect(
+      parse(
+        withField(
+          'tags2',
+          tags({
+            items: {
+              type: 'string',
+              enum: ['header', 'footer', 'body'],
+              enumDescriptions: ['Top', 'Bottom', ''],
+            },
+            recommended: ['header', 'body'],
+          }),
+        ),
+      ).success,
+    ).toBe(true);
+
+    const rejected: Array<[string, unknown, string]> = [
+      [
+        'recommended without enum',
+        withField('note', { type: 'string', title: 'x', recommended: 'a' }),
+        at('note', ''),
+      ],
+      [
+        'enumDescriptions without enum',
+        withField('note', { type: 'string', title: 'x', enumDescriptions: ['a'] }),
+        at('note', ''),
+      ],
+      [
+        'fewer descriptions than choices',
+        withField('pick', pick({ enumDescriptions: ['First', 'Second'] })),
+        at('pick', '.enumDescriptions'),
+      ],
+      [
+        'more item descriptions than choices',
+        withField(
+          'tags2',
+          tags({
+            items: {
+              type: 'string',
+              enum: ['header', 'footer', 'body'],
+              enumDescriptions: ['a', 'b', 'c', 'd'],
+            },
+          }),
+        ),
+        at('tags2', '.items.enumDescriptions'),
+      ],
+      [
+        'description above 2000 characters',
+        withField('pick', pick({ enumDescriptions: ['x'.repeat(2001), '', ''] })),
+        at('pick', '.enumDescriptions.0'),
+      ],
+      [
+        'recommended outside enum',
+        withField('pick', pick({ recommended: 'd' })),
+        at('pick', '.recommended'),
+      ],
+      [
+        'recommended shorter than minLength',
+        withField('pick', pick({ minLength: 2, recommended: 'a' })),
+        at('pick', '.recommended'),
+      ],
+      [
+        'recommended choices outside enum',
+        withField('tags2', tags({ recommended: ['other'] })),
+        at('tags2', '.recommended'),
+      ],
+      [
+        'duplicate recommended choices',
+        withField('tags2', tags({ recommended: ['header', 'header'] })),
+        at('tags2', '.recommended'),
+      ],
+      [
+        'more recommended choices than maxItems',
+        withField('tags2', tags({ recommended: ['header', 'footer', 'body'] })),
+        at('tags2', '.recommended'),
+      ],
+      [
+        'fewer recommended choices than minItems',
+        withField('tags2', tags({ recommended: [] })),
+        at('tags2', '.recommended'),
+      ],
+      [
+        'recommended on a boolean field',
+        withField('flag', { type: 'boolean', title: 'x', recommended: true }),
+        at('flag', ''),
+      ],
+    ];
+    for (const [label, value, path] of rejected) {
+      expect(issuePaths(value), label).toEqual([path]);
+    }
+  });
+
   it('the field contract matches the bundled meta-schema (contract test)', () => {
     // Compares the accepted keys, the required keys and the value ranges. Differences in how types are written (such as listing several types) are not compared.
     const LIMIT_KEYS = [

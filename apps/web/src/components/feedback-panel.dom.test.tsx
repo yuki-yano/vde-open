@@ -327,3 +327,88 @@ describe('empty answers (spec 11.2)', () => {
     expect(sendButton().disabled).toBe(false);
   });
 });
+
+describe('option descriptions and the recommendation', () => {
+  const described: Questionnaire = {
+    schemaVersion: 1,
+    title: '説明つきの選択肢',
+    fieldOrder: ['layout', 'targets', 'region'],
+    answerSchema: {
+      type: 'object',
+      properties: {
+        layout: {
+          type: 'string',
+          title: '採用案',
+          enum: ['A', 'B', 'C'],
+          enumDescriptions: ['Keeps the current layout', '', 'Two columns'],
+          recommended: 'C',
+        },
+        targets: {
+          type: 'array',
+          title: '対象',
+          maxItems: 2,
+          uniqueItems: true,
+          items: { type: 'string', enum: ['header', 'footer'], enumDescriptions: ['Top bar', ''] },
+          recommended: ['footer'],
+        },
+        region: {
+          type: 'string',
+          title: '地域',
+          enum: ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7'],
+          enumDescriptions: ['', 'Second region', 'Third region', '', '', '', ''],
+          recommended: 'r4',
+        },
+      },
+      required: ['layout'],
+      additionalProperties: false,
+    },
+  };
+  // The text of the elements that aria-describedby points at.
+  const description = (element: HTMLElement) =>
+    (element.getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .filter((id) => id !== '')
+      .map((id) => document.getElementById(id)?.textContent ?? `missing #${id}`)
+      .join(' ');
+
+  it('shows the descriptions and "Recommended" as accessible descriptions and lists the descriptions of a select', async () => {
+    show(requestOf({ questionnaire: described }));
+    await until(() => statusText() !== '');
+    // The accessible name stays the option name; the description and "Recommended" describe the control.
+    expect(description(control('A', 'radio'))).toBe('Keeps the current layout');
+    expect(control('B', 'radio').hasAttribute('aria-describedby')).toBe(false);
+    expect(description(control('C', 'radio'))).toBe('RecommendedTwo columns');
+    expect(description(control('header', 'checkbox'))).toBe('Top bar');
+    expect(description(control('footer', 'checkbox'))).toBe('Recommended');
+
+    const select = container.querySelector('select') as HTMLSelectElement;
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      'Select an option',
+      'r1',
+      'r2',
+      'r3',
+      'r4 (Recommended)',
+      'r5',
+      'r6',
+      'r7',
+    ]);
+    const list = container.querySelector('[aria-label="Option descriptions"]');
+    expect([...(list?.querySelectorAll('li') ?? [])].map((item) => item.textContent)).toEqual([
+      'r2Second region',
+      'r3Third region',
+      // A recommended option without a description is listed too, so the recommendation is visible before opening the select.
+      'r4Recommended',
+    ]);
+  });
+
+  it('the recommendation is not selected and not saved as a draft answer', async () => {
+    show(requestOf({ questionnaire: described }));
+    await until(() => statusText() !== '');
+    await afterSaveDelay();
+    expect(container.querySelectorAll('[aria-checked="true"]')).toHaveLength(0);
+    expect((container.querySelector('select') as HTMLSelectElement).value).toBe('none');
+    expect(saves).toEqual([]);
+    expect(statusText()).toBe('Not answered');
+    expect(sendButton().disabled).toBe(true);
+  });
+});

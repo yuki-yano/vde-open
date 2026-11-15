@@ -118,6 +118,17 @@
                 "type": "string",
                 "maxLength": 160
               }
+            },
+            "enumDescriptions": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "recommended": {
+              "type": "string"
             }
           },
           "required": [
@@ -222,6 +233,14 @@
                     "type": "string",
                     "maxLength": 160
                   }
+                },
+                "enumDescriptions": {
+                  "type": "array",
+                  "maxItems": 32,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
                 }
               },
               "required": [
@@ -229,6 +248,12 @@
                 "enum"
               ],
               "additionalProperties": false
+            },
+            "recommended": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": [
