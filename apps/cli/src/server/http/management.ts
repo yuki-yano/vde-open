@@ -228,6 +228,8 @@ const linesQuerySchema = z
 
 const integerQuery = z.string().regex(/^\d+$/).transform(Number);
 
+const booleanQuery = z.enum(['true', 'false']).transform((value) => value === 'true');
+
 export async function startManagementServer(
   deps: ManagementDeps,
   options: { port?: number } = {},
@@ -408,8 +410,15 @@ export async function startManagementServer(
 
   // List of questions. Draft answers are not included.
   api.get('/feedback', (c) => {
-    const status = c.req.query('status');
-    return ok(c, 'feedback.list', deps.feedback.list(status === undefined ? {} : { status }));
+    const { status, acknowledged } = c.req.query();
+    return ok(
+      c,
+      'feedback.list',
+      deps.feedback.list({
+        ...(status === undefined ? {} : { status }),
+        ...(acknowledged === undefined ? {} : { acknowledged: booleanQuery.parse(acknowledged) }),
+      }),
+    );
   });
 
   // A question for the management UI. Includes the questionnaire, the draft answer, and the document's current revision.

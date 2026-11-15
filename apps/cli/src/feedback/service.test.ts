@@ -421,7 +421,12 @@ describe('FB-017 / FB-018 / FB-019 / FB-020 / FB-021 wait, cancel, acknowledge, 
     ).rejects.toMatchObject({
       code: 'E_CONFIRMATION_REQUIRED',
     });
+    events = [];
     await feedback.forget({ requestId: request.requestId, confirmed: true });
+    // The deletion is notified, so the management UI's lists drop the question.
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'feedback-changed', requestId: request.requestId }),
+    );
     await expect(
       Promise.resolve().then(() => feedback.get({ requestId: request.requestId })),
     ).rejects.toMatchObject({

@@ -142,7 +142,7 @@ vo feedback ack <requestId> --submission-id <id> --json
 
 The person answers in the answer panel of the management UI. The answers are submitted only when they press "Send answers to the agent"; draft answers are never returned to the agent. Do not use this to collect secrets such as passwords or API keys.
 
-The top of the document list shows every question awaiting an answer under "Waiting for your answer", with its document and how long it has waited. Press a question to show its document and answer panel.
+The top of the document list shows every question awaiting an answer under "Waiting for your answer", with its document and how long it has waited. Press a question to show its document and answer panel. Below it, "Answered, agent has not picked up" lists the answers sent in the last 24 hours that the agent has not acknowledged with `vo feedback ack`, so you can spot an agent that has stopped.
 
 ## Troubleshooting
 

@@ -447,6 +447,8 @@ export type FeedbackCreateResult = z.infer<typeof feedbackCreateResultSchema>;
 
 export const feedbackListParamsSchema = z.strictObject({
   status: feedbackStatusSchema.optional(),
+  // Only questions whose submitted answer the agent has (true) or has not (false) acknowledged.
+  acknowledged: z.boolean().optional(),
 });
 export const feedbackListResultSchema = z.strictObject({
   requests: z.array(feedbackForAgentSchema),

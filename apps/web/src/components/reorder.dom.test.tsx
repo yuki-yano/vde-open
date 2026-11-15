@@ -53,6 +53,7 @@ beforeEach(() => {
     status: () => Promise.resolve({ activeDocumentId: null }),
     feedback: () => new Promise(() => undefined),
     pendingFeedback: () => Promise.resolve([]),
+    unacknowledgedFeedback: () => Promise.resolve([]),
     events: (next: NonNullable<typeof handlers>) => {
       handlers = next;
       return { close: () => undefined };

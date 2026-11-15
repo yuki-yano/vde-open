@@ -441,3 +441,36 @@ describe('11.7 saving a draft answer from the HTML, and grant expiry while waiti
     });
   });
 });
+
+describe('the list of questions narrowed to the answers the agent has not acknowledged', () => {
+  it('lists a submitted answer until the agent acknowledges it, and rejects a value other than true or false', async () => {
+    const started = await start(nodeStoreFs);
+    const list = async (query: string) => {
+      const response = await fetch(`${started.origin}/_/api/v1/feedback?${query}`);
+      const body = (await response.json()) as {
+        data?: { requests: Array<{ requestId: string }> };
+        error?: { code: string };
+      };
+      return {
+        status: response.status,
+        ids: body.data?.requests.map((item) => item.requestId),
+        body,
+      };
+    };
+    const unacknowledged = 'status=submitted&acknowledged=false';
+    expect((await list(unacknowledged)).ids).toEqual([]);
+
+    const submissionId = `sub_${randomUUID()}`;
+    expect((await submit(started, submissionId).response).status).toBe(200);
+    expect((await list(unacknowledged)).ids).toEqual([started.requestId]);
+    expect((await list('acknowledged=true')).ids).toEqual([]);
+
+    await started.feedback.ack({ requestId: started.requestId, submissionId });
+    expect((await list(unacknowledged)).ids).toEqual([]);
+    expect((await list('acknowledged=true')).ids).toEqual([started.requestId]);
+
+    const invalid = await list('acknowledged=yes');
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error?.code).toBe('E_INVALID_ARGUMENT');
+  });
+});

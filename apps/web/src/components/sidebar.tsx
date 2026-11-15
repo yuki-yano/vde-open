@@ -39,7 +39,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import type { SidebarView } from '@/lib/preferences';
-import type { PendingFeedback } from '@/lib/use-pending-feedback';
+import type { FeedbackInbox } from '@/lib/use-feedback-inbox';
 import {
   buildLabels,
   fileNameOf,
@@ -60,8 +60,8 @@ export interface SidebarProps {
   documents: DocumentSummary[];
   // The names computed from the list by the caller (computed here when not given).
   labels?: Labels;
-  // Questions awaiting an answer, shown above the list with the open document each one is about.
-  pending: PendingFeedback;
+  // Questions waiting on the person or the agent, shown above the list with the open document each one is about.
+  inbox: FeedbackInbox;
   activeId: string | null;
   view: SidebarView;
   onViewChange: (view: SidebarView) => void;
@@ -694,12 +694,14 @@ function DragCatalogGuard({
   return null;
 }
 
-// The elapsed times of the questions awaiting an answer are counted in minutes.
+// The elapsed times of the questions are counted in minutes.
 const ELAPSED_TICK_MS = 30_000;
+// Answers stay until the agent forgets them, so only those submitted within this time are listed as not picked up.
+const UNACKNOWLEDGED_SHOWN_MS = 24 * 60 * 60_000;
 
-function elapsedText(createdAt: string, now: number): string {
+function elapsedText(at: string, now: number): string {
   // A clock a little ahead on the daemon side must not show a negative time.
-  const minutes = Math.max(0, Math.floor((now - Date.parse(createdAt)) / 60_000));
+  const minutes = Math.max(0, Math.floor((now - Date.parse(at)) / 60_000));
   if (minutes < 1) return 'just now';
   if (minutes < 60) return `${String(minutes)}m ago`;
   const hours = Math.floor(minutes / 60);
@@ -707,23 +709,33 @@ function elapsedText(createdAt: string, now: number): string {
   return `${String(Math.floor(hours / 24))}d ago`;
 }
 
-function PendingQuestionRow({
-  request,
-  document,
+interface QuestionRowData {
+  request: FeedbackForAgent;
+  document: DocumentSummary;
+  // When the question was asked, or answered for the answers not picked up.
+  at: string;
+}
+
+// What the time of a row counts from.
+type TimeLabel = 'Asked' | 'Answered';
+
+function QuestionRow({
+  row: { request, document, at },
+  timeLabel,
+  elapsed,
   labels,
   short,
   active,
-  elapsed,
   onSelect,
   onFocus,
   onBlur,
 }: {
-  request: FeedbackForAgent;
-  document: DocumentSummary;
+  row: QuestionRowData;
+  timeLabel: TimeLabel;
+  elapsed: string;
   labels: Labels;
   short: ShortDirectory | undefined;
   active: boolean;
-  elapsed: string;
   onSelect: () => void;
   onFocus: () => void;
   onBlur: (row: HTMLButtonElement) => void;
@@ -763,11 +775,11 @@ function PendingQuestionRow({
           <span className="min-w-0 flex-1 truncate" data-part="document">
             {document.title}
           </span>
-          <time
-            dateTime={request.createdAt}
-            className="shrink-0 text-muted-foreground"
-            data-part="elapsed"
-          >
+          <time dateTime={at} className="shrink-0 text-muted-foreground" data-part="elapsed">
+            {/* The heading says it already, so a narrow list gives the room to the document instead. */}
+            {timeLabel === 'Answered' && (
+              <span className="hidden @min-[13rem]/list:inline">answered </span>
+            )}
             {elapsed}
           </time>
         </span>
@@ -780,25 +792,33 @@ function PendingQuestionRow({
         </span>
       </button>
       <span id={descriptionId} hidden>
-        {`${document.title}. ${location}. Asked ${elapsed}.`}
+        {`${document.title}. ${location}. ${timeLabel} ${elapsed}.`}
       </span>
     </li>
   );
 }
 
-// Questions awaiting an answer, across the open documents, oldest first. Kept outside the reorderable list and the
-// same in both layouts. Questions whose document is not in the list yet appear once a later list includes it.
-function PendingQuestions({
-  pending,
-  documents,
+// One section of questions above the document list. Stays mounted while empty, so focus on its last row can move on.
+function QuestionSection({
+  heading,
+  tone,
+  rows,
+  timeLabel,
+  now,
+  failed,
   labels,
   shortened,
   activeId,
   onSelect,
   documentList,
 }: {
-  pending: PendingFeedback;
-  documents: DocumentSummary[];
+  heading: string;
+  tone?: string;
+  rows: QuestionRowData[];
+  timeLabel: TimeLabel;
+  now: number;
+  // Whether the last fetch failed. The section shows then even without rows.
+  failed: boolean;
   labels: Labels;
   shortened: Map<string, ShortDirectory>;
   activeId: string | null;
@@ -806,26 +826,8 @@ function PendingQuestions({
   documentList: RefObject<HTMLDivElement | null>;
 }) {
   const headingId = useId();
-  const rows = useMemo(() => {
-    const byId = new Map(documents.map((document) => [document.documentId, document]));
-    return pending.requests.flatMap((request) => {
-      const document = byId.get(request.documentId);
-      return document ? [{ request, document }] : [];
-    });
-  }, [pending.requests, documents]);
-  // One timer for every row, running only while rows are shown.
-  const [now, setNow] = useState(Date.now);
-  const ticking = rows.length > 0;
-  useEffect(() => {
-    if (!ticking) return undefined;
-    const update = () => setNow(Date.now());
-    update();
-    const timer = setInterval(update, ELAPSED_TICK_MS);
-    return () => clearInterval(timer);
-  }, [ticking]);
-
-  // When the focused row goes away (answered or cancelled), focus moves to the row that took its place,
-  // or to the document in the list once no question is left. Focus that moved elsewhere is left alone.
+  // When the focused row goes away (answered, acknowledged or cancelled), focus moves to the row that took its
+  // place, or to the document in the list once the section has no row left. Focus that moved elsewhere is left alone.
   const list = useRef<HTMLUListElement>(null);
   const focused = useRef<{ requestId: string; index: number; documentId: string } | null>(null);
   useLayoutEffect(() => {
@@ -855,16 +857,13 @@ function PendingQuestions({
     }, 0);
   };
 
-  if (rows.length === 0 && !pending.failed) return null;
+  if (rows.length === 0 && !failed) return null;
   return (
-    <section aria-labelledby={headingId} className="flex max-h-[40%] shrink-0 flex-col border-b">
-      <h2 id={headingId} className="flex min-w-0 px-3 pt-2 pb-1 text-sm font-medium">
-        <span className="truncate" title="Waiting for your answer">
-          Waiting for your answer
-        </span>
-        <span className="shrink-0">&nbsp;({rows.length})</span>
+    <section aria-labelledby={headingId} className="flex min-h-0 flex-col border-b">
+      <h2 id={headingId} className={cn('px-3 pt-2 pb-1 text-sm font-medium', tone)}>
+        {heading}&nbsp;({rows.length})
       </h2>
-      {pending.failed && (
+      {failed && (
         <p role="status" className="px-3 pb-1 text-xs text-destructive">
           Could not fetch the latest questions.
         </p>
@@ -873,21 +872,21 @@ function PendingQuestions({
         ref={list}
         className="@container/list flex min-h-0 flex-col gap-0.5 overflow-y-auto px-2 pb-2"
       >
-        {rows.map(({ request, document }, index) => (
-          <PendingQuestionRow
-            key={request.requestId}
-            request={request}
-            document={document}
+        {rows.map((row, index) => (
+          <QuestionRow
+            key={row.request.requestId}
+            row={row}
+            timeLabel={timeLabel}
+            elapsed={elapsedText(row.at, now)}
             labels={labels}
-            short={shortened.get(document.documentId)}
-            active={document.documentId === activeId}
-            elapsed={elapsedText(request.createdAt, now)}
-            onSelect={() => onSelect(document.documentId)}
+            short={shortened.get(row.document.documentId)}
+            active={row.document.documentId === activeId}
+            onSelect={() => onSelect(row.document.documentId)}
             onFocus={() => {
               focused.current = {
-                requestId: request.requestId,
+                requestId: row.request.requestId,
                 index,
-                documentId: document.documentId,
+                documentId: row.document.documentId,
               };
             }}
             onBlur={onBlur}
@@ -898,8 +897,83 @@ function PendingQuestions({
   );
 }
 
+// The questions waiting on the person, then the answers the agent has not picked up, each across the open documents
+// and oldest first. Kept outside the reorderable list and the same in both layouts. Questions whose document is not
+// in the list yet appear once a later list includes it.
+function QuestionInbox({
+  inbox,
+  documents,
+  ...section
+}: {
+  inbox: FeedbackInbox;
+  documents: DocumentSummary[];
+  labels: Labels;
+  shortened: Map<string, ShortDirectory>;
+  activeId: string | null;
+  onSelect: (documentId: string) => void;
+  documentList: RefObject<HTMLDivElement | null>;
+}) {
+  const matched = useMemo(() => {
+    const byId = new Map(documents.map((document) => [document.documentId, document]));
+    const onOpenDocuments = (
+      requests: FeedbackForAgent[],
+      at: (request: FeedbackForAgent) => string | undefined,
+    ) =>
+      requests.flatMap((request) => {
+        const document = byId.get(request.documentId);
+        const time = at(request);
+        return document && time !== undefined ? [{ request, document, at: time }] : [];
+      });
+    return {
+      waiting: onOpenDocuments(inbox.waiting, (request) => request.createdAt),
+      answered: onOpenDocuments(
+        inbox.unacknowledged,
+        (request) => request.submission?.submittedAt,
+      ).toSorted((a, b) => a.at.localeCompare(b.at)),
+    };
+  }, [inbox, documents]);
+  const [now, setNow] = useState(Date.now);
+  const answered = matched.answered.filter(
+    (row) => now - Date.parse(row.at) <= UNACKNOWLEDGED_SHOWN_MS,
+  );
+  // One timer for every row of both sections, running only while rows are shown.
+  const ticking = matched.waiting.length > 0 || answered.length > 0;
+  // Before paint, so rows never show with the clock from when the timer last stopped.
+  useLayoutEffect(() => {
+    if (!ticking) return undefined;
+    const update = () => setNow(Date.now());
+    update();
+    const timer = setInterval(update, ELAPSED_TICK_MS);
+    return () => clearInterval(timer);
+  }, [ticking]);
+
+  return (
+    // The sections share at most half of the sidebar and scroll on their own. Grid splits the room evenly, and a section
+    // that needs less than its half gives the rest to the other (flex would shrink both in proportion instead).
+    <div className="grid max-h-[50%] shrink-0 auto-rows-[minmax(0,max-content)]">
+      <QuestionSection
+        heading="Waiting for your answer"
+        rows={matched.waiting}
+        timeLabel="Asked"
+        now={now}
+        failed={inbox.failed}
+        {...section}
+      />
+      <QuestionSection
+        heading="Answered, agent has not picked up"
+        tone="text-warning"
+        rows={answered}
+        timeLabel="Answered"
+        now={now}
+        failed={false}
+        {...section}
+      />
+    </div>
+  );
+}
+
 export function Sidebar(props: SidebarProps) {
-  const { documents, pending, activeId, view, onViewChange, onSelect, onClose, onReorder } = props;
+  const { documents, inbox, activeId, view, onViewChange, onSelect, onClose, onReorder } = props;
   const [dragDocuments, setDragDocuments] = useState<DocumentSummary[] | null>(null);
   const [reorderMessage, setReorderMessage] = useState<string | null>(null);
   const order = documents.map((document) => document.documentId);
@@ -922,8 +996,8 @@ export function Sidebar(props: SidebarProps) {
         pressedOn.current = (event.target as Element).closest('button');
       }}
     >
-      <PendingQuestions
-        pending={pending}
+      <QuestionInbox
+        inbox={inbox}
         documents={documents}
         labels={labels}
         shortened={shortened}

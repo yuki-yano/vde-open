@@ -119,6 +119,7 @@ beforeEach(() => {
       return Promise.resolve(current.request);
     },
     pendingFeedback: () => Promise.resolve([]),
+    unacknowledgedFeedback: () => Promise.resolve([]),
     events: (next: NonNullable<typeof handlers>) => {
       handlers = next;
       return { close: () => undefined };
