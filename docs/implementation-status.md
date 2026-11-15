@@ -532,9 +532,10 @@ HTMLの実browserでの印刷はmacOSのみ確認した。Linux・Windowsでの�
 - 質問定義: 単一選択に`enumDescriptions`と`recommended`、複数選択に`items.enumDescriptions`と`recommended`（配列）を足した。`recommended`はそのfieldへの有効な回答でなければならず、既存の回答の検証で確かめる。回答の値は今までどおり`enum`の文字列。決定はADR-0018。
 - 回答panel: ラジオ・チェックボックスは選択肢名の下に「Recommended」と説明を出し、`aria-describedby`で結ぶ。7件以上のselectでは、optionに「(Recommended)」を付け、説明のある選択肢と推奨の選択肢をselectの下に一覧で出す。推奨は初期選択にも回答案にもしない。
 - 回答待ちの一覧: サイドバーの上部に「Waiting for your answer」を置き、`GET /feedback?status=pending`を文書一覧と`documentId`で突き合わせて出す。各行は質問のtitle、文書、位置、経過時間。押すとその文書を表示する。取り直しは`feedbackSignal`の契機で、`createRefresher`で1件ずつ行う。失敗したときは前回の結果を残して失敗を示す。文書の並べ替えの外に置き、高さの上限を超えると区画の中だけscrollする。新しいAPIは作っていない。
+- 受け取り待ちの一覧: 「Waiting for your answer」の下に「Answered, agent has not picked up」を置き、送信済みでAgentが`ack`していない回答のうち、送信から24時間以内のものを送信の古い順に出す。`GET /feedback`に任意の`acknowledged`（`true`・`false`）を足し、`status=submitted&acknowledged=false`をdaemon側で絞る。送信済みの記録は`forget`まで残るため、全件を取って画面側で絞らない。2つの一覧は1回の取り直しで並行に取り、両方をまとめて置き換える。2つの要求の間に起きた変更は、その通知による次の取り直しで直る。24時間の判定は経過時間と同じタイマー1本で更新する。各行は質問のtitle、文書、位置、「answered Xm ago」（幅13rem未満では「answered」を省き、文書名に幅を残す）。押すとその文書を表示する。見出しは`--warning`の色だが、意味は文言で伝える。2つの区画は合わせてサイドバーの50%までをgridで等分する（40%では高さ700pxの画面で2件目が切れたため広げた）。半分に収まる区画は行を全部出して残りをもう一方に回し、収まらない区画は中でscrollする（Chromium・Firefox・WebKitで同じ配分）。CLIの`vo feedback list`には条件を足していない。
 - 設計の確認: 実装の前にCodexの設計レビューを1回受け、selectの説明の扱い、`recommended`の検証、一覧の取り直しと失敗の表示、並べ替えとの分離を決めた。
-- 確認: `pnpm format:check`、`pnpm lint`、`pnpm typecheck`、`pnpm test`（80 files、929件）、`pnpm build`、`pnpm test:e2e`（100件）が成功。専用の`VDE_OPEN_HOME`で起動したdaemonで、説明と推奨の表示（ラジオ・select・複数選択）、一覧の表示・行の選択・送信後に一覧から消えること・幅800のdrawer・幅180のサイドバーを撮影して確かめた。
-- 既知の点: `apps/web/src/components/sidebar.tsx`は1,062行になった。一覧を別fileへ移すには`LocationLine`・`ROW_FOCUS`・`rowIn`も移す必要があり、この変更では分けていない。幅180pxで一覧の見出しが「Waiting for your an…」と切れる（件数は残る）。
+- 確認: `pnpm format:check`、`pnpm lint`、`pnpm typecheck`、`pnpm test`（80 files、933件）、`pnpm build`、`pnpm test:e2e`（102件）が成功。専用の`VDE_OPEN_HOME`で起動したdaemonで、説明と推奨の表示（ラジオ・select・複数選択）、一覧の表示・行の選択・送信後に一覧から消えること・幅800のdrawer・幅180のサイドバーを撮影して確かめた。受け取り待ちの区画も、送信で出ること、`feedback ack`で開いたままの画面から消えること、Tree・ダーク・drawer・幅180を撮影して確かめた。
+- 既知の点: `apps/web/src/components/sidebar.tsx`は1,137行になった。一覧を別fileへ移すには`LocationLine`・`ROW_FOCUS`・`rowIn`も移す必要があり、この変更では分けていない。一覧の見出しは切らずに折り返す。幅180pxでは2行になる。
 
 ## 全体のDoD（仕様17.1）
 

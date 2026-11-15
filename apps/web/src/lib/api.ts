@@ -125,6 +125,8 @@ export interface Api {
   feedback(requestId: string): Promise<FeedbackForUi>;
   // Every question awaiting an answer, oldest first.
   pendingFeedback(): Promise<FeedbackForAgent[]>;
+  // Every submitted answer the agent has not acknowledged yet, oldest question first.
+  unacknowledgedFeedback(): Promise<FeedbackForAgent[]>;
   // Replace the draft answer. Pass the draft version it is based on.
   saveDraft(
     requestId: string,
@@ -289,6 +291,10 @@ export function createApi(): Api {
     },
     async pendingFeedback() {
       return (await request<FeedbackListResult>('/feedback?status=pending')).data.requests;
+    },
+    async unacknowledgedFeedback() {
+      return (await request<FeedbackListResult>('/feedback?status=submitted&acknowledged=false'))
+        .data.requests;
     },
     async saveDraft(requestId, expectedDraftVersion, answers) {
       return (

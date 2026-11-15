@@ -12,7 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Workspace } from '@/App';
 import type { Api } from '@/lib/api';
 
-// The list of questions awaiting an answer across the open documents, above the document list.
+// The lists of questions awaiting an answer and of answers the agent has not picked up, across the open documents,
+// above the document list.
 
 const REV = `rev_${'1'.repeat(64)}`;
 const requestIdOf = (n: number) => `req_0000000${String(n)}-0000-4000-8000-000000000000`;
@@ -59,6 +60,27 @@ function questionOn(
   };
 }
 
+// A question whose answer was submitted at submittedAt and that the agent has not acknowledged.
+function answeredOn(
+  document: DocumentSummary,
+  n: number,
+  title: string,
+  submittedAt = new Date().toISOString(),
+): FeedbackForAgent {
+  return {
+    ...questionOn(document, n, title, '2026-01-01T00:00:00.000Z'),
+    status: 'submitted',
+    submission: {
+      submissionId: `sub_0000000${String(n)}-0000-4000-8000-000000000000`,
+      answers: { verdict: 'OK' },
+      submittedAt,
+      revision: REV,
+      confirmedAgainstOlderRevision: false,
+      currentRevisionAtSubmit: REV,
+    },
+  };
+}
+
 const docA = documentOf(1, 'alpha');
 const docB = documentOf(2, 'beta');
 const docC = documentOf(3, 'gamma');
@@ -66,7 +88,11 @@ const docC = documentOf(3, 'gamma');
 let container: HTMLElement;
 let root: Root;
 // The daemon's state. Each fetch answers with the state at the time it started.
-let server: { documents: DocumentSummary[]; pending: FeedbackForAgent[] };
+let server: {
+  documents: DocumentSummary[];
+  pending: FeedbackForAgent[];
+  unacknowledged: FeedbackForAgent[];
+};
 // Fetches of the pending questions can be held back (finished later) or fail.
 let fetches: { hold: boolean; held: Array<() => void>; fail: boolean };
 let handlers: { onEvent: (event: ServerEvent) => void; onConnect: () => void } | null;
@@ -82,8 +108,12 @@ function withPending(documents: DocumentSummary[], pending: FeedbackForAgent[]) 
   }));
 }
 
-function setServer(documents: DocumentSummary[], pending: FeedbackForAgent[]) {
-  server = { documents: withPending(documents, pending), pending };
+function setServer(
+  documents: DocumentSummary[],
+  pending: FeedbackForAgent[],
+  unacknowledged: FeedbackForAgent[] = [],
+) {
+  server = { documents: withPending(documents, pending), pending, unacknowledged };
 }
 
 beforeEach(() => {
@@ -134,6 +164,7 @@ beforeEach(() => {
       if (!fetches.hold) return Promise.resolve(snapshot);
       return new Promise((resolve) => fetches.held.push(() => resolve(snapshot)));
     },
+    unacknowledgedFeedback: () => Promise.resolve(server.unacknowledged),
     events: (next: NonNullable<typeof handlers>) => {
       handlers = next;
       return { close: () => undefined };
@@ -167,20 +198,26 @@ async function connect() {
   notify('hello');
 }
 
-const section = () =>
+const WAITING = 'Waiting for your answer';
+const ANSWERED = 'Answered, agent has not picked up';
+const section = (name = WAITING) =>
   [...container.querySelectorAll('section')].find((item) =>
-    item.querySelector('h2')?.textContent?.startsWith('Waiting for your answer'),
+    item.querySelector('h2')?.textContent?.startsWith(name),
   ) ?? null;
 // The count is kept apart from the heading text by a no-break space.
-const heading = () => section()?.querySelector('h2')?.textContent?.replace(/\s+/g, ' ') ?? null;
-const rowButtons = () => [
-  ...(section()?.querySelectorAll<HTMLButtonElement>('button[data-request-id]') ?? []),
+const heading = (name = WAITING) =>
+  section(name)?.querySelector('h2')?.textContent?.replace(/\s+/g, ' ') ?? null;
+const rowButtons = (name = WAITING) => [
+  ...(section(name)?.querySelectorAll<HTMLButtonElement>('button[data-request-id]') ?? []),
 ];
-const shownRows = () =>
-  rowButtons().map((row) => [
+const shownRows = (name = WAITING) =>
+  rowButtons(name).map((row) => [
     row.querySelector('[data-part="question"]')?.textContent,
     row.querySelector('[data-part="document"]')?.textContent,
   ]);
+const elapsedOf = (name = WAITING) =>
+  rowButtons(name).map((row) => row.querySelector('[data-part="elapsed"]')?.textContent);
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const failure = () => section()?.querySelector('[role="status"]')?.textContent ?? null;
 const panelTitle = () =>
   container.querySelector('aside[aria-label="Answer the question"] h2')?.textContent ?? null;
@@ -252,21 +289,24 @@ describe('questions awaiting an answer', () => {
     expect(shownRows()).toEqual([['New question', 'alpha']]);
   });
 
-  it('keeps the last list and says so when a fetch fails, until a fetch succeeds', async () => {
-    setServer([docA, docB], [questionOn(docB, 1, 'Pick a layout')]);
+  it('keeps the last lists and says so once when a fetch fails, until a fetch succeeds', async () => {
+    setServer([docA, docB], [questionOn(docB, 1, 'Pick a layout')], [answeredOn(docA, 2, 'Done')]);
     await connect();
-    await until(() => rowButtons().length === 1);
+    await until(() => rowButtons().length === 1 && rowButtons(ANSWERED).length === 1);
 
     fetches.fail = true;
     notify();
     await until(() => failure() !== null);
     expect(failure()).toBe('Could not fetch the latest questions.');
     expect(shownRows()).toEqual([['Pick a layout', 'beta']]);
+    expect(shownRows(ANSWERED)).toEqual([['Done', 'alpha']]);
+    expect(section(ANSWERED)?.querySelector('[role="status"]')).toBeNull();
 
     fetches.fail = false;
     notify();
     await until(() => failure() === null);
     expect(shownRows()).toEqual([['Pick a layout', 'beta']]);
+    expect(shownRows(ANSWERED)).toEqual([['Done', 'alpha']]);
   });
 
   it('says so even when the failed fetch is the first', async () => {
@@ -277,22 +317,22 @@ describe('questions awaiting an answer', () => {
     expect(failure()).toBe('Could not fetch the latest questions.');
   });
 
-  it('shows the same list in the Tree layout', async () => {
+  it('shows the same lists in the Tree layout', async () => {
     window.localStorage.setItem('vde-open.pref.sidebar-view', JSON.stringify('tree'));
-    setServer([docA, docB], [questionOn(docB, 1, 'Pick a layout')]);
+    setServer([docA, docB], [questionOn(docB, 1, 'Pick a layout')], [answeredOn(docA, 2, 'Done')]);
     await connect();
-    await until(() => rowButtons().length === 1);
+    await until(() => rowButtons().length === 1 && rowButtons(ANSWERED).length === 1);
     expect(container.querySelector('[role="tree"]')).not.toBeNull();
     expect(shownRows()).toEqual([['Pick a layout', 'beta']]);
+    expect(shownRows(ANSWERED)).toEqual([['Done', 'alpha']]);
   });
 
-  it('counts how long each question has waited, with one timer for the list', async () => {
+  it('counts how long each question has waited, with one timer for both lists', async () => {
     // The clock still moves with real time, so the waits below can time out.
     vi.useFakeTimers({
       toFake: ['Date', 'setInterval', 'clearInterval'],
       shouldAdvanceTime: true,
     });
-    const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
     setServer(
       [docA, docB, docC],
       [
@@ -300,21 +340,22 @@ describe('questions awaiting an answer', () => {
         questionOn(docB, 2, 'q2', minutesAgo(5)),
         questionOn(docC, 3, 'q3', minutesAgo(3 * 60 + 5)),
       ],
+      [answeredOn(docA, 4, 'q4', minutesAgo(2))],
     );
     await connect();
-    const elapsed = () =>
-      rowButtons().map((row) => row.querySelector('[data-part="elapsed"]')?.textContent);
     await until(() => rowButtons().length === 3);
-    expect(elapsed()).toEqual(['just now', '5m ago', '3h ago']);
+    expect(elapsedOf()).toEqual(['just now', '5m ago', '3h ago']);
+    expect(elapsedOf(ANSWERED)).toEqual(['answered 2m ago']);
     const timersWithRows = vi.getTimerCount();
     vi.advanceTimersByTime(60_000);
-    await until(() => elapsed()[0] === '1m ago');
-    expect(elapsed()).toEqual(['1m ago', '6m ago', '3h ago']);
+    await until(() => elapsedOf()[0] === '1m ago');
+    expect(elapsedOf()).toEqual(['1m ago', '6m ago', '3h ago']);
+    expect(elapsedOf(ANSWERED)).toEqual(['answered 3m ago']);
 
-    // Three rows share one timer, and it stops once no question is left.
+    // Four rows in two lists share one timer, and it stops once no question is left.
     setServer([docA, docB, docC], []);
     notify();
-    await until(() => section() === null);
+    await until(() => section() === null && section(ANSWERED) === null);
     await until(() => vi.getTimerCount() < timersWithRows);
     expect(timersWithRows - vi.getTimerCount()).toBe(1);
   });
@@ -349,5 +390,70 @@ describe('questions awaiting an answer', () => {
     await until(() => rowButtons().length === 1);
     await settle();
     expect(document.activeElement).toBe(documentRow(docB));
+  });
+});
+
+describe('answers the agent has not picked up', () => {
+  it('lists each answer of the last 24 hours with its document, oldest answer first', async () => {
+    const docD = documentOf(4, 'delta');
+    setServer(
+      [docA, docB, docC],
+      [],
+      [
+        answeredOn(docB, 1, 'Later answer', minutesAgo(2)),
+        answeredOn(docA, 2, 'Earlier answer', minutesAgo(10)),
+        answeredOn(docC, 3, 'Day-old answer', minutesAgo(24 * 60 + 1)),
+        answeredOn(docD, 4, 'Answer on a document not listed'),
+      ],
+    );
+    await connect();
+    await until(() => rowButtons(ANSWERED).length === 2);
+    expect(heading(ANSWERED)).toBe('Answered, agent has not picked up (2)');
+    expect(shownRows(ANSWERED)).toEqual([
+      ['Earlier answer', 'alpha'],
+      ['Later answer', 'beta'],
+    ]);
+    expect(elapsedOf(ANSWERED)).toEqual(['answered 10m ago', 'answered 2m ago']);
+    const [row] = rowButtons(ANSWERED);
+    const description = document.getElementById(row?.getAttribute('aria-describedby') ?? '');
+    expect(description?.textContent).toBe('alpha. /work/alpha.html. Answered 10m ago.');
+    expect(section()).toBeNull();
+
+    row?.click();
+    await until(() => documentRow(docA)?.getAttribute('aria-current') === 'true');
+    expect(row?.getAttribute('aria-current')).toBe('true');
+  });
+
+  it('a submitted question moves here from the questions awaiting an answer, and leaves once the agent acknowledges it', async () => {
+    setServer([docA, docB], [questionOn(docB, 1, 'Pick a layout')]);
+    await connect();
+    await until(() => rowButtons().length === 1);
+    expect(section(ANSWERED)).toBeNull();
+
+    setServer([docA, docB], [], [answeredOn(docB, 1, 'Pick a layout')]);
+    notify();
+    await until(() => rowButtons(ANSWERED).length === 1);
+    expect(section()).toBeNull();
+    expect(shownRows(ANSWERED)).toEqual([['Pick a layout', 'beta']]);
+
+    setServer([docA, docB], []);
+    notify();
+    await until(() => section(ANSWERED) === null);
+    expect(section(ANSWERED)).toBeNull();
+  });
+
+  it('drops an answer once it is more than 24 hours old, without a refetch', async () => {
+    vi.useFakeTimers({
+      toFake: ['Date', 'setInterval', 'clearInterval'],
+      shouldAdvanceTime: true,
+    });
+    setServer([docA], [], [answeredOn(docA, 1, 'Almost a day', minutesAgo(24 * 60 - 1))]);
+    await connect();
+    await until(() => rowButtons(ANSWERED).length === 1);
+    expect(elapsedOf(ANSWERED)).toEqual(['answered 23h ago']);
+
+    vi.advanceTimersByTime(90_000);
+    await until(() => section(ANSWERED) === null);
+    expect(section(ANSWERED)).toBeNull();
   });
 });

@@ -33,7 +33,7 @@ function show(documents: DocumentSummary[], view: SidebarView = 'flat') {
     root.render(
       <Sidebar
         documents={documents}
-        pending={{ requests: [], failed: false }}
+        inbox={{ waiting: [], unacknowledged: [], failed: false }}
         activeId={null}
         view={view}
         onViewChange={() => undefined}

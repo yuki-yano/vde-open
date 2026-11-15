@@ -325,6 +325,11 @@ export class FeedbackService {
     const params = feedbackListParamsSchema.parse(rawParams ?? {});
     const requests = Object.values(this.#store.payload.feedbackRequests)
       .filter((record) => params.status === undefined || record.status === params.status)
+      .filter(
+        (record) =>
+          params.acknowledged === undefined ||
+          (record.acknowledgedAt !== null) === params.acknowledged,
+      )
       .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
       .map((record) => this.#toAgent(record));
     return this.#result({ requests });
@@ -451,7 +456,7 @@ export class FeedbackService {
         requestId: params.requestId,
       });
     }
-    await this.#store.transaction((tx) => {
+    const forgotten = await this.#store.transaction((tx) => {
       const state = tx.state;
       const record = this.#require(state, params.requestId);
       if (record.status === 'pending') {
@@ -473,7 +478,10 @@ export class FeedbackService {
           pinnedRevisions(state, record.documentId),
         );
       }
+      return structuredClone(record);
     });
+    // Lists of questions (the management UI's answered-but-not-picked-up list) refetch and drop the deleted one.
+    this.#changed(forgotten);
     // Removes stored content that is no longer referenced. Even if this fails, the record deletion is committed.
     await this.#store.collectGarbage().catch(() => 0);
     return this.#result({ requestId: params.requestId, forgotten: true });
