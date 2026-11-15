@@ -1,7 +1,9 @@
 import type {
   Answers,
   DocumentSummary,
+  FeedbackForAgent,
   FeedbackForUi,
+  FeedbackListResult,
   FeedbackSubmitParams,
   HtmlMode,
   LinkOpenResult,
@@ -103,6 +105,8 @@ export interface Api {
   ): Promise<LinkOpenResult>;
   // The question (including the questionnaire, the draft answer, and the document's current revision).
   feedback(requestId: string): Promise<FeedbackForUi>;
+  // Every question awaiting an answer, oldest first.
+  pendingFeedback(): Promise<FeedbackForAgent[]>;
   // Replace the draft answer. Pass the draft version it is based on.
   saveDraft(
     requestId: string,
@@ -264,6 +268,9 @@ export function createApi(): Api {
     },
     async feedback(requestId) {
       return (await request<FeedbackForUi>(`/feedback/${requestId}`)).data;
+    },
+    async pendingFeedback() {
+      return (await request<FeedbackListResult>('/feedback?status=pending')).data.requests;
     },
     async saveDraft(requestId, expectedDraftVersion, answers) {
       return (

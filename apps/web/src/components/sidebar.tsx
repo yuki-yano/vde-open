@@ -8,7 +8,7 @@ import {
   useDragOperation,
 } from '@dnd-kit/react';
 import { isSortable, useSortable } from '@dnd-kit/react/sortable';
-import type { DocumentSummary } from '@vde-open/shared';
+import type { DocumentSummary, FeedbackForAgent } from '@vde-open/shared';
 import {
   CircleAlert,
   FileLock,
@@ -39,6 +39,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import type { SidebarView } from '@/lib/preferences';
+import type { PendingFeedback } from '@/lib/use-pending-feedback';
 import {
   buildLabels,
   fileNameOf,
@@ -59,6 +60,8 @@ export interface SidebarProps {
   documents: DocumentSummary[];
   // The names computed from the list by the caller (computed here when not given).
   labels?: Labels;
+  // Questions awaiting an answer, shown above the list with the open document each one is about.
+  pending: PendingFeedback;
   activeId: string | null;
   view: SidebarView;
   onViewChange: (view: SidebarView) => void;
@@ -691,8 +694,212 @@ function DragCatalogGuard({
   return null;
 }
 
+// The elapsed times of the questions awaiting an answer are counted in minutes.
+const ELAPSED_TICK_MS = 30_000;
+
+function elapsedText(createdAt: string, now: number): string {
+  // A clock a little ahead on the daemon side must not show a negative time.
+  const minutes = Math.max(0, Math.floor((now - Date.parse(createdAt)) / 60_000));
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${String(minutes)}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${String(hours)}h ago`;
+  return `${String(Math.floor(hours / 24))}d ago`;
+}
+
+function PendingQuestionRow({
+  request,
+  document,
+  labels,
+  short,
+  active,
+  elapsed,
+  onSelect,
+  onFocus,
+  onBlur,
+}: {
+  request: FeedbackForAgent;
+  document: DocumentSummary;
+  labels: Labels;
+  short: ShortDirectory | undefined;
+  active: boolean;
+  elapsed: string;
+  onSelect: () => void;
+  onFocus: () => void;
+  onBlur: (row: HTMLButtonElement) => void;
+}) {
+  const descriptionId = useId();
+  const location = visible(locationText(document, labels));
+  return (
+    <li>
+      <button
+        type="button"
+        className={cn(
+          'flex w-full min-w-0 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left text-sm',
+          ROW_FOCUS,
+          active ? 'bg-accent text-accent-foreground' : 'hover:bg-muted',
+        )}
+        aria-current={active ? 'true' : undefined}
+        aria-describedby={descriptionId}
+        title={[request.title, document.title, location].join('\n')}
+        data-request-id={request.requestId}
+        onClick={onSelect}
+        onFocus={onFocus}
+        onBlur={(event) => onBlur(event.currentTarget)}
+      >
+        <span className="flex w-full min-w-0 items-center gap-1.5">
+          <MessageCircleQuestionMark className="size-4 shrink-0 text-primary" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate font-medium" data-part="question">
+            {request.title}
+          </span>
+        </span>
+        {/* The document, its location and the elapsed time are read out through the description below, not as part
+            of the name. The elapsed time sits here so a narrow list keeps room for the question. */}
+        <span
+          className="flex w-full min-w-0 items-center gap-1.5 pl-5.5 text-xs"
+          aria-hidden="true"
+        >
+          <FormatIcon format={document.format} className="size-3.5" />
+          <span className="min-w-0 flex-1 truncate" data-part="document">
+            {document.title}
+          </span>
+          <time
+            dateTime={request.createdAt}
+            className="shrink-0 text-muted-foreground"
+            data-part="elapsed"
+          >
+            {elapsed}
+          </time>
+        </span>
+        <span
+          className="flex w-full min-w-0 items-center gap-1.5 overflow-hidden pl-5.5 text-xs text-muted-foreground"
+          aria-hidden="true"
+          data-part="location"
+        >
+          <LocationLine document={document} labels={labels} short={short} />
+        </span>
+      </button>
+      <span id={descriptionId} hidden>
+        {`${document.title}. ${location}. Asked ${elapsed}.`}
+      </span>
+    </li>
+  );
+}
+
+// Questions awaiting an answer, across the open documents, oldest first. Kept outside the reorderable list and the
+// same in both layouts. Questions whose document is not in the list yet appear once a later list includes it.
+function PendingQuestions({
+  pending,
+  documents,
+  labels,
+  shortened,
+  activeId,
+  onSelect,
+  documentList,
+}: {
+  pending: PendingFeedback;
+  documents: DocumentSummary[];
+  labels: Labels;
+  shortened: Map<string, ShortDirectory>;
+  activeId: string | null;
+  onSelect: (documentId: string) => void;
+  documentList: RefObject<HTMLDivElement | null>;
+}) {
+  const headingId = useId();
+  const rows = useMemo(() => {
+    const byId = new Map(documents.map((document) => [document.documentId, document]));
+    return pending.requests.flatMap((request) => {
+      const document = byId.get(request.documentId);
+      return document ? [{ request, document }] : [];
+    });
+  }, [pending.requests, documents]);
+  // One timer for every row, running only while rows are shown.
+  const [now, setNow] = useState(Date.now);
+  const ticking = rows.length > 0;
+  useEffect(() => {
+    if (!ticking) return undefined;
+    const update = () => setNow(Date.now());
+    update();
+    const timer = setInterval(update, ELAPSED_TICK_MS);
+    return () => clearInterval(timer);
+  }, [ticking]);
+
+  // When the focused row goes away (answered or cancelled), focus moves to the row that took its place,
+  // or to the document in the list once no question is left. Focus that moved elsewhere is left alone.
+  const list = useRef<HTMLUListElement>(null);
+  const focused = useRef<{ requestId: string; index: number; documentId: string } | null>(null);
+  useLayoutEffect(() => {
+    const current = focused.current;
+    if (!current) return;
+    const buttons = [
+      ...(list.current?.querySelectorAll<HTMLButtonElement>('button[data-request-id]') ?? []),
+    ];
+    const index = buttons.findIndex((button) => button.dataset['requestId'] === current.requestId);
+    if (index !== -1) {
+      current.index = index;
+      return;
+    }
+    focused.current = null;
+    const activeElement = globalThis.document.activeElement;
+    if (activeElement !== null && activeElement !== globalThis.document.body) return;
+    const next =
+      buttons[Math.min(current.index, buttons.length - 1)] ??
+      (documentList.current ? rowIn(documentList.current, current.documentId) : null);
+    next?.focus();
+  });
+  const onBlur = (row: HTMLButtonElement) => {
+    // Wait until focus settles. A row removed by an update keeps the record; leaving the list clears it.
+    setTimeout(() => {
+      if (!row.isConnected) return;
+      if (!list.current?.contains(globalThis.document.activeElement)) focused.current = null;
+    }, 0);
+  };
+
+  if (rows.length === 0 && !pending.failed) return null;
+  return (
+    <section aria-labelledby={headingId} className="flex max-h-[40%] shrink-0 flex-col border-b">
+      <h2 id={headingId} className="flex min-w-0 px-3 pt-2 pb-1 text-sm font-medium">
+        <span className="truncate" title="Waiting for your answer">
+          Waiting for your answer
+        </span>
+        <span className="shrink-0">&nbsp;({rows.length})</span>
+      </h2>
+      {pending.failed && (
+        <p role="status" className="px-3 pb-1 text-xs text-destructive">
+          Could not fetch the latest questions.
+        </p>
+      )}
+      <ul
+        ref={list}
+        className="@container/list flex min-h-0 flex-col gap-0.5 overflow-y-auto px-2 pb-2"
+      >
+        {rows.map(({ request, document }, index) => (
+          <PendingQuestionRow
+            key={request.requestId}
+            request={request}
+            document={document}
+            labels={labels}
+            short={shortened.get(document.documentId)}
+            active={document.documentId === activeId}
+            elapsed={elapsedText(request.createdAt, now)}
+            onSelect={() => onSelect(document.documentId)}
+            onFocus={() => {
+              focused.current = {
+                requestId: request.requestId,
+                index,
+                documentId: document.documentId,
+              };
+            }}
+            onBlur={onBlur}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function Sidebar(props: SidebarProps) {
-  const { documents, activeId, view, onViewChange, onSelect, onClose, onReorder } = props;
+  const { documents, pending, activeId, view, onViewChange, onSelect, onClose, onReorder } = props;
   const [dragDocuments, setDragDocuments] = useState<DocumentSummary[] | null>(null);
   const [reorderMessage, setReorderMessage] = useState<string | null>(null);
   const order = documents.map((document) => document.documentId);
@@ -715,6 +922,15 @@ export function Sidebar(props: SidebarProps) {
         pressedOn.current = (event.target as Element).closest('button');
       }}
     >
+      <PendingQuestions
+        pending={pending}
+        documents={documents}
+        labels={labels}
+        shortened={shortened}
+        activeId={activeId}
+        onSelect={onSelect}
+        documentList={list}
+      />
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
         <h2 className="text-sm font-medium">Open documents ({documents.length})</h2>
         {reorderMessage && (

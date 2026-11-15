@@ -142,6 +142,8 @@ vo feedback ack <requestId> --submission-id <id> --json
 
 人は管理画面の回答panelで回答し、「Send answers to the agent」を押したときだけ回答が確定します。送信の前の入力（回答案）はAgentへ返しません。passwordやAPI keyなどの秘密を入力してもらう用途には使わないでください。
 
+管理画面は、開いているすべての文書の回答待ちの質問を、文書一覧の上部の「Waiting for your answer」に、対象の文書と経過時間とともに並べます。質問を押すと、その文書と回答panelを表示します。
+
 ## トラブルシュート
 
 | 症状 | 対処 |
