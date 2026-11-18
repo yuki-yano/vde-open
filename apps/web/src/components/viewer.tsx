@@ -1,6 +1,11 @@
-import { encodeLogicalPath, fragmentOfAnchor, localImagePath } from '@vde-open/document';
+import {
+  HTML_LINK_HELLO,
+  encodeLogicalPath,
+  fragmentOfAnchor,
+  localImagePath,
+} from '@vde-open/document';
 import { codeOfBlock, MarkdownView } from '@vde-open/document/react';
-import type { DocumentSummary, FeedbackForUi, OutlineItem } from '@vde-open/shared';
+import type { DocumentSummary, FeedbackForUi, LinkOpenParams, OutlineItem } from '@vde-open/shared';
 import {
   ChevronsLeftRight,
   CircleAlert,
@@ -11,7 +16,16 @@ import {
   RefreshCw,
   TableOfContents,
 } from 'lucide-react';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import {
   AlertDialog,
@@ -130,10 +144,9 @@ interface LoadFailure {
 }
 
 // Confirmation before opening an unregistered document. path is the absolute path the daemon resolved.
-// The confirmation is tied to the revision and target at the time it was requested. When confirming, send that revision and identifier.
-interface PendingLink {
-  linkId: string;
-  revision: string;
+// Keep the link's original revision and mode while the document can reload in the background.
+type LinkToOpen = Omit<LinkOpenParams, 'documentId'>;
+interface PendingLink extends LinkToOpen {
   path: string;
   confirmation: string;
   // The previous confirmation did not hold (the target changed or it expired).
@@ -305,6 +318,8 @@ function TextViewer({
   const showMarkdown = isMarkdown && wantsPreview && markdown.status === 'ready';
   // HTML shows the converted content inside a sandbox on a different origin.
   const frameUrl = !isMarkdown && wantsPreview ? (grant?.documentUrl ?? null) : null;
+  const frameHasDocumentLinks =
+    frameUrl !== null && grant?.links.some((link) => link.kind === 'document');
   // Communication with the HTML lasts only while the iframe is on screen. Removing it ends the communication.
   const frame = useRef<HTMLIFrameElement>(null);
   const frameLoads = useRef<{ url: string; count: number } | null>(null);
@@ -358,16 +373,15 @@ function TextViewer({
 
   // Open a link to a local document. For unregistered documents, show the path and confirm before opening.
   const openLink = useCallback(
-    async (linkId: string, revision: string, confirmation?: string) => {
+    async (link: LinkToOpen) => {
       setLinkError(null);
       try {
-        await api.openLink(document.documentId, revision, linkId, confirmation);
+        await api.openLink(document.documentId, link);
         setPendingLink(null);
       } catch (reason) {
         if (reason instanceof ApiError && reason.code === 'E_CONFIRMATION_REQUIRED') {
           setPendingLink({
-            linkId,
-            revision,
+            ...link,
             path: String(reason.details['path'] ?? ''),
             confirmation: String(reason.details['confirmation'] ?? ''),
             changed: reason.details['changed'] === true,
@@ -383,10 +397,57 @@ function TextViewer({
   const openMarkdownLink = useCallback(
     (href: string) => {
       const link = grant?.links.find((candidate) => candidate.href === href);
-      if (grant && link?.kind === 'document') void openLink(link.linkId, grant.revision);
+      if (grant && link?.kind === 'document') {
+        void openLink({ linkId: link.linkId, revision: grant.revision, mode: grant.mode });
+      }
     },
     [grant, openLink],
   );
+  const openFrameLink = useEffectEvent((link: LinkToOpen) => {
+    if (displayed && pendingLink === null) void openLink(link);
+  });
+  useLayoutEffect(() => {
+    const element = frame.current;
+    if (!element || !frameHasDocumentLinks || !grant) return undefined;
+    let closePort: (() => void) | undefined;
+    const onPortMessage = ({ data }: MessageEvent<unknown>) => {
+      if (element.closest('[inert]') || typeof data !== 'string') return;
+      const link = grant.links.find(
+        (candidate) => candidate.kind === 'document' && candidate.linkId === data,
+      );
+      if (link) openFrameLink({ linkId: link.linkId, revision: grant.revision, mode: grant.mode });
+    };
+    const onMessage = (event: MessageEvent<unknown>) => {
+      if (
+        event.source === null ||
+        event.source !== element.contentWindow ||
+        event.origin !== 'null' ||
+        event.data !== HTML_LINK_HELLO ||
+        event.ports.length !== 1
+      )
+        return;
+      const [incoming] = event.ports;
+      if (!incoming) return;
+      // In Interactive, only the first script can hand over a port. Static outline jumps can reload the same frame.
+      if (closePort && grant.mode === 'interactive') {
+        incoming.close();
+        return;
+      }
+      closePort?.();
+      incoming.addEventListener('message', onPortMessage);
+      incoming.start();
+      closePort = () => {
+        incoming.removeEventListener('message', onPortMessage);
+        incoming.close();
+      };
+    };
+    // The frame can finish loading while its workspace is still staged.
+    window.addEventListener('message', onMessage);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      closePort?.();
+    };
+  }, [frameHasDocumentLinks, grant]);
 
   // Each code block reports its own copy result where the action was performed.
   const codeActions = useMemo(() => <CopyButton code label="code" text={codeOfBlock} />, []);
@@ -501,7 +562,6 @@ function TextViewer({
   ];
   // Show the view mode exactly as the render grant issued by the daemon says.
   const frameMode = grant?.mode ?? 'static';
-  // HTML links cannot be clicked inside the view, so they are opened from the list. Markdown links can be opened from the body.
   const links = isMarkdown ? [] : (grant?.links ?? []);
   const contentNotices = [
     ...(targetNotice
@@ -602,7 +662,12 @@ function TextViewer({
                     size="xs"
                     className="h-auto p-0"
                     onClick={() => {
-                      if (grant) void openLink(link.linkId, grant.revision);
+                      if (grant)
+                        void openLink({
+                          linkId: link.linkId,
+                          revision: grant.revision,
+                          mode: grant.mode,
+                        });
                     }}
                   >
                     {link.text || link.href}
@@ -867,8 +932,8 @@ function TextViewer({
                 setLoadedFrameUrl(frameUrl);
               }}
               // Same-origin treatment, form submission, popups, top navigation, and downloads are never allowed.
-              // Only interactive allows scripts to run (spec 10.2).
-              sandbox={frameMode === 'interactive' ? 'allow-scripts' : ''}
+              // In Static, the response CSP allows only the document link relay.
+              sandbox={frameMode === 'interactive' || frameHasDocumentLinks ? 'allow-scripts' : ''}
               referrerPolicy="no-referrer"
               className="min-h-0 w-full flex-1 border-0 bg-white"
               data-testid="document-frame"
@@ -1008,9 +1073,7 @@ function TextViewer({
             <AlertDialogCancel>Don't open</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (pendingLink) {
-                  void openLink(pendingLink.linkId, pendingLink.revision, pendingLink.confirmation);
-                }
+                if (pendingLink) void openLink(pendingLink);
               }}
             >
               Add to list and open

@@ -53,7 +53,7 @@ describe('static HTML print document', () => {
     const output = renderHtmlPrintDocument({
       ...input,
       source:
-        '<base href="file:///etc/"><meta http-equiv="refresh" content="0;url=https://example.com"><meta http-equiv="Content-Security-Policy" content="default-src *"><script>alert(1)</script><iframe srcdoc="secret"></iframe><h1 onclick="alert(1)">本文</h1><img src="file:///etc/passwd"><img src="https://example.com/a.png"><link rel="stylesheet" href="https://example.com/a.css"><style>@import "file:///etc/passwd"; p { background:url(https://example.com/); }</style><a href="file:///secret.html">秘密</a>',
+        '<base href="file:///etc/"><meta http-equiv="refresh" content="0;url=https://example.com"><meta http-equiv="Content-Security-Policy" content="default-src *"><script>alert(1)</script><iframe srcdoc="secret"></iframe><h1 onclick="alert(1)">本文</h1><img src="file:///etc/passwd"><img src="https://example.com/a.png"><link rel="stylesheet" href="https://example.com/a.css"><style>@import "file:///etc/passwd"; p { background:url(https://example.com/); }</style><a href="file:///secret.html">秘密</a><a href="./details.html">Details</a>',
     });
     expect(output.html).not.toMatch(
       /<script|<iframe|<base|onclick|refresh|example\.com|file:\/\/\/|secret\.html|default-src \*/,
@@ -62,6 +62,7 @@ describe('static HTML print document', () => {
       "default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline' file:",
     );
     expect(output.html).toContain('本文');
+    expect(output.html).toContain('<a>Details</a>');
   });
 
   it('escapes a missing title and places default page rules before author rules', () => {

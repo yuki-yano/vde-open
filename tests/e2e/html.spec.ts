@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, realpathSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
@@ -100,18 +101,19 @@ test('P3 gate / SEC-005: in the Static view, the document scripts, event attribu
   page.on('request', (request) => requested.push(request.url()));
   const origin = await openHostile(page);
 
-  // The document is shown inside an empty sandbox, from an origin different from the management UI.
+  // The document has an opaque origin. Only the app relay is allowed to run by the response CSP.
   const frame = page.getByTestId('document-frame');
-  await expect(frame).toHaveAttribute('sandbox', '');
+  await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
   const src = (await frame.getAttribute('src')) as string;
   expect(new URL(src).origin).not.toBe(new URL(page.url()).origin);
   expect(new URL(src).pathname).toMatch(/^\/r\/[A-Za-z0-9_-]{43}\/files\/index\.html$/);
 
-  // The shown content. The text is as it was before any script rewrote it, and no executable elements remain.
+  // The shown content retains the author's text, with only the app relay script.
   const inner = page.frameLocator('[data-testid="document-frame"]');
   await expect(inner.locator('#marker')).toHaveText('元の文字');
   await expect(inner.locator('#fallback')).toHaveText('scriptが動かないときの文');
-  for (const selector of ['script', 'iframe', 'object', 'embed', 'svg', 'base', 'noscript']) {
+  await expect(inner.locator('script')).toHaveCount(1);
+  for (const selector of ['iframe', 'object', 'embed', 'svg', 'base', 'noscript']) {
     await expect(inner.locator(selector), selector).toHaveCount(0);
   }
   await expect(inner.locator('[onload], [onerror], [onclick]')).toHaveCount(0);
@@ -119,9 +121,9 @@ test('P3 gate / SEC-005: in the Static view, the document scripts, event attribu
   await expect(inner.locator('#styled')).toHaveCSS('color', 'rgb(0, 128, 0)');
   await expect(inner.locator('#styled')).toHaveCSS('font-weight', '700');
   await expect(inner.locator('#ok')).toHaveJSProperty('naturalWidth', 1);
-  // Links cannot be clicked. Only in-document navigation remains.
+  // Local document links are relayed by ID. The original heading link still works in the frame.
   await expect(inner.locator('#external')).not.toHaveAttribute('href');
-  await expect(inner.locator('#neighbor')).not.toHaveAttribute('href');
+  await expect(inner.locator('#neighbor')).toHaveAttribute('href', '#');
   await expect(inner.locator('#inner')).toHaveAttribute('href', '#marker');
 
   // Even after the meta refresh delay (1 second), neither navigation nor an outbound request happens.
@@ -154,26 +156,34 @@ test('P3 gate / SEC-005: in the Static view, the document scripts, event attribu
   await expect(page.getByTestId('html-mode')).toBeVisible();
 });
 
-test('SEC-004 (partial): the render response has a sandbox and a policy that forbids scripts', async ({
+test('SEC-004 (partial): the Static render response allows only the app relay script', async ({
   page,
 }) => {
   await openHostile(page);
   const src = (await page.getByTestId('document-frame').getAttribute('src')) as string;
   const response = await page.request.get(src);
   const csp = response.headers()['content-security-policy'] ?? '';
-  expect(csp).toContain("script-src 'none'");
+  const relay = await page
+    .frameLocator('[data-testid="document-frame"]')
+    .locator('script')
+    .textContent();
+  const hash = createHash('sha256')
+    .update(relay ?? '')
+    .digest('base64');
+  expect(csp.split('; ').find((directive) => directive.startsWith('script-src '))).toBe(
+    `script-src 'sha256-${hash}'`,
+  );
   expect(csp).toContain("connect-src 'none'");
   expect(csp).toContain(`frame-ancestors ${new URL(page.url()).origin}`);
-  expect(csp.split('; ').at(-1)).toBe('sandbox');
+  expect(csp.split('; ').at(-1)).toBe('sandbox allow-scripts');
   expect(csp).not.toContain('allow-same-origin');
-  expect(csp).not.toContain('allow-scripts');
   // The management UI may load only the document view (iframe) and registered images from the render listener.
   const ui = await page.request.get(new URL('/', page.url()).href);
   const uiCsp = ui.headers()['content-security-policy'] ?? '';
   expect(uiCsp).toContain(`frame-src ${new URL(src).origin}`);
   expect(uiCsp).toContain("script-src 'self'");
   expect(uiCsp).toContain("frame-ancestors 'none'");
-  // Opening the render URL directly shows no management UI, and no script runs.
+  // Opening the render URL directly still shows the original text with author scripts blocked.
   const direct = await page.context().newPage();
   await direct.goto(src);
   await expect(direct.locator('#marker')).toHaveText('元の文字');
@@ -213,6 +223,78 @@ test('SEC-019: links in the document open from the list, and unregistered docume
   expect((await t.json<{ totalDocuments: number }>(['list'])).totalDocuments).toBe(2);
 });
 
+for (const mode of ['static', 'interactive'] as const) {
+  test(`SEC-019: local body links open from the ${mode} HTML preview`, async ({ page }) => {
+    t.write(
+      'site/index.html',
+      `<h1>Source</h1>
+       <noscript><a href="./decoy.md">Static-only link</a></noscript>
+       <h2 id="links">Open files</h2>
+       <a href="./details.html"><span>Details</span></a>
+       <a href="./doc.md">Notes</a>`,
+    );
+    const destination = realpathSync(t.write('site/details.html', '<h1>HTML destination</h1>'));
+    t.write('site/doc.md', '# Markdown destination\n');
+    t.write('site/decoy.md', '# Wrong destination\n');
+    await t.json(['open', 'site/index.html', '--html-mode', mode]);
+    const linkRequests: string[] = [];
+    page.on('request', (request) => {
+      if (/\/links\/[^/]+\/open$/.test(request.url())) linkRequests.push(request.url());
+    });
+    await page.goto(await t.uiUrl());
+
+    const inner = page
+      .locator('[data-testid="document-workspace"]:not([inert])')
+      .frameLocator('[data-testid="document-frame"]');
+    const link = inner.getByRole('link', { name: 'Details' });
+    await expect(link).toBeVisible();
+    if (mode === 'static') {
+      await page
+        .getByRole('complementary', { name: 'Outline' })
+        .getByRole('button', { name: 'Open files' })
+        .click();
+      await expect
+        .poll(() => link.evaluate((element) => element.ownerDocument.location.hash))
+        .toBe('#links');
+    } else {
+      await expect(inner.getByText('Static-only link')).toHaveCount(0);
+    }
+    await inner.getByRole('link', { name: 'Notes' }).evaluate((element) => {
+      if (element instanceof HTMLAnchorElement) element.click();
+    });
+
+    const sidebar = page.getByRole('navigation', { name: 'Open documents' });
+    const source = sidebar.getByRole('button', { name: 'index.html', exact: true });
+    const details = sidebar.getByRole('button', { name: 'details.html', exact: true });
+    const dialog = page.getByRole('alertdialog');
+    await link.locator('span').click();
+    await expect(dialog).toContainText(destination);
+    expect(linkRequests).toHaveLength(1);
+    await dialog.getByRole('button', { name: "Don't open" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(details).toHaveCount(0);
+
+    await link.press('Enter');
+    await expect(dialog).toContainText(destination);
+    await dialog.getByRole('button', { name: 'Add to list and open' }).click();
+    await expect(details).toHaveAttribute('aria-current', 'true');
+    await expect(inner.getByRole('heading', { name: 'HTML destination' })).toBeVisible();
+
+    await source.click();
+    await link.click();
+    await expect(details).toHaveAttribute('aria-current', 'true');
+    await expect(inner.getByRole('heading', { name: 'HTML destination' })).toBeVisible();
+    await expect(dialog).toBeHidden();
+    expect(linkRequests).toHaveLength(4);
+
+    await source.click();
+    await inner.getByRole('link', { name: 'Notes' }).click();
+    await expect(dialog).toContainText('doc.md');
+    await dialog.getByRole('button', { name: 'Add to list and open' }).click();
+    await expect(page.locator('article')).toContainText('Markdown destination');
+  });
+}
+
 test('SEC-019: if the document is updated while the confirmation is shown, the document that was confirmed is the one opened', async ({
   page,
 }) => {
@@ -221,10 +303,9 @@ test('SEC-019: if the document is updated while the confirmation is shown, the d
   t.write('site/second.md', '# 更新後の行き先\n');
   await t.json(['open', 'site/index.html']);
   await page.goto(await t.uiUrl());
-  await page.getByTestId('render-links').click();
   await page
-    .getByRole('dialog', { name: 'Links in this document' })
-    .getByRole('button', { name: 'link' })
+    .frameLocator('[data-testid="document-frame"]')
+    .getByRole('link', { name: 'link' })
     .click();
   const dialog = page.getByRole('alertdialog');
   await expect(dialog).toContainText('first.md');

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { analyzeHtml, ParseLimitError } from './analysis.ts';
 import { scanHtmlReferences, transformStaticHtml } from './html-static.ts';
 import type { AssetRole } from './references.ts';
+import { renderDocument } from './render-document.ts';
 
 type HtmlNode = DefaultTreeAdapterMap['node'];
 
@@ -209,6 +210,29 @@ describe('SEC-006 removal of automatic navigation and external requests', () => 
       { linkId: 'lnk_0008', href: 'https://example.com/area', text: '', kind: 'external' },
     ]);
     expect(result.diagnostics.find((entry) => entry.code === 'link-disabled')?.count).toBe(9);
+  });
+
+  it('gives duplicate local preview links the same ID and removes author-provided IDs', () => {
+    const result = renderDocument({
+      source: `<a href="./details.html" data-vde-document-link="author">Details</a>
+        <map><area href="./details.html" alt="Duplicate"></map>
+        <a href="#inside" data-vde-document-link="author">Inside</a>
+        <a href="https://example.com/" data-vde-document-link="author">External</a>`,
+      format: 'html',
+      mode: 'static',
+      documentLogicalPath: 'index.html',
+      assets: [],
+      stylesheets: [],
+      sdkScript: null,
+    });
+    expect(result.html).toContain('<a href="#" data-vde-document-link="lnk_0001">Details</a>');
+    expect(result.html).toContain(
+      '<area href="#" data-vde-document-link="lnk_0001" alt="Duplicate">',
+    );
+    expect(result.html).toContain('<a href="#inside">Inside</a>');
+    expect(result.html).toContain('<a>External</a>');
+    expect(result.links.map((link) => link.kind)).toEqual(['document', 'external']);
+    expect(result.diagnostics).toEqual([{ code: 'link-disabled', target: null, count: 1 }]);
   });
 });
 

@@ -1,4 +1,4 @@
-// Transform an HTML document into its viewable form (spec 10.4). static has no scripts; interactive keeps only registered scripts.
+// Transform an HTML document into its viewable form (spec 10.4). Only interactive keeps author scripts.
 // Rewrites the parse5 syntax tree and serializes it. No regex replacement on the HTML string.
 import { parse, serialize, type DefaultTreeAdapterMap } from 'parse5';
 
@@ -11,6 +11,7 @@ import {
   type HtmlHeading,
 } from './analysis.ts';
 import { transformCss, type CssKind } from './css-transform.ts';
+import { HTML_LINK_ATTRIBUTE, HTML_LINK_RELAY } from './html-link-relay.ts';
 import {
   classifyLink,
   classifyReference,
@@ -60,7 +61,9 @@ export interface StaticHtmlInput {
   assetUrls?: ReadonlyMap<string, string>;
   // interactive: keep the document's scripts and event handlers (loading only registered script files). Default is static.
   interactive?: boolean;
-  // SDK for communication between the HTML and the host, inserted as the first script (interactive only).
+  // Enable body links and their app-owned relay in preview only.
+  relayDocumentLinks?: boolean;
+  // SDK for communication between the HTML and the host, inserted before author scripts (interactive only).
   sdkScript?: string;
 }
 
@@ -144,9 +147,10 @@ const MAX_LINK_TEXT = 120;
 interface Policy {
   // Whether to keep scripts and event handlers (interactive).
   interactive: boolean;
+  relayDocumentLinks?: boolean;
   // The URL to output when the reference is kept, or null to remove it.
   asset(url: string, context: ReferenceContext): string | null;
-  link(href: string, text: string): void;
+  link(href: string, text: string, kind: StaticLink['kind']): string | null;
   note(code: string, target: string | null): void;
 }
 
@@ -254,6 +258,7 @@ function rewriteElement(element: HtmlElement, policy: Policy): boolean {
   for (const attribute of element.attrs) {
     const name = attribute.name;
     if (!ATTRIBUTE_NAME.test(name)) continue;
+    if (policy.relayDocumentLinks && name === HTML_LINK_ATTRIBUTE) continue;
     if (name.startsWith('on')) {
       if (policy.interactive) kept.push(attribute);
       else handlers += 1;
@@ -271,9 +276,14 @@ function rewriteElement(element: HtmlElement, policy: Policy): boolean {
     if (name === 'href') {
       if (tag === 'link') kept.push(attribute);
       else if (isAnchor) {
-        // Keep only in-document navigation. Other links are disabled and made openable from the host's list.
-        if (classifyLink(attribute.value).kind === 'fragment') kept.push(attribute);
-        else policy.link(attribute.value, textOf(element));
+        const { kind } = classifyLink(attribute.value);
+        if (kind === 'fragment') kept.push(attribute);
+        else {
+          const linkId = policy.link(attribute.value, textOf(element), kind);
+          if (linkId === null) policy.note('link-disabled', null);
+          else
+            kept.push({ ...attribute, value: '#' }, { name: HTML_LINK_ATTRIBUTE, value: linkId });
+        }
       }
       continue;
     }
@@ -357,7 +367,7 @@ function rewriteTree(root: HtmlParent, policy: Policy): void {
       }
       if (!rewriteElement(child, policy)) continue;
       if (child.tagName === 'style') {
-        const css = rewriteCss(textOfStyle(child), 'stylesheet', policy);
+        const css = rewriteCss(rawTextOf(child), 'stylesheet', policy);
         child.childNodes = [{ nodeName: '#text', value: css, parentNode: child }];
         kept.push(child);
         continue;
@@ -371,7 +381,7 @@ function rewriteTree(root: HtmlParent, policy: Policy): void {
   }
 }
 
-function textOfStyle(element: HtmlElement): string {
+function rawTextOf(element: HtmlElement): string {
   let text = '';
   for (const child of element.childNodes) {
     if (child.nodeName === '#text' && 'value' in child) text += child.value;
@@ -381,14 +391,27 @@ function textOfStyle(element: HtmlElement): string {
 
 // Parse the transformed output again and check that no element or attribute leading to execution or navigation remains.
 // In interactive, only scripts and event handlers are allowed.
-function assertOutput(html: string, interactive: boolean): void {
-  const stack: HtmlNode[] = [parse(html, { scriptingEnabled: false })];
+function assertOutput(html: string, interactive: boolean, withLinkRelay: boolean): void {
+  const document = parse(html, { scriptingEnabled: false });
+  const relay = withLinkRelay ? headOf(document).childNodes[0] : undefined;
+  if (
+    withLinkRelay &&
+    (!relay ||
+      !isElement(relay) ||
+      relay.tagName !== 'script' ||
+      relay.attrs.length !== 0 ||
+      rawTextOf(relay) !== HTML_LINK_RELAY)
+  ) {
+    throw new Error('unsafe output: document link relay');
+  }
+  const stack: HtmlNode[] = [document];
   while (stack.length > 0) {
     const node = stack.pop() as HtmlNode;
     if (isElement(node)) {
       const unsafe =
         node.namespaceURI !== HTML_NAMESPACE ||
-        (REMOVED_ELEMENTS[node.tagName] !== undefined &&
+        (node !== relay &&
+          REMOVED_ELEMENTS[node.tagName] !== undefined &&
           !(interactive && node.tagName === 'script')) ||
         (interactive && node.tagName === 'noscript') ||
         node.attrs.some(
@@ -481,26 +504,36 @@ export function transformStaticHtml(
 ): StaticHtmlResult {
   const baseDir = dirnameOfLogicalPath(input.documentLogicalPath);
   const links: StaticLink[] = [];
-  const linkIds = new Set<string>();
+  const linksByHref = new Map<string, StaticLink>();
   const interactive = input.interactive === true;
+  const relayDocumentLinks = input.relayDocumentLinks === true;
 
   const policy: Policy = {
     interactive,
+    relayDocumentLinks,
     note: (code, target) => log.note(code, target),
     asset: (url, context) =>
       resolveAssetUrl(url, context, baseDir, input.assets, log, {
         scripts: interactive,
         ...(input.assetUrls === undefined ? {} : { assetUrls: input.assetUrls }),
       }),
-    link(href, text) {
-      log.note('link-disabled', null);
-      const target = classifyLink(href);
-      if (target.kind === 'fragment' || links.length >= MAX_LINKS) return;
+    link(href, text, kind) {
       const shown = href.trim().slice(0, 2000);
-      if (linkIds.has(shown)) return;
-      linkIds.add(shown);
-      const linkId = `lnk_${String(links.length + 1).padStart(4, '0')}`;
-      links.push({ linkId, href: shown, text, kind: target.kind });
+      let link = linksByHref.get(shown);
+      if (link === undefined) {
+        if (links.length >= MAX_LINKS) return null;
+        link = {
+          linkId: `lnk_${String(links.length + 1).padStart(4, '0')}`,
+          href: shown,
+          text,
+          kind,
+        };
+        linksByHref.set(shown, link);
+        links.push(link);
+      }
+      return relayDocumentLinks && kind === 'document' && link.kind === 'document'
+        ? link.linkId
+        : null;
     },
   };
 
@@ -513,8 +546,10 @@ export function transformStaticHtml(
   for (const heading of headings) setId(heading.element, heading.anchor);
   rewriteTree(document, policy);
   if (interactive && input.sdkScript !== undefined) insertFirstScript(document, input.sdkScript);
+  const withLinkRelay = relayDocumentLinks && links.some((link) => link.kind === 'document');
+  if (withLinkRelay) insertFirstScript(document, HTML_LINK_RELAY);
   const html = serialize(document);
-  assertOutput(html, interactive);
+  assertOutput(html, interactive, withLinkRelay);
   return { html, links, diagnostics: log.list(), headingTargets: reachable(document, headings) };
 }
 
@@ -559,10 +594,7 @@ function reachable(document: HtmlParent, headings: HtmlHeading[]): HeadingTarget
     .map(({ sectionId, anchor }) => ({ sectionId, anchor }));
 }
 
-// Insert the script as the first child of head. It runs before any script in the document.
-function insertFirstScript(document: HtmlParent, source: string): void {
-  if (source.toLowerCase().includes('</script'))
-    throw new Error('script text must not close itself');
+function headOf(document: HtmlParent): HtmlElement {
   const html = document.childNodes.find(
     (node): node is HtmlElement => isElement(node) && node.tagName === 'html',
   );
@@ -570,6 +602,14 @@ function insertFirstScript(document: HtmlParent, source: string): void {
     (node): node is HtmlElement => isElement(node) && node.tagName === 'head',
   );
   if (!head) throw new Error('document has no head');
+  return head;
+}
+
+// Insert the script as the first child of head. It runs before any script in the document.
+function insertFirstScript(document: HtmlParent, source: string): void {
+  if (source.toLowerCase().includes('</script'))
+    throw new Error('script text must not close itself');
+  const head = headOf(document);
   const script: HtmlElement = {
     nodeName: 'script',
     tagName: 'script',
@@ -592,7 +632,7 @@ export function scanHtmlReferences(source: string): ScannedReference[] {
       references.push({ url, context });
       return url;
     },
-    link: () => undefined,
+    link: () => null,
     note: () => undefined,
   };
   rewriteTree(parse(source, { scriptingEnabled: false }), policy);

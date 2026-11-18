@@ -4,6 +4,7 @@ import type {
   FeedbackForUi,
   FeedbackSubmitParams,
   HtmlMode,
+  LinkOpenParams,
   LinkOpenResult,
   ListResult,
   OutlineItem,
@@ -95,12 +96,7 @@ export interface Api {
   releaseGrants(grants: string[]): Promise<void>;
   // Open the local document a link in the document points to. For an unregistered document, the error asks for confirmation.
   // Calling again with the confirmation identifier from that error opens it.
-  openLink(
-    documentId: string,
-    revision: string,
-    linkId: string,
-    confirmation?: string,
-  ): Promise<LinkOpenResult>;
+  openLink(documentId: string, link: Omit<LinkOpenParams, 'documentId'>): Promise<LinkOpenResult>;
   // The question (including the questionnaire, the draft answer, and the document's current revision).
   feedback(requestId: string): Promise<FeedbackForUi>;
   // Replace the draft answer. Pass the draft version it is based on.
@@ -255,10 +251,10 @@ export function createApi(): Api {
     async releaseGrants(grants) {
       await request('/render-grants/release', { method: 'POST', body: JSON.stringify({ grants }) });
     },
-    async openLink(documentId, revision, linkId, confirmation) {
+    async openLink(documentId, { revision, mode, linkId, confirmation }) {
       const { data } = await request<LinkOpenResult>(
         `/documents/${documentId}/links/${linkId}/open`,
-        { method: 'POST', body: JSON.stringify({ revision, confirmation }) },
+        { method: 'POST', body: JSON.stringify({ revision, mode, confirmation }) },
       );
       return data;
     },

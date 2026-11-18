@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { isValidLogicalPath } from '@vde-open/document';
+import { HTML_LINK_RELAY } from '@vde-open/document/render';
 
 import type { HtmlMode } from '@vde-open/shared';
 
@@ -11,6 +13,7 @@ const CLOSE_GRACE_MS = 1000;
 // Shape of a view URL. Only `/r/<grant>/files/<logical path>` is accepted (spec 12.3).
 const PREVIEW_PATH = /^\/r\/([A-Za-z0-9_-]{43})\/files\/(.+)$/;
 const ENCODED_SEPARATOR_OR_NUL = /%(2f|5c|00)/i;
+const LINK_RELAY_HASH = `'sha256-${createHash('sha256').update(HTML_LINK_RELAY).digest('base64')}'`;
 
 export interface PreviewDeps {
   render: RenderService;
@@ -26,13 +29,23 @@ export interface PreviewServer {
 }
 
 // Document policy (spec 10.5). Only files registered for this view may be loaded.
-// static runs no scripts. interactive allows only inline and registered scripts, and connections to registered files.
+// static can run only the link relay. interactive allows inline and registered scripts and connections to registered files.
 // Neither adds `allow-same-origin` (the document has no origin).
-function documentCsp(mode: HtmlMode, grantBase: string, ancestors: string[]): string {
+function documentCsp(
+  mode: HtmlMode,
+  grantBase: string,
+  ancestors: string[],
+  hasDocumentLinks: boolean,
+): string {
   const interactive = mode === 'interactive';
+  const scriptSources = interactive
+    ? `'unsafe-inline' ${grantBase}`
+    : hasDocumentLinks
+      ? LINK_RELAY_HASH
+      : "'none'";
   return [
     "default-src 'none'",
-    interactive ? `script-src 'unsafe-inline' ${grantBase}` : "script-src 'none'",
+    `script-src ${scriptSources}`,
     `style-src 'unsafe-inline' ${grantBase}`,
     `img-src ${grantBase} data:`,
     `font-src ${grantBase}`,
@@ -43,7 +56,7 @@ function documentCsp(mode: HtmlMode, grantBase: string, ancestors: string[]): st
     "base-uri 'none'",
     "form-action 'none'",
     `frame-ancestors ${ancestors.length > 0 ? ancestors.join(' ') : "'none'"}`,
-    interactive ? 'sandbox allow-scripts' : 'sandbox',
+    interactive || hasDocumentLinks ? 'sandbox allow-scripts' : 'sandbox',
   ].join('; ');
 }
 
@@ -59,7 +72,7 @@ function headersFor(file: PreviewFile, origin: string, ancestors: string[]) {
     'Cache-Control': 'no-store',
     'Content-Security-Policy':
       file.role === 'document'
-        ? documentCsp(file.mode, `${origin}/r/${file.grant}/`, ancestors)
+        ? documentCsp(file.mode, `${origin}/r/${file.grant}/`, ancestors, file.hasDocumentLinks)
         : ASSET_CSP,
   };
   // A sandboxed document has no origin, so loading fonts and the like is cross-origin.

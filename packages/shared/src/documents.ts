@@ -379,6 +379,7 @@ export type HtmlModeChangeParams = z.input<typeof htmlModeChangeParamsSchema>;
 export const linkOpenParamsSchema = z.strictObject({
   documentId: documentIdSchema,
   revision: revisionSchema,
+  mode: htmlModeSchema,
   linkId: z.string().regex(/^lnk_\d{4,}$/),
   // Identifier of the confirmation to open an unregistered document. Send back what the confirmation-required response returned, unchanged.
   // Bound to the confirmed document, revision, link and target, and usable only once.

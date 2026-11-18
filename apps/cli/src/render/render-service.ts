@@ -8,6 +8,7 @@ import {
   VdeError,
   type DocumentFormat,
   type HtmlMode,
+  type LinkOpenParams,
   type RenderDiagnostic,
   type RenderGrantResult,
   type RenderLink,
@@ -25,8 +26,8 @@ export interface PreviewFile {
   role: 'document' | AssetRole;
   // The secret part of the preview URL. Used in the response CSP to allow only this view.
   grant: string;
-  // The document's view mode. Only interactive documents are served with a CSP that allows scripts.
   mode: HtmlMode;
+  hasDocumentLinks: boolean;
 }
 
 type SnapshotFile =
@@ -83,8 +84,10 @@ export interface RenderService {
   release(grants: string[]): number;
   // The file a preview URL points to. null if the grant is invalid or the path is not registered.
   resolve(grant: string, logicalPath: string): Promise<PreviewFile | null>;
-  // A link in the document, for the displayed revision.
-  linkOf(documentId: string, revision: string, linkId: string): Promise<RenderLink>;
+  // A link in the document, for the displayed revision and mode.
+  linkOf(
+    params: Pick<LinkOpenParams, 'documentId' | 'revision' | 'mode' | 'linkId'>,
+  ): Promise<RenderLink>;
   // Revokes grants of closed documents. Grants from before a close do not come back on reopen.
   pruneClosed(): void;
   // Unregistered files the specified view tried to load.
@@ -122,7 +125,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
   const snapshotOf = async (
     documentId: string,
     revision: string | undefined,
-    mode: HtmlMode = 'static',
+    mode: HtmlMode,
     withSdk = false,
   ) => {
     const { record, entry } = documents.describeRevision(documentId, revision);
@@ -454,7 +457,15 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
             : await store.readBlob(file.sha256);
       // If the grant was revoked while reading the content, do not serve it.
       if (!liveGrant(key)) return null;
-      return { body, mime: file.mime, role: file.role, grant: key, mode: grant.mode };
+      return {
+        body,
+        mime: file.mime,
+        role: file.role,
+        grant: key,
+        mode: grant.mode,
+        hasDocumentLinks:
+          file.role === 'document' && grant.snapshot.links.some((link) => link.kind === 'document'),
+      };
     },
 
     missingOf(key) {
@@ -469,8 +480,8 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       }
     },
 
-    async linkOf(documentId, revision, linkId) {
-      const { snapshot } = await snapshotOf(documentId, revision);
+    async linkOf({ documentId, revision, mode, linkId }) {
+      const { snapshot } = await snapshotOf(documentId, revision, mode);
       const link = snapshot.links.find((candidate) => candidate.linkId === linkId);
       if (!link) {
         throw new VdeError('E_LINK_NOT_FOUND', 'The link was not found.', { documentId, linkId });

@@ -545,7 +545,7 @@ export async function startManagementServer(
       documentId: c.req.param('id'),
       linkId: c.req.param('linkId'),
     });
-    const link = await deps.render.linkOf(params.documentId, params.revision, params.linkId);
+    const link = await deps.render.linkOf(params);
     return ok(
       c,
       'documents.link-open',

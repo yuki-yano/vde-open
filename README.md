@@ -77,9 +77,10 @@ ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skill
 
 ## HTML display limits
 
-- By default (static), scripts do not run. Scripts, event attributes, iframe/object/embed, base, automatic navigation (meta refresh), form targets, and external images, CSS, and fonts are removed. Links cannot be clicked inside the view; open them from "Links in this document".
+- By default (Static), the view removes the document's scripts, event attributes, iframe/object/embed, base, automatic navigation (meta refresh), form targets, and external images, CSS, and fonts.
+- In Static and Interactive, select a local document link in the preview to switch to an open document or confirm opening a new one. Heading links jump within the preview. Open external links from "Links in this document".
 - Only files that the document references, inside the assets root (by default the document's directory), can be loaded. Files whose names start with "." such as `.env` and `.git` are never loaded. Set the scope with `--assets-root` and individual files with `--asset`.
-- Scripts run only in HTML opened with `--html-mode interactive`. Use it only with HTML that you or the agent prepared and trust: scripts can load only registered files and cannot reach the management UI, the management API, or other files, but this does not block every outbound request (navigation inside the view, for example). After the daemon restarts, the HTML is static until you allow scripts again in the management UI.
+- Document scripts run only in Interactive HTML. You can enable it with `--html-mode interactive` or allow scripts in the management UI. Use it only with HTML that you or the agent prepared and trust: scripts can load only registered files and cannot reach the management UI, the management API, or other files, but this does not block every outbound request (navigation inside the view, for example). After the daemon restarts, the HTML is static until you allow scripts again in the management UI.
 - "Differences" in the management UI lists what the view changed, why, and what to do.
 
 ## Markdown display

@@ -586,6 +586,24 @@ describe('SEC-015 expiry of render grants', () => {
 });
 
 describe('SEC-016 / SEC-017 responses of the preview listener', () => {
+  it('allows only the hash of the app relay in Static HTML with local document links', async () => {
+    t.write('site/index.html', '<script>window.author = true</script><a href="./next.md">次</a>');
+    const document = await open(['site/index.html']);
+    const ui = await connectUi(t);
+    const grant = await ui.grant(document.documentId);
+    const html = await previewGet(ui, grant, 'index.html');
+    expect(html.status).toBe(200);
+    expect(html.text.match(/<script\b/g)).toHaveLength(1);
+    expect(html.text).not.toContain('window.author');
+    const relay = /<script>([\s\S]*?)<\/script>/.exec(html.text)?.[1] ?? '';
+    const hash = createHash('sha256').update(relay).digest('base64');
+    const csp = String(html.headers['content-security-policy']).split('; ');
+    expect(csp.find((directive) => directive.startsWith('script-src '))).toBe(
+      `script-src 'sha256-${hash}'`,
+    );
+    expect(csp).toContain('sandbox allow-scripts');
+  });
+
   it('attaches the load allowance only to assets such as fonts, not to the document', async () => {
     t.write('site/index.html', '<link rel="stylesheet" href="s.css"><img src="a.png"><p>本文</p>');
     t.write('site/s.css', '@font-face{font-family:f;src:url(f.woff2)}');
@@ -926,7 +944,7 @@ describe('SEC-019 opening documents from links in a document', () => {
     (ui: UiClient, documentId: string) => (linkId: string, body: Record<string, unknown>) =>
       ui.api<LinkResult>(`/documents/${documentId}/links/${linkId}/open`, {
         method: 'POST',
-        body,
+        body: { mode: 'static', ...body },
       });
   const titles = async () => (await list()).map((entry) => entry.title);
 

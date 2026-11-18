@@ -11,7 +11,7 @@ const DESCRIPTIONS: Record<string, Describe> = {
   'asset-scan-failed': () =>
     'Scanning the files this document references did not finish in time or exceeded the structure limits, so images and CSS were not registered. Run vo refresh <document ID> to scan again.',
   'script-removed': (_target, count) =>
-    `Removed ${plural(count, 'script')}. Scripts do not run in this view, so content that scripts would create is not shown.`,
+    `Removed ${plural(count, 'script')}. Content created by the document's scripts is unavailable in Static.`,
   'script-not-loaded': (_target, count) =>
     `Removed ${plural(count, 'script')} that could not be loaded (referencing unregistered files or external URLs).`,
   'noscript-removed': (_target, count) =>
@@ -50,7 +50,7 @@ const DESCRIPTIONS: Record<string, Describe> = {
   'css-invalid': (target) =>
     `${target === '' ? 'The CSS in the document' : target} has parts that could not be parsed, and those parts were disabled.`,
   'link-disabled': (_target, count) =>
-    `Links in this document (${String(count)}) cannot be clicked inside the view. Open them from the "Links in this document" list.`,
+    `${plural(count, 'link')} unavailable in the preview. See "Links in this document" for available actions.`,
 };
 
 export function describeDiagnostic(diagnostic: RenderDiagnostic): string {

@@ -22,7 +22,7 @@ export interface RenderInput {
   stylesheets: Array<{ logicalPath: string; text: string }>;
   // HTML mode. interactive keeps registered scripts and event handlers.
   mode: 'static' | 'interactive';
-  // SDK inserted as the first script into interactive HTML. null to insert none.
+  // SDK inserted before author scripts in interactive HTML. null to insert none.
   sdkScript: string | null;
 }
 
@@ -65,6 +65,7 @@ export function renderDocument(input: RenderInput): RenderOutput {
   const result = transformStaticHtml(
     {
       ...staticInput,
+      relayDocumentLinks: true,
       interactive: input.mode === 'interactive',
       ...(input.mode === 'interactive' && input.sdkScript !== null
         ? { sdkScript: input.sdkScript }

@@ -156,15 +156,15 @@ function HtmlViewDetails({
     <>
       <p>Buttons and text inside the view belong to the opened document, rather than this app.</p>
       <p>
-        Links and form submission inside the view are disabled. Open links from “Links in this
-        document”.
+        Links to local documents and headings work in the preview. Open external links from “Links
+        in this document”. Forms are display-only.
       </p>
       {running ? (
         <p>
           <ScriptLimits />
         </p>
       ) : (
-        <p>Scripts do not run in this view.</p>
+        <p>Scripts from the document are off in this view.</p>
       )}
       {pinnedStatic && (
         <p>

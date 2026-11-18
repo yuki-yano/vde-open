@@ -77,9 +77,10 @@ ln -s ~/.bun/install/global/node_modules/vde-open/skills/vde-open ~/.codex/skill
 
 ## HTMLの表示の制限
 
-- 既定（static）では、scriptを動かしません。script、event属性、iframe・object・embed、base、自動の移動（meta refresh）、formの送信先、外部の画像・CSS・fontを取り除きます。linkは表示の中では押せず、「Links in this document」の一覧から開きます。
+- 既定の Static では、文書のscript、event属性、iframe・object・embed、base、自動の移動（meta refresh）、formの送信先、外部の画像・CSS・fontを取り除きます。
+- Static と Interactive では、プレビュー本文からローカル文書へのリンクを開けます。開いている文書にはそのまま切り替わり、新しく開く場合はパスを表示して確認します。見出しへのリンクはプレビュー内で移動します。外部リンクは「Links in this document」から開けます。
 - 読み込めるのは、文書が参照する、assets-root（既定は文書のあるdirectory）の中のfileだけです。`.env`や`.git`など名前が「.」で始まるfileは読み込みません。範囲は`--assets-root`、個別のfileは`--asset`で指定します。
-- `--html-mode interactive`を指定したHTMLだけ、scriptを動かします。自分やAgentが用意した、信頼できるHTMLだけで使ってください。scriptが読み込めるのは登録したfileだけで、管理画面・管理API・fileには触れられませんが、表示の中でのpageの移動など、すべての外部への通信を止めるものではありません。daemonを起動し直すと、管理画面で許可し直すまで静的表示になります。
+- 文書のscriptは Interactive で実行します。`--html-mode interactive`を指定するか、管理画面でscriptを許可すると切り替わります。自分やAgentが用意した、信頼できるHTMLだけで使ってください。scriptが読み込めるのは登録したfileだけで、管理画面・管理API・fileには触れられませんが、表示の中でのpageの移動など、すべての外部への通信を止めるものではありません。daemonを起動し直すと、管理画面で許可し直すまで静的表示になります。
 - 元の文書と表示が違う点は、管理画面の「Differences」に、対象・理由・対処とともに表示します。
 
 ## Markdownの表示
