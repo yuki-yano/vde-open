@@ -19,6 +19,7 @@ let events: DocumentEvent[];
 let reads: string[];
 let analyzedFormats: DocumentFormat[];
 let service: DocumentService;
+let fixedTime: Date | null;
 // Max number of concurrent reads of the same file.
 let maxConcurrentReads: number;
 
@@ -59,6 +60,7 @@ beforeEach(async () => {
   events = [];
   reads = [];
   analyzedFormats = [];
+  fixedTime = null;
   gates = new Map();
   afterRead = (loaded) => loaded;
   maxConcurrentReads = 0;
@@ -66,6 +68,7 @@ beforeEach(async () => {
   service = new DocumentService({
     store,
     cursors: createCursorCodec(randomBytes(32)),
+    now: () => fixedTime ?? new Date(),
     emit: (event) => events.push(event),
     analyze: (format, text) => {
       analyzedFormats.push(format);
@@ -113,6 +116,19 @@ function holdNextRead(where: 'before' | 'after'): Gate {
 
 // Waits long enough for other work to proceed if it is not blocked.
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+it('keeps the opening order of a batch recorded in the same millisecond', async () => {
+  fixedTime = new Date('2026-11-18T00:00:00Z');
+  for (const title of ['A', 'B', 'C']) write(`${title}.md`, `# ${title}\n`);
+  const { data } = await service.open({ cwd: base, paths: ['A.md', 'B.md', 'C.md'] });
+  const openedAt = data.documents.map((document) => document.openedAt);
+  expect(new Set(openedAt).size).toBe(3);
+  expect(openedAt).toEqual(openedAt.toSorted());
+
+  await service.focus({ documentId: data.documents[2]?.documentId });
+  await service.close({ cwd: base, targets: ['C.md'] });
+  expect(store.payload.activeDocumentId).toBe(data.documents[1]?.documentId);
+});
 
 describe('ordering of "read then publish" for the same file', () => {
   it('when an earlier refresh reads newer content later, a later refresh does not overwrite it with older content', async () => {

@@ -21,6 +21,7 @@ import {
   closeParamsSchema,
   documentIdSchema,
   htmlModeChangeParamsSchema,
+  lastOpenedDocument,
   LIMITS,
   listParamsSchema,
   openParamsSchema,
@@ -264,6 +265,10 @@ export function pruneRevisions(
       now - Date.parse(entry.createdAt) < LIMITS.revisionGraceMs
     );
   });
+}
+
+function lastOpenedRecord(state: StatePayload): DocumentRecord | undefined {
+  return lastOpenedDocument(state.openOrder.flatMap((id) => state.documents[id] ?? []));
 }
 
 function openSourceBytes(state: StatePayload): number {
@@ -1178,6 +1183,15 @@ export class DocumentService {
       assetScan: item.assetScanFailed ? 'failed' : 'complete',
     };
 
+    let openedAt = timestamp;
+    if (!existing?.isOpen) {
+      const latest = lastOpenedRecord(state);
+      // A batch can register more than one document in the same millisecond.
+      if (latest && latest.openedAt >= timestamp) {
+        openedAt = new Date(Date.parse(latest.openedAt) + 1).toISOString();
+      }
+    }
+
     if (!existing) {
       const documentId = `doc_${randomUUID()}`;
       const htmlMode: HtmlMode = options.htmlMode ?? 'static';
@@ -1192,7 +1206,7 @@ export class DocumentService {
         displayPath: item.displayPath,
         pathSegments: item.pathSegments,
         isOpen: true,
-        openedAt: timestamp,
+        openedAt,
         updatedAt: timestamp,
         sourceState: 'ready',
         currentRevision: revision,
@@ -1210,7 +1224,7 @@ export class DocumentService {
     let revisionChanged = false;
     if (!existing.isOpen) {
       existing.isOpen = true;
-      existing.openedAt = timestamp;
+      existing.openedAt = openedAt;
       state.openOrder.push(existing.documentId);
       changed = true;
       openSetChanged = true;
@@ -1765,7 +1779,7 @@ export class DocumentService {
       if (closed.length > 0) {
         state.openOrder = state.openOrder.filter((documentId) => !closed.includes(documentId));
         if (state.activeDocumentId !== null && closed.includes(state.activeDocumentId)) {
-          state.activeDocumentId = state.openOrder[0] ?? null;
+          state.activeDocumentId = lastOpenedRecord(state)?.documentId ?? null;
         }
         state.catalogVersion += 1;
         changed = true;

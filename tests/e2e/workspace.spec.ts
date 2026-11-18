@@ -149,6 +149,62 @@ test('removing from the list keeps the file', async ({ page }) => {
   expect(existsSync(join(t.work, 'a.md'))).toBe(true);
 });
 
+test('closing the displayed document returns to the last document opened, regardless of sidebar order', async ({
+  page,
+}) => {
+  for (const title of ['A', 'B', 'C', 'D']) t.write(`${title}.md`, `# ${title}\n`);
+  const { documents } = await t.json<{ documents: Array<{ documentId: string }> }>([
+    'open',
+    'A.md',
+    'B.md',
+    'C.md',
+    'D.md',
+  ]);
+  const [a, , c, d] = documents.map(({ documentId }) => documentId);
+  await page.goto(await t.uiUrl());
+  const sidebar = sidebarOf(page);
+  const row = (title: string) => sidebar.getByRole('button', { name: title, exact: true });
+  const shown = page.getByTestId('document-body').getByRole('heading', { level: 1 });
+  const closeFromSidebar = async (title: string) => {
+    await row(title).hover();
+    await sidebar.getByRole('button', { name: `Remove ${title} from the list` }).click();
+    await expect(row(title)).toHaveCount(0);
+  };
+  const daemonSelection = async () => {
+    const status = await page.request.get(new URL('/_/api/v1/status', page.url()).href);
+    expect(status.ok()).toBe(true);
+    return ((await status.json()) as { data: { activeDocumentId: string | null } }).data
+      .activeDocumentId;
+  };
+
+  const reordered = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/documents/order') && response.request().method() === 'PUT',
+  );
+  await row('C').press('Alt+ArrowUp');
+  expect((await reordered).ok()).toBe(true);
+  await expect(sidebar.locator('button[data-document-id]')).toHaveText([/^A/, /^C/, /^B/, /^D/]);
+  await row('D').press('Enter');
+  await expect(shown).toHaveText('D');
+  await closeFromSidebar('D');
+  await expect(shown).toHaveText('C');
+  await expect(page).toHaveURL(new RegExp(`[?&]document=${c}`));
+  expect(await daemonSelection()).toBe(a);
+
+  await closeFromSidebar('B');
+  await expect(shown).toHaveText('C');
+  await t.json(['open', 'D.md']);
+  await expect(shown).toHaveText('C');
+  await t.json(['focus', a!]);
+  await t.json(['focus', c!]);
+  await t.json(['close', c!]);
+  await expect(shown).toHaveText('D');
+  expect(await daemonSelection()).toBe(d);
+
+  await closeFromSidebar('D');
+  await expect(shown).toHaveText('A');
+});
+
 test('shows every heading even when the outline does not fit in one response', async ({ page }) => {
   // A document whose outline JSON exceeds the per-response limit (1MiB).
   const headings = Array.from(

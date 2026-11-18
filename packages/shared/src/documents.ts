@@ -115,6 +115,22 @@ export const documentSummarySchema = z.strictObject({
 });
 export type DocumentSummary = z.infer<typeof documentSummarySchema>;
 
+export function lastOpenedDocument<T extends Pick<DocumentSummary, 'documentId' | 'openedAt'>>(
+  documents: readonly T[],
+): T | undefined {
+  let latest: T | undefined;
+  for (const document of documents) {
+    if (
+      latest === undefined ||
+      document.openedAt > latest.openedAt ||
+      (document.openedAt === latest.openedAt && document.documentId > latest.documentId)
+    ) {
+      latest = document;
+    }
+  }
+  return latest;
+}
+
 export const sourceRangeSchema = z.strictObject({
   startByte: z.number().int().nonnegative(),
   endByteExclusive: z.number().int().nonnegative(),

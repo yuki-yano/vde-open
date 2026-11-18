@@ -1,4 +1,9 @@
-import type { DocumentSummary, SearchHit, ServerEvent } from '@vde-open/shared';
+import {
+  lastOpenedDocument,
+  type DocumentSummary,
+  type SearchHit,
+  type ServerEvent,
+} from '@vde-open/shared';
 import { Menu, Monitor, Moon, Palette, Search, Sun, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 
@@ -212,16 +217,22 @@ export function Workspace({ api }: { api: Api }) {
           : { ...current, initialized: true, history: 'replace' };
       }
       // On first load, the document in the URL comes first (with the heading the URL keeps for it), then the one the
-      // daemon remembers. Afterwards (the shown document was closed), the first in the list.
+      // daemon remembers.
       const fromUrl = documentInUrl();
       const preferred = current.initialized
         ? null
         : ([fromUrl, status.activeDocumentId].find(isOpen) ?? null);
       const heading = preferred !== null && preferred === fromUrl ? headingInUrl() : null;
       const restores = current.restores + 1;
+      // A missing focus target in the same catalog was never shown. Closing it advances the catalog version.
+      const wasClosed =
+        current.initialized &&
+        current.activeId !== null &&
+        (current.requestedAt === 0 || list.catalogVersion > current.requestedAt);
+      const nextDocument = wasClosed ? lastOpenedDocument(list.documents) : list.documents[0];
       return {
         ...current,
-        activeId: preferred ?? list.documents[0]?.documentId ?? null,
+        activeId: preferred ?? nextDocument?.documentId ?? null,
         initialized: true,
         history: 'replace',
         requestedAt: 0,
