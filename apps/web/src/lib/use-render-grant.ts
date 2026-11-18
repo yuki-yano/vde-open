@@ -51,6 +51,9 @@ export interface GrantOptions {
   requestId: string | null;
   // A value that changes when refetching under the same conditions as a new view (a new instance).
   nonce: number;
+  // The daemon start the view belongs to. Grants die with their daemon, so a new start retires the view at once
+  // (the frame, images, and answer port go away) and a fresh grant is fetched from the new daemon.
+  daemonId?: string | null;
 }
 
 const STATIC_OPTIONS: GrantOptions = { mode: 'static', requestId: null, nonce: 0 };
@@ -68,13 +71,13 @@ export function useRenderGrant(
   updatedAt: string,
   options: GrantOptions = STATIC_OPTIONS,
 ): GrantState {
-  const { mode, requestId, nonce } = options;
+  const { mode, requestId, nonce, daemonId = null } = options;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   // The grant in use for the view, and what it is for (document and revision).
   const held = useRef<{ key: string; grant: string } | null>(null);
   // Grants retired from the view. Released after the screen update has been applied.
   const retired = useRef<string[]>([]);
-  const key = `${documentId}\n${revision ?? ''}\n${mode}\n${requestId ?? ''}\n${String(nonce)}`;
+  const key = `${daemonId ?? ''}\n${documentId}\n${revision ?? ''}\n${mode}\n${requestId ?? ''}\n${String(nonce)}`;
   const shown = loaded !== null && loaded.key === key ? loaded : null;
   const fetchToken = fetchTokenOf(shown, updatedAt);
   // The grant of the view this render puts on screen.

@@ -57,6 +57,8 @@ function packTarball(): string {
     'package/dist/workers/parse-worker.js',
     'package/dist/workers/search-worker.js',
     'package/dist/web/index.html',
+    // The phone reader's screen (ADR-0017).
+    'package/dist/web/mobile.html',
     'package/docs/agent-usage.md',
     'package/README.md',
     'package/LICENSE',
@@ -64,6 +66,29 @@ function packTarball(): string {
     'package/THIRD_PARTY_NOTICES.md',
   ]) {
     if (!entries.has(entry)) fail(`the tarball lacks ${entry}`);
+  }
+  // Every local file both screens reference (scripts, preloaded shared chunks, stylesheets) is in the package.
+  for (const html of ['index.html', 'mobile.html']) {
+    const page = captureCommand('tar', ['-xzOf', tarball, `package/dist/web/${html}`], {
+      cwd: repoRoot,
+    }).stdout;
+    const references = [...page.matchAll(/(?:src|href)="\/([^"]+)"/g)].map(
+      (match) => match[1] ?? '',
+    );
+    if (!references.some((reference) => reference.endsWith('.js')))
+      fail(`${html} references no script`);
+    for (const reference of references) {
+      if (!entries.has(`package/dist/web/${reference}`)) {
+        fail(`the tarball lacks ${reference}, referenced by ${html}`);
+      }
+    }
+  }
+  if (
+    ![...entries].some((entry) =>
+      /^package\/dist\/web\/assets\/markdown\.worker-[^/]+\.js$/.test(entry),
+    )
+  ) {
+    fail('the tarball lacks the Markdown worker');
   }
   for (const entry of entries) {
     if (entry.endsWith('bundled-modules.json'))
@@ -194,6 +219,8 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     ...process.env,
     PATH: `${dirname(process.execPath)}${delimiter}${process.env['PATH'] ?? ''}`,
     VDE_OPEN_HOME: stateHome,
+    // Do not take the fixed default ports a normal daemon may be using.
+    VDE_OPEN_TEST_EPHEMERAL_PORTS: '1',
     // No browser here: the PDF export step checks the print document up to looking for the browser.
     VDE_OPEN_BROWSER: join(installDir, 'no browser here'),
   };

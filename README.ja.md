@@ -53,7 +53,7 @@ vo close docs/design.md                  # 一覧から外す（fileは消さな
 vo daemon stop                           # daemonを止める
 ```
 
-管理画面は認証を行いません。`vo ui --print-url`で出るURLは、daemonが動いている間、同じ端末の別のbrowserやtabへコピーして開けます。文書を指定したURLも、そのまま開けます。配信は`127.0.0.1`だけで、別の端末からの閲覧には対応していません。
+管理画面は認証を行いません。URLは既定で`http://127.0.0.1:43180/`で、daemonを再起動しても変わらないため、ブックマークできます。開いたままのtabは`vo daemon restart`の後に再接続し、同じ文書を表示し直します（HTMLはスクリプトを再び許可するまでStatic表示に戻ります）。`vo ui --print-url`で出るURLは、同じ端末の別のbrowserやtabへコピーして開けます。文書を指定したURLも、そのまま開けます。配信はすべて`127.0.0.1`だけです。スマホから読むには[スマホからTailscale経由で読む](#スマホからtailscale経由で読む)を参照してください。
 
 Agentからの検索・読み取り・質問の方法は [docs/agent-usage.ja.md](docs/agent-usage.ja.md) にあります。
 
@@ -131,7 +131,37 @@ PNG/APNG、JPEG（`jpg`・`jpeg`・`jpe`・`jif`・`jfif`・`pjpeg`・`pjp`）�
   - Linux: `$XDG_STATE_HOME/vde-open`（未設定なら`~/.local/state/vde-open`）
   - Windows: `%LOCALAPPDATA%\vde-open`
 - daemonは`vo daemon stop`で止め、`vo daemon status`で状態を確かめます。
+- 待受ポートは、起動時に状態の保存先にある任意の`listeners.json`から読みます（`{"managementPort": 43180, "previewPort": 43181}`。どちらも既定値）。変更は次の起動から反映されます。`vo serve --port <n> --preview-port <n>`はその起動だけ値を上書きし、ファイルは書き換えません。ポートが使用中なら、起動は`E_DAEMON_START_FAILED`で失敗し、用途とポート番号を表示します。
 - 管理画面の配色・表示の切り替えなどはbrowserに保存します。
+
+## スマホからTailscale経由で読む
+
+このMacで開いている文書を自分のスマホで読み、PCで許可したHTMLデモをタップやドラッグで操作できます。スマホでできるのは一覧と閲覧だけです。文書を開く・閉じる・並べ替える・focusする、質問に回答する、スクリプトを許可する、といった操作はできません。スマホで文書を選んでもPCの表示は変わりません。
+
+```bash
+vo mobile enable     # 設定して、スマホでブックマークするURLを表示する
+vo mobile status     # 設定・daemonの状態・Serveの転送を確かめる
+vo mobile disable    # 設定と、readerの転送を外す
+```
+
+`vo mobile enable`は、`tailscale status`からこのMacのTailscaleの名前と自分のログイン名を読み、状態の保存先の`listeners.json`に書き込みます（他の設定は残します）。続けてdaemonを再起動し、Tailscale Serveの転送を2件（`https://<host>:43182`と`:43183`を`127.0.0.1`の同じポートへ）追加します。他のServe設定は変えません。どちらかのポートが別の用途に使われていれば、何も変えずに止まります。Serveを自分で設定する場合は`--no-serve`を付けます。ServeのCLIには条件付きの変更がないため、転送は追加・削除の直前に毎回確かめます。その一瞬に別のプログラムが作った転送は、置き換わる可能性があります。表示された`https://<host>:43182/`を、同じtailnetにログインしたスマホで開いてブックマークしてください。daemonを再起動しても変わりません。
+
+手動で設定する場合は、`listeners.json`に次を書いてdaemonを再起動し、`tailscale serve --bg --https=43182 http://127.0.0.1:43182`と、43183の同じ転送を追加します。
+
+```json
+{
+  "mobile": {
+    "host": "example-mac.example-tailnet.ts.net",
+    "login": "person@example.com",
+    "uiPort": 43182,
+    "previewPort": 43183
+  }
+}
+```
+
+`uiPort`と`previewPort`の既定は43182と43183です。互いに、またPCのポートと別の番号にし、443は使えません。`vo daemon status`に`phone reader: ready <URL>`、または`error`と理由が出ます（どちらでもPCは動き続けます）。
+
+両方のポートで、すべてのrequestに設定した`Host`と、`login`と一致する`Tailscale-User-Login`がちょうど1つ必要です（Serveがログイン中の本人の分を付けます）。それ以外は拒否します。Tailscaleのログインが変わったら、`vo mobile enable`をもう一度実行してください。2つのポートに届く端末は、tailnetの接続ルールでも限定してください。HTMLのスクリプトは、PCで許可している間だけスマホでも動きます（`vo open --html-mode interactive demo.html`。読み込むファイルは`--asset`で登録）。再起動後の再許可、許可の取り消し、文書を閉じる・保存すると、スマホの表示は差し替えるか取り外します。Serveの転送はdaemonの停止中も残ります。ポートを他の用途に回す前に`vo mobile disable`（または`tailscale serve --https=43182 off`と43183の同じ操作）で外してください。`vo mobile disable`は、readerと同じ形の転送（そのHTTPSポートの`/`を`127.0.0.1`の同じポートへ）を、手動で作ったものも含めて外します。Serveをそのまま残すには`vo mobile disable --no-serve`を使います。
 
 ## 人への質問と回答
 

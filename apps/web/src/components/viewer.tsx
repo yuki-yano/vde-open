@@ -101,6 +101,8 @@ const SOURCE_STATE: Record<string, string> = {
 export interface ViewerProps {
   api: Api;
   document: DocumentSummary;
+  // The daemon start the shown list came from. A new start replaces the view with one from the new daemon.
+  daemonId?: string | null;
   // The revision pinned by a question awaiting an answer. If set, keep showing it even when a newer revision arrives (spec 11.4).
   fixedRevision?: string | null;
   // The question for this document. If it is a pending question created in interactive mode, accept draft answers from the HTML.
@@ -168,6 +170,7 @@ export function Viewer(props: ViewerProps) {
 function TextViewer({
   api,
   document,
+  daemonId = null,
   fixedRevision = null,
   request = null,
   renderSignal = 0,
@@ -299,6 +302,7 @@ function TextViewer({
     mode: interactive ? 'interactive' : 'static',
     requestId: pinnedRequestId,
     nonce: frameNonce,
+    daemonId,
   });
   const grant = grantState.status === 'ready' ? grantState.grant : null;
   const missing = useMissingAssets(api, grant?.grant ?? null, renderSignal);

@@ -13,6 +13,7 @@ type ImageResult = { url: string; failed: boolean };
 export function ImageViewer({
   api,
   document,
+  daemonId = null,
   fixedRevision = null,
   request = null,
   waitingForRequest = false,
@@ -30,6 +31,7 @@ export function ImageViewer({
     mode: 'static',
     requestId: fixedRevision !== null && request?.status === 'pending' ? request.requestId : null,
     nonce: 0,
+    daemonId,
   });
   const url = grant.status === 'ready' ? grant.grant.documentUrl : null;
   const settled = result !== null && result.url === url;
@@ -147,7 +149,8 @@ function ImageHeader({
   );
 }
 
-function ImageCanvas({
+// The image itself: fit or actual size, a load and decode failure message. Shared with the phone reader.
+export function ImageCanvas({
   url,
   title,
   actualSize,

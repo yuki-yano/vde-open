@@ -53,7 +53,7 @@ vo close docs/design.md                  # remove from the list (the file is not
 vo daemon stop                           # stop the daemon
 ```
 
-The management UI does not require authentication. The URL printed by `vo ui --print-url` can be copied to another browser or tab on the same machine while the daemon is running. URLs that select a document work directly too. Both listeners bind to `127.0.0.1`; viewing from another machine is not supported.
+The management UI does not require authentication. Its URL is `http://127.0.0.1:43180/` by default and stays the same across daemon restarts, so it can be bookmarked; an open tab reconnects after `vo daemon restart` and shows the same document again (HTML returns to the static view until scripts are allowed again). The URL printed by `vo ui --print-url` can be copied to another browser or tab on the same machine. URLs that select a document work directly too. All listeners bind to `127.0.0.1`. To read on your phone, see [Reading on your phone over Tailscale](#reading-on-your-phone-over-tailscale).
 
 For how agents search, read, and ask questions, see [docs/agent-usage.md](docs/agent-usage.md).
 
@@ -131,7 +131,37 @@ Images are searchable by title and path (`vo search diagram --mode path`). Text 
   - Linux: `$XDG_STATE_HOME/vde-open` (or `~/.local/state/vde-open` if unset)
   - Windows: `%LOCALAPPDATA%\vde-open`
 - Stop the daemon with `vo daemon stop`, and check it with `vo daemon status`.
+- The listen ports are read from an optional `listeners.json` in the state directory when the daemon starts (`{"managementPort": 43180, "previewPort": 43181}`; both are the defaults). Changes apply on the next start. `vo serve --port <n> --preview-port <n>` overrides them for that run only and does not change the file. If a port is in use, starting fails with `E_DAEMON_START_FAILED`, naming the listener and the port.
 - Management UI preferences such as the color theme and the view mode are stored in the browser.
+
+## Reading on your phone over Tailscale
+
+The documents open on this machine can be read on your own phone, and HTML demos that you allowed on the PC can be tapped and dragged there. The phone gets a list and a reader only: it cannot open, close, reorder, or focus documents, answer questions, or allow scripts. Choosing a document on the phone never changes what the PC shows.
+
+```bash
+vo mobile enable     # set up and print the URL to bookmark on your phone
+vo mobile status     # settings, the daemon's state, and the Serve forwards
+vo mobile disable    # remove the settings and the reader's forwards
+```
+
+`vo mobile enable` reads this machine's Tailscale name and your Tailscale login from `tailscale status`, writes them to `listeners.json` in the state directory (other settings are kept), restarts the daemon, and adds the two Tailscale Serve forwards (`https://<host>:43182` and `:43183` to the same ports on `127.0.0.1`). It never changes another Serve setting: if either port is used for something else, it stops without changing anything. `--no-serve` leaves Serve to you. Serve's CLI cannot make a change conditional, so each forward is checked right before it is added or removed; one made by another program in that instant could still be replaced. Then open the printed `https://<host>:43182/` on your phone (signed in to the same tailnet) and bookmark it; it stays the same across daemon restarts.
+
+To set it up by hand instead, add this to `listeners.json` and restart the daemon, then add the forwards with `tailscale serve --bg --https=43182 http://127.0.0.1:43182` and the same for 43183:
+
+```json
+{
+  "mobile": {
+    "host": "example-mac.example-tailnet.ts.net",
+    "login": "person@example.com",
+    "uiPort": 43182,
+    "previewPort": 43183
+  }
+}
+```
+
+`uiPort` and `previewPort` default to 43182 and 43183, must differ from each other and from the PC ports, and cannot be 443. `vo daemon status` shows `phone reader: ready <URL>`, or `error` with the reason (the PC keeps working either way).
+
+Every request on both ports must carry the `Host` you configured and exactly one `Tailscale-User-Login` equal to `login`, which Serve adds for the signed-in person; anything else is refused. If your Tailscale login changes, run `vo mobile enable` again. Restrict which devices may reach the two ports with your tailnet access rules as well. HTML runs scripts on the phone only while the PC allows them (`vo open --html-mode interactive demo.html`, with `--asset` for files it loads); allowing again after a restart, revoking, closing, or saving the document replaces or removes the phone's view. The Serve forwards stay while the daemon is stopped; before giving the ports another use, run `vo mobile disable` (or `tailscale serve --https=43182 off` and the same for 43183). `vo mobile disable` removes every forward that has exactly the reader's shape (`/` on that HTTPS port to the same port on `127.0.0.1`), including one you made by hand; to keep Serve as it is, use `vo mobile disable --no-serve`.
 
 ## Asking a person and getting answers
 

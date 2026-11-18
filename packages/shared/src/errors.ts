@@ -24,14 +24,19 @@ export const ERROR_SPECS = {
   E_SECTION_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   E_REQUEST_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
   E_BROWSER_NOT_FOUND: { exit: ExitCode.notFound, retryable: false },
+  E_TAILSCALE_UNAVAILABLE: { exit: ExitCode.notFound, retryable: false },
   // Conflicts, revision mismatches
   E_KEY_CONFLICT: { exit: ExitCode.conflict, retryable: false },
   E_REVISION_UNAVAILABLE: { exit: ExitCode.conflict, retryable: false },
   E_INVALID_CURSOR: { exit: ExitCode.conflict, retryable: false },
   E_CURSOR_STALE: { exit: ExitCode.conflict, retryable: false },
+  // The phone asked for a revision or view generation that is no longer current. It fetches the list again.
+  E_VIEW_STALE: { exit: ExitCode.conflict, retryable: false },
   E_CATALOG_CONFLICT: { exit: ExitCode.conflict, retryable: true },
   E_PENDING_REQUEST_EXISTS: { exit: ExitCode.conflict, retryable: false },
   E_OPERATION_CONFLICT: { exit: ExitCode.conflict, retryable: false },
+  // A Tailscale Serve port is already used for something else (vo mobile enable changes nothing then).
+  E_SERVE_CONFLICT: { exit: ExitCode.conflict, retryable: false },
   E_DRAFT_CONFLICT: { exit: ExitCode.conflict, retryable: false },
   E_SUBMISSION_CONFLICT: { exit: ExitCode.conflict, retryable: false },
   E_REQUEST_NOT_PENDING: { exit: ExitCode.conflict, retryable: false },
@@ -62,6 +67,7 @@ export const ERROR_SPECS = {
   // I/O, state corruption, internal
   E_IO: { exit: ExitCode.internal, retryable: false },
   E_EXPORT_FAILED: { exit: ExitCode.internal, retryable: false },
+  E_TAILSCALE_FAILED: { exit: ExitCode.internal, retryable: false },
   E_STORAGE_WRITE_FAILED: { exit: ExitCode.internal, retryable: true },
   E_COMMIT_INDETERMINATE: { exit: ExitCode.internal, retryable: true },
   E_STATE_CORRUPT: { exit: ExitCode.internal, retryable: false },

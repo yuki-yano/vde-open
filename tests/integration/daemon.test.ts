@@ -96,7 +96,9 @@ describe('SYS-001 status when the daemon is not running', () => {
       daemonId: null,
       pid: null,
     });
-    // Does not create the state root either.
+    // Does not create the state root either, and neither does doctor.
+    expect(existsSync(t.home)).toBe(false);
+    await t.run(['doctor', '--json']);
     expect(existsSync(t.home)).toBe(false);
     expect(
       (await t.run(['daemon', 'stop', '--json'])).json<{ wasRunning: boolean }>().data.wasRunning,
@@ -547,7 +549,7 @@ describe('foreground daemon', () => {
     const { cliEntry } = await import('./harness.ts');
     const child = spawn(process.execPath, [cliEntry, 'serve'], {
       cwd: t.work,
-      env: { ...process.env, VDE_OPEN_HOME: t.home },
+      env: { ...process.env, VDE_OPEN_HOME: t.home, VDE_OPEN_TEST_EPHEMERAL_PORTS: '1' },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     children.push(child);
@@ -570,5 +572,66 @@ describe('foreground daemon', () => {
     expect((await status()).state).toBe('stopped');
     expect(lockIsHeld()).toBe(false);
     renameSync(join(t.home, 'logs'), join(t.home, 'logs-kept'));
+  });
+});
+
+describe('fixed listener ports', () => {
+  interface UiStatus {
+    uiUrl: string;
+    daemonId: string;
+  }
+  const uiStatus = async () => (await t.run(['daemon', 'status', '--json'])).json<UiStatus>().data;
+
+  it('restart keeps the URL saved in listeners.json and the document, with a new daemonId', async () => {
+    t.write('a.md', '# a\n');
+    expect((await t.run(['open', 'a.md', '--no-open', '--json'])).exitCode).toBe(0);
+    const first = await uiStatus();
+    // Save the ports this start got, as a user would after the first run.
+    const preview = (
+      (await (await fetch(`${first.uiUrl}_/api/v1/status`)).json()) as {
+        data: { previewOrigin: string };
+      }
+    ).data.previewOrigin;
+    writeFileSync(
+      join(t.home, 'listeners.json'),
+      JSON.stringify({
+        managementPort: Number(new URL(first.uiUrl).port),
+        previewPort: Number(new URL(preview).port),
+      }),
+    );
+    expect((await t.run(['daemon', 'restart', '--json'])).exitCode).toBe(0);
+    expect((await t.run(['daemon', 'restart', '--json'])).exitCode).toBe(0);
+    const second = await uiStatus();
+    expect(second.uiUrl).toBe(first.uiUrl);
+    expect(second.daemonId).not.toBe(first.daemonId);
+    expect((await t.run(['ui', '--print-url'])).stdout.trim()).toBe(first.uiUrl);
+    expect(await listIds()).toHaveLength(1);
+  });
+
+  it('auto-start on a busy port reports the listener and port (JSON and text) and leaves no daemon', async () => {
+    const { createServer } = await import('node:net');
+    const busy = createServer();
+    await new Promise<void>((resolve) => busy.listen(0, '127.0.0.1', resolve));
+    const port = (busy.address() as { port: number }).port;
+    try {
+      mkdirSync(t.home, { recursive: true, mode: 0o700 });
+      writeFileSync(join(t.home, 'listeners.json'), JSON.stringify({ managementPort: port }));
+      t.write('a.md', '# a\n');
+      const json = await t.run(['open', 'a.md', '--no-open', '--json']);
+      expect(json.exitCode).not.toBe(0);
+      expect(json.json().error).toMatchObject({
+        code: 'E_DAEMON_START_FAILED',
+        details: { listener: 'management', port, cause: 'EADDRINUSE' },
+      });
+      const text = await t.run(['open', 'a.md', '--no-open']);
+      expect(text.stderr).toContain(
+        `management listener could not listen on 127.0.0.1:${String(port)}`,
+      );
+      expect((await status()).state).toBe('stopped');
+      expect(lockIsHeld()).toBe(false);
+      expect(busy.listening).toBe(true);
+    } finally {
+      await new Promise((resolve) => busy.close(resolve));
+    }
   });
 });

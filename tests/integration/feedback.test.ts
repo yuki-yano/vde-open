@@ -94,7 +94,7 @@ function spawnCli(args: string[]): {
 } {
   const child = spawn(process.execPath, [cliEntry, ...args], {
     cwd: t.work,
-    env: { ...process.env, VDE_OPEN_HOME: t.home },
+    env: { ...process.env, VDE_OPEN_HOME: t.home, VDE_OPEN_TEST_EPHEMERAL_PORTS: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';

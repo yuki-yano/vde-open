@@ -45,7 +45,12 @@ export function createE2eHome(extraEnv: Record<string, string> = {}): E2eHome {
   const home = join(base, 'home');
   const work = join(base, 'work');
   mkdirSync(work);
-  const env = { ...process.env, ...extraEnv, VDE_OPEN_HOME: home };
+  const env = {
+    ...process.env,
+    ...extraEnv,
+    VDE_OPEN_HOME: home,
+    VDE_OPEN_TEST_EPHEMERAL_PORTS: '1',
+  };
 
   const run = (args: string[]): Promise<CliResult> =>
     new Promise((resolve, reject) => {

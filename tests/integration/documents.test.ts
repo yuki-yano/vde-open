@@ -196,7 +196,13 @@ describe('CLI-006 registering from stdin', () => {
     const script = `(printf '# 前半'; sleep 0.4; printf 'と後半\\n本文\\n') | "$NODE" "$CLI" open - --format markdown --json`;
     const stdout = execFileSync('sh', ['-c', script], {
       cwd: t.work,
-      env: { ...process.env, VDE_OPEN_HOME: t.home, NODE: process.execPath, CLI: cliEntry },
+      env: {
+        ...process.env,
+        VDE_OPEN_HOME: t.home,
+        VDE_OPEN_TEST_EPHEMERAL_PORTS: '1',
+        NODE: process.execPath,
+        CLI: cliEntry,
+      },
       encoding: 'utf8',
     });
     const opened = JSON.parse(stdout) as { data: OpenData };

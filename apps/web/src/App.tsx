@@ -4,12 +4,13 @@ import {
   type SearchHit,
   type ServerEvent,
 } from '@vde-open/shared';
-import { Menu, Monitor, Moon, Palette, Search, Sun, X } from 'lucide-react';
+import { Monitor, Moon, Palette, Search, Sun } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 
 import { RepositoryLabelsContext } from '@/components/document-location';
 import { DocumentSwitcher } from '@/components/document-workspace';
 import { DetailsPopover } from '@/components/details-popover';
+import { DrawerPanel, DrawerToggle } from '@/components/drawer';
 import { SearchDialog } from '@/components/search-dialog';
 import { Sidebar } from '@/components/sidebar';
 import type { SectionTarget } from '@/components/viewer';
@@ -74,9 +75,15 @@ function useAppearance() {
 
 export function Workspace({ api }: { api: Api }) {
   // The document list and the catalogVersion at the time it was fetched. Passed as the precondition when saving the order.
-  const [catalog, setCatalog] = useState<{ documents: DocumentSummary[]; version: number }>({
+  // daemonId is the daemon start the list came from. Views follow it, so a restart replaces them.
+  const [catalog, setCatalog] = useState<{
+    documents: DocumentSummary[];
+    version: number;
+    daemonId: string | null;
+  }>({
     documents: [],
     version: 0,
+    daemonId: null,
   });
   // The document being shown. initialized is whether the first list has been fetched and a document chosen from it.
   // history is how the URL follows this change: push for a switch the user can go back from, replace otherwise.
@@ -205,7 +212,14 @@ export function Workspace({ api }: { api: Api }) {
   // Refetch the list from the daemon. Switch the shown document only if it was closed.
   const fetchList = useCallback(async () => {
     const [list, status] = await Promise.all([api.documents(), api.status()]);
-    setCatalog({ documents: list.documents, version: list.catalogVersion });
+    // The notification stream decides which daemon start the views follow; a fetched status only fills it in before
+    // the first notification. A fetch that crossed a restart can then never take the views back to the old start.
+    // (Documents and revisions are persisted, so a list from either start describes the same documents.)
+    setCatalog((current) => ({
+      documents: list.documents,
+      version: list.catalogVersion,
+      daemonId: current.daemonId ?? status.daemonId,
+    }));
     setSelection((current) => {
       const isOpen = (documentId: string | null): documentId is string =>
         documentId !== null &&
@@ -269,6 +283,12 @@ export function Workspace({ api }: { api: Api }) {
     const onEvent = (event: ServerEvent) => {
       const previous = lastEvent.current;
       lastEvent.current = { daemonId: event.daemonId, sequence: event.sequence };
+      // A new daemon start retires the views at once, even if fetching the list then fails.
+      if (previous?.daemonId !== event.daemonId) {
+        setCatalog((current) =>
+          current.daemonId === event.daemonId ? current : { ...current, daemonId: event.daemonId },
+        );
+      }
       if (event.type === 'daemon-stopping') {
         setNotice('The daemon stopped. Run vo to start it again.');
         return;
@@ -410,16 +430,12 @@ export function Workspace({ api }: { api: Api }) {
       {/* Below 900px the list is a drawer. Its toggle and search sit outside the document view, so they stay
           usable with no document shown and while documents switch. */}
       <div className="flex h-10 shrink-0 items-center gap-1 border-b bg-chrome px-2 min-[900px]:hidden">
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-expanded={drawerOpen}
-          aria-controls="document-list"
-          onClick={() => setDrawerOpen((open) => !open)}
-        >
-          {drawerOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
-          Document list
-        </Button>
+        <DrawerToggle
+          open={drawerOpen}
+          controls="document-list"
+          onToggle={() => setDrawerOpen((open) => !open)}
+          label="Document list"
+        />
         <Button
           variant="ghost"
           size="icon-sm"
@@ -439,9 +455,10 @@ export function Workspace({ api }: { api: Api }) {
       )}
       <div className="relative flex min-h-0 flex-1">
         {/* Below 900px, the list becomes a drawer (do not cram three panes side by side; spec 13.2). */}
-        <div
+        <DrawerPanel
           id="document-list"
-          className={`${drawerOpen ? 'block' : 'hidden'} absolute inset-y-0 left-0 z-20 w-72 max-w-[85vw] shrink-0 border-r bg-chrome shadow-lg min-[900px]:static min-[900px]:block min-[900px]:max-w-none min-[900px]:shadow-none`}
+          open={drawerOpen}
+          docked
           style={{ width: drawerOpen ? undefined : width }}
         >
           <Sidebar
@@ -476,7 +493,7 @@ export function Workspace({ api }: { api: Api }) {
             }
             settings={appearance}
           />
-        </div>
+        </DrawerPanel>
         <div
           role="separator"
           aria-orientation="vertical"
@@ -491,6 +508,7 @@ export function Workspace({ api }: { api: Api }) {
               documents={documents}
               api={api}
               document={active}
+              daemonId={catalog.daemonId}
               feedbackSignal={feedbackSignal}
               renderSignal={renderSignal}
               sectionTarget={sectionTarget?.documentId === active.documentId ? sectionTarget : null}

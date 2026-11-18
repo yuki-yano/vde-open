@@ -7,7 +7,7 @@ import { HTML_LINK_RELAY } from '@vde-open/document/render';
 
 import type { HtmlMode } from '@vde-open/shared';
 
-import type { PreviewFile, RenderService } from '../../render/render-service.ts';
+import type { PreviewFile } from '../../render/render-service.ts';
 
 const CLOSE_GRACE_MS = 1000;
 // Shape of a view URL. Only `/r/<grant>/files/<logical path>` is accepted (spec 12.3).
@@ -16,9 +16,17 @@ const ENCODED_SEPARATOR_OR_NUL = /%(2f|5c|00)/i;
 const LINK_RELAY_HASH = `'sha256-${createHash('sha256').update(HTML_LINK_RELAY).digest('base64')}'`;
 
 export interface PreviewDeps {
-  render: RenderService;
-  // Management UI origins allowed to embed the view. Includes the development origin, if any.
+  // The file a view URL points to, for this listener's audience only.
+  resolve: (grant: string, logicalPath: string) => Promise<PreviewFile | null>;
+  // UI origins allowed to embed the view. Includes the development origin, if any.
   frameAncestors: () => string[];
+  // Behind Tailscale Serve: the `host:port` browsers use. Requests must carry it as Host, and URLs and the CSP use
+  // `https://` with it. Without it, the listener answers to its own 127.0.0.1 address.
+  publicHost?: string;
+  // Extra check on every request (the phone reader's identity). A failure gets the same 404 as an unknown grant.
+  authorize?: (request: IncomingMessage) => boolean;
+  // Until this is true nothing is served (the phone listeners open together or not at all).
+  isOpen?: () => boolean;
   onEvent?: (event: string, fields: Record<string, string | number>) => void;
 }
 
@@ -128,8 +136,13 @@ export async function startPreviewServer(
   };
 
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
-    // Accept only the actual listen address as Host.
+    // Accept only the expected Host (the listen address, or the public name behind Serve). Behind Serve, exactly one.
     if (request.headers.host !== host) return reject(response, 404);
+    if (deps.publicHost !== undefined && request.headersDistinct['host']?.length !== 1) {
+      return reject(response, 404);
+    }
+    if (deps.isOpen && !deps.isOpen()) return reject(response, 404);
+    if (deps.authorize && !deps.authorize(request)) return reject(response, 404);
     const method = request.method ?? '';
     if (method !== 'GET' && method !== 'HEAD') return reject(response, 405, { Allow: 'GET, HEAD' });
 
@@ -144,7 +157,7 @@ export async function startPreviewServer(
     const logicalPath = match ? logicalPathOf(match[2] as string) : null;
     if (!match || logicalPath === null) return reject(response, 404);
 
-    const file = await deps.render.resolve(match[1] as string, logicalPath);
+    const file = await deps.resolve(match[1] as string, logicalPath);
     if (!file) return reject(response, 404);
     response.writeHead(200, headersFor(file, origin, deps.frameAncestors()));
     response.end(method === 'HEAD' ? undefined : file.body);
@@ -162,8 +175,8 @@ export async function startPreviewServer(
     server.listen(options.port ?? 0, '127.0.0.1', () => resolve());
   });
   const { port } = server.address() as AddressInfo;
-  host = `127.0.0.1:${String(port)}`;
-  origin = `http://${host}`;
+  host = deps.publicHost ?? `127.0.0.1:${String(port)}`;
+  origin = deps.publicHost === undefined ? `http://${host}` : `https://${host}`;
 
   return {
     port,

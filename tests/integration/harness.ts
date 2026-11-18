@@ -109,6 +109,8 @@ export function createTestHome(): TestHome {
   const env = (extra: Record<string, string> = {}): NodeJS.ProcessEnv => ({
     ...process.env,
     VDE_OPEN_HOME: home,
+    // Separate homes run in parallel; never share the fixed default ports.
+    VDE_OPEN_TEST_EPHEMERAL_PORTS: '1',
     ...extra,
   });
 

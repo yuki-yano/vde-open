@@ -6,6 +6,7 @@ export * from './errors.ts';
 export * from './exit-codes.ts';
 export * from './feedback.ts';
 export * from './limits.ts';
+export * from './mobile.ts';
 export * from './pdf.ts';
 export * from './strict-json.ts';
 export * from './versions.ts';

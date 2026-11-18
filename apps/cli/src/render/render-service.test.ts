@@ -16,6 +16,7 @@ import { nodeStoreFs } from '../persistence/store-fs.ts';
 import { createWatchService } from '../watch/watch-service.ts';
 import type { ParseService } from '../workers/parse-service.ts';
 import { createRenderService, type RenderService } from './render-service.ts';
+import { createViewEpochs, type ViewEpochs } from './view-epochs.ts';
 
 let base: string;
 let store: StateStore;
@@ -532,5 +533,122 @@ describe('headings the HTML view can be moved to', () => {
     } finally {
       await watcher.close();
     }
+  });
+});
+
+describe('phone reader grants (ADR-0017)', () => {
+  let phone: RenderService;
+  let views: ViewEpochs;
+
+  beforeEach(() => {
+    // Like the daemon: every document event advances the view generations.
+    documents = new DocumentService({
+      store,
+      cursors: createCursorCodec(randomBytes(32)),
+      emit: () => views.observe(),
+    });
+    views = createViewEpochs(documents);
+    const parse: ParseService = {
+      diagnostics: () => Promise.resolve(null),
+      analyze: (format, text) => Promise.resolve(analyzeDocument(text, format)),
+      scan: (kind, text) => Promise.resolve(scanReferences(kind, text)),
+      render: async (input) => {
+        renderStarted();
+        if (holdRender) await holdRender;
+        return renderDocument(input);
+      },
+      print: () => Promise.reject(new Error('unused')),
+      printHtml: () => Promise.reject(new Error('unused')),
+      close: () => Promise.resolve(),
+    };
+    phone = createRenderService({
+      store,
+      documents,
+      parse,
+      previewOrigin: () => 'http://127.0.0.1:1',
+      mobile: {
+        previewOrigin: () => 'https://mac.example.ts.net:43183',
+        viewEpochOf: (documentId) => views.of(documentId),
+      },
+    });
+  });
+
+  const current = (documentId: string) => ({
+    revision: documents.state.documents[documentId]?.currentRevision ?? '',
+    viewEpoch: views.of(documentId),
+  });
+  const allow = (documentId: string, mode: 'static' | 'interactive') =>
+    documents.setHtmlMode({ documentId, mode, confirmed: true });
+
+  it('a permission change while rendering refuses the grant as a changed view', async () => {
+    const documentId = await openDocument();
+    await allow(documentId, 'interactive');
+    const paused = pauseRender();
+    const issuing = phone.createMobileGrant(documentId, current(documentId));
+    await paused.started;
+    await allow(documentId, 'static');
+    paused.resume();
+    await expect(issuing).rejects.toMatchObject({ code: 'E_VIEW_STALE' });
+    expect(phone.grantCount).toBe(0);
+  });
+
+  it('a close and reopen while rendering refuses the grant; so does a new revision', async () => {
+    const documentId = await openDocument();
+    let paused = pauseRender();
+    let issuing = phone.createMobileGrant(documentId, current(documentId));
+    await paused.started;
+    await documents.close({ cwd: base, targets: [documentId] });
+    await documents.open({ cwd: base, paths: ['site/index.html'] });
+    paused.resume();
+    await expect(issuing).rejects.toMatchObject({
+      code: expect.stringMatching(/E_VIEW_STALE|E_DOCUMENT_NOT_OPEN/),
+    });
+
+    // A revision not rendered yet, so the next issue renders (and can be held).
+    holdRender = null;
+    write('site/index.html', '<p>Second</p>');
+    await documents.refresh({ documentId });
+    paused = pauseRender();
+    issuing = phone.createMobileGrant(documentId, current(documentId));
+    await paused.started;
+    write('site/index.html', '<p>Third</p>');
+    await documents.refresh({ documentId });
+    paused.resume();
+    await expect(issuing).rejects.toMatchObject({ code: 'E_VIEW_STALE' });
+    expect(phone.grantCount).toBe(0);
+  });
+
+  it('the view generation never returns to an earlier value across Static -> Interactive -> Static', async () => {
+    const documentId = await openDocument();
+    const seen = [views.of(documentId)];
+    await allow(documentId, 'interactive');
+    seen.push(views.of(documentId));
+    await allow(documentId, 'static');
+    seen.push(views.of(documentId));
+    expect(new Set(seen).size).toBe(3);
+    // Focus does not advance it.
+    await documents.focus({ documentId });
+    expect(views.of(documentId)).toBe(seen[2]);
+  });
+
+  it('phone and PC grants are served, released, and bounded only within their own audience', async () => {
+    const documentId = await openDocument();
+    const pc = await phone.createGrant({ documentId }, GRANT_CONTEXT);
+    const mobile = await phone.createMobileGrant(documentId, current(documentId));
+    expect(mobile.documentUrl?.startsWith('https://mac.example.ts.net:43183/r/')).toBe(true);
+    expect(await phone.resolve(mobile.grant, 'index.html')).toBeNull();
+    expect(await phone.resolveMobile(pc.grant, 'index.html')).toBeNull();
+    expect(phone.release([mobile.grant])).toBe(0);
+    expect(phone.releaseMobile([pc.grant])).toBe(0);
+    expect(phone.checkMobile(mobile.grant)).toBe(true);
+    expect(await phone.resolve(pc.grant, 'index.html')).not.toBeNull();
+
+    const phoneGrants = [mobile.grant];
+    for (let index = 0; index < LIMITS.renderGrants; index += 1) {
+      phoneGrants.push((await phone.createMobileGrant(documentId, current(documentId))).grant);
+    }
+    expect(phone.checkMobile(phoneGrants[0] ?? '')).toBe(false);
+    expect(phone.checkMobile(phoneGrants[1] ?? '')).toBe(true);
+    expect(await phone.resolve(pc.grant, 'index.html')).not.toBeNull();
   });
 });

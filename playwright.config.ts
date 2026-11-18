@@ -10,6 +10,8 @@ const CROSS_BROWSER = [
   'images.spec.ts',
   'themes.spec.ts',
   'sidebar-drag.spec.ts',
+  // The phone reader over HTTPS: two origins, the opaque demo frame, CSP and CORS (ADR-0017).
+  'mobile-reader.spec.ts',
 ];
 
 export default defineConfig({

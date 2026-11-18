@@ -250,6 +250,7 @@ export function createDaemonControl(environment: PathEnvironment): DaemonControl
     openDocuments: null,
     catalogVersion: null,
     uiUrl: null,
+    mobile: null,
   });
 
   return { stateRoot, connectExisting, ensure, ensureDetailed, stop, stoppedStatus };

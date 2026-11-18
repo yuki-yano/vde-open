@@ -10,7 +10,6 @@ import {
   exitCodeForError,
   feedbackCancelParamsSchema,
   isVdeError,
-  LIMITS,
   linkOpenParamsSchema,
   parseStrictJson,
   requestIdSchema,
@@ -19,11 +18,9 @@ import {
   successEnvelope,
   VdeError,
   type ErrorBody,
-  type ServerEvent,
   type UiStatus,
 } from '@vde-open/shared';
 import { Hono, type Context } from 'hono';
-import { streamSSE } from 'hono/streaming';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z, ZodError } from 'zod';
 
@@ -33,7 +30,7 @@ import type { FeedbackService } from '../../feedback/service.ts';
 import type { RenderService } from '../../render/render-service.ts';
 import type { SearchService } from '../../search/search-service.ts';
 import type { EventHub } from '../event-hub.ts';
-import { createEventQueue } from './event-queue.ts';
+import { createEventStreams } from './event-stream.ts';
 
 const API_PREFIX = '/_/api/v1';
 const STREAM_FLUSH_MS = 100;
@@ -104,13 +101,13 @@ interface HttpEnv {
   Bindings: Partial<HttpBindings>;
 }
 
-interface StaticAsset {
+export interface StaticAsset {
   body: Buffer;
   type: string;
   immutable: boolean;
 }
 
-async function loadStaticAssets(webRoot: string | null): Promise<Map<string, StaticAsset>> {
+export async function loadStaticAssets(webRoot: string | null): Promise<Map<string, StaticAsset>> {
   const assets = new Map<string, StaticAsset>();
   if (!webRoot) return assets;
   // Fix the set of served files at startup. Request paths are never resolved against the filesystem.
@@ -236,8 +233,7 @@ export async function startManagementServer(
   const app = new Hono<HttpEnv>();
   let origin = '';
   let host = '';
-  // Per notification connection: the finish function and the number of pending notifications.
-  const streams = new Map<() => void, { readonly pending: number }>();
+  const streams = createEventStreams();
 
   // Headers attached to every response.
   app.use('*', async (c, next) => {
@@ -559,74 +555,25 @@ export async function startManagementServer(
     );
   });
 
-  // SSE read via fetch (spec 6.5). Only IDs and revisions are streamed, never the body.
-  // The `no-cache` set by streamSSE allows storing, so use `no-store` instead. With a storable response, Firefox
-  // holds a second connection to the same URL (another screen or a reconnect) for about 20 seconds until the first response ends.
-  api.get('/events', (c) => {
-    const response = streamSSE(c, async (stream) => {
-      let closed = false;
-      let wake: () => void = () => undefined;
-      const done = new Promise<void>((resolve) => {
-        wake = resolve;
-      });
-      const finish = () => {
-        closed = true;
-        wake();
-      };
-      // Writes are performed in order, and before ending the stream, wait for the requested writes to finish.
-      // Closing without waiting loses the notifications emitted just before stopping.
-      const queue = createEventQueue({
-        writeEvent: (event) =>
-          stream.writeSSE({
-            event: event.type,
-            id: String(event.sequence),
-            data: JSON.stringify(event),
-          }),
-        writeHeartbeat: () => stream.write(': heartbeat\n\n'),
-        onError: finish,
-      });
-      // Stop sending and cut the connection when writes stall. Skip the remaining writes,
-      // end the stalled write, and close the socket too (do not leave data queued for a peer that does not read).
-      const drop = () => {
-        queue.stop();
-        finish();
-        stream.abort();
-        c.env.outgoing?.destroy();
-      };
-      streams.set(finish, queue);
-      stream.onAbort(finish);
-      const send = (event: ServerEvent) => {
-        if (!closed) queue.send(event);
-      };
-      // Announce the current sequence number on every connect. The receiver resyncs state from here.
-      send({
+  // Notifications (spec 6.5). Announce the current sequence number on every connect; the receiver resyncs from there.
+  api.get('/events', (c) =>
+    streams.open(c, {
+      hello: {
         type: 'hello',
         daemonId: deps.daemonId,
         sequence: deps.events.sequence,
         catalogVersion: deps.documents.state.catalogVersion,
-      });
-      const unsubscribe = deps.events.subscribe(send);
-      const heartbeat = setInterval(() => {
-        // Cut a connection whose receiver does not read and whose writes make no progress. The receiver reconnects and resyncs state.
-        if (queue.stalledFor() >= (deps.stallMs ?? LIMITS.sseStallMs)) {
-          drop();
-          return;
-        }
-        queue.heartbeat();
-      }, deps.heartbeatMs ?? LIMITS.sseHeartbeatMs);
-      try {
-        await done;
-      } finally {
-        clearInterval(heartbeat);
-        unsubscribe();
-        await queue.settled();
-        // Count it as a connection until the writes finish (do not hide unfinished connections from diagnostics).
-        streams.delete(finish);
-      }
-    });
-    response.headers.set('Cache-Control', 'no-store');
-    return response;
-  });
+      },
+      subscribe: (listener) => deps.events.subscribe(listener),
+      frame: (event) => ({
+        event: event.type,
+        id: String(event.sequence),
+        data: JSON.stringify(event),
+      }),
+      heartbeatMs: deps.heartbeatMs,
+      stallMs: deps.stallMs,
+    }),
+  );
 
   api.all('*', (c) => fail(c, new VdeError('E_UNKNOWN_METHOD', 'Unknown API.')));
   api.onError((error, c) => fail(c, error));
@@ -672,13 +619,11 @@ export async function startManagementServer(
     port,
     origin,
     eventStreams() {
-      let maxPending = 0;
-      for (const queue of streams.values()) maxPending = Math.max(maxPending, queue.pending);
-      return { streams: streams.size, maxPending };
+      return streams.stats();
     },
     async close() {
       // End the notification streams first. Close connections after the last notification (daemon-stopping) is delivered.
-      for (const finish of streams.keys()) finish();
+      streams.finishAll();
       await new Promise((resolve) => setTimeout(resolve, STREAM_FLUSH_MS));
       await new Promise<void>((resolve) => {
         server.close(() => resolve());

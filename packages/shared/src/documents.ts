@@ -257,6 +257,19 @@ export const closeResultSchema = z.strictObject({
 });
 export type CloseResult = z.infer<typeof closeResultSchema>;
 
+// The mobile listeners as the PC sees them (daemon status). Only `ready` carries the bookmark URL.
+export const mobileStatusSchema = z.discriminatedUnion('state', [
+  z.strictObject({ state: z.literal('disabled') }),
+  z.strictObject({ state: z.literal('ready'), uiUrl: z.string() }),
+  z.strictObject({
+    state: z.literal('error'),
+    listener: z.enum(['ui', 'preview']).nullable(),
+    port: z.number().int().nullable(),
+    reason: z.string(),
+  }),
+]);
+export type MobileStatus = z.infer<typeof mobileStatusSchema>;
+
 export const daemonStatusSchema = z.strictObject({
   state: z.enum(['running', 'stopped']),
   daemonId: z.string().nullable(),
@@ -269,6 +282,8 @@ export const daemonStatusSchema = z.strictObject({
   catalogVersion: z.number().int().nonnegative().nullable(),
   // URL of the management UI. Contains no authentication secret.
   uiUrl: z.string().nullable(),
+  // The phone reader's listeners. null while the daemon is stopped.
+  mobile: mobileStatusSchema.nullable(),
 });
 export type DaemonStatus = z.infer<typeof daemonStatusSchema>;
 

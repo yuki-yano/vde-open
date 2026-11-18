@@ -42,5 +42,12 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // The PC management screen and the phone reader (ADR-0017) share chunks and the Markdown worker.
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        mobile: fileURLToPath(new URL('./mobile.html', import.meta.url)),
+      },
+    },
   },
 });

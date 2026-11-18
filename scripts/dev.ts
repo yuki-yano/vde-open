@@ -14,6 +14,8 @@ const env = {
   ...process.env,
   // Do not touch the normal state and daemon.
   VDE_OPEN_HOME: join(repoRoot, '.dev-home'),
+  // The preview listener gets a free port, so development never takes the fixed default ports.
+  VDE_OPEN_TEST_EPHEMERAL_PORTS: '1',
   VDE_OPEN_DEV_UI_ORIGIN: UI_ORIGIN,
   VDE_OPEN_DEV_BACKEND: BACKEND_ORIGIN,
 };
@@ -45,14 +47,23 @@ start(process.execPath, [cliEntry, 'serve', '--port', String(BACKEND_PORT)], rep
 start(process.execPath, [join(webDir, 'node_modules', 'vite', 'bin', 'vite.js')], webDir);
 
 // Once the daemon is ready, show the URL for opening it in the development UI.
+// `daemon status` never starts a daemon, so polling it cannot race the foreground daemon for the state.
 const deadline = Date.now() + 15_000;
+const uiUrlOf = (stdout: string): string => {
+  try {
+    const envelope = JSON.parse(stdout) as { data?: { uiUrl?: string | null } };
+    return envelope.data?.uiUrl ?? '';
+  } catch {
+    return '';
+  }
+};
 const printUrl = () => {
   if (stopping) return;
-  const result = captureCommand(process.execPath, [cliEntry, 'ui', '--print-url'], {
+  const result = captureCommand(process.execPath, [cliEntry, 'daemon', 'status', '--json'], {
     cwd: repoRoot,
     env,
   });
-  const url = result.stdout.trim();
+  const url = uiUrlOf(result.stdout);
   if (result.status === 0 && url.startsWith(BACKEND_ORIGIN)) {
     console.log(`\nDevelopment UI: ${url.replace(BACKEND_ORIGIN, UI_ORIGIN)}\n`);
     return;

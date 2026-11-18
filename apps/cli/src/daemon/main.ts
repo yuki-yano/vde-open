@@ -7,6 +7,7 @@ import {
   LIMITS,
   VdeError,
   type DaemonStatus,
+  type MobileStatus,
   type Warning,
 } from '@vde-open/shared';
 import { z, ZodError } from 'zod';
@@ -25,9 +26,11 @@ import {
 import { StateStore } from '../persistence/state-store.ts';
 import { nodeStoreFs, type StoreFs } from '../persistence/store-fs.ts';
 import { createRenderService } from '../render/render-service.ts';
+import { createViewEpochs, type ViewEpochs } from '../render/view-epochs.ts';
 import { createSearchService, type SearchService } from '../search/search-service.ts';
 import { createEventHub } from '../server/event-hub.ts';
 import { startManagementServer, type ManagementServer } from '../server/http/management.ts';
+import { isConfiguredPerson, startMobileServer, type MobileServer } from '../server/http/mobile.ts';
 import { startPreviewServer, type PreviewServer } from '../server/http/preview.ts';
 import { startIpcServer, type IpcServer } from '../server/ipc-server.ts';
 import { createWatchService, type WatchService } from '../watch/watch-service.ts';
@@ -42,6 +45,12 @@ import {
   systemProcessProbe,
   type ProcessProbe,
 } from './lock.ts';
+import {
+  ephemeralPortsAllowed,
+  readListenerConfig,
+  resolveMobileConfig,
+  resolvePcPorts,
+} from './listener-config.ts';
 import { createFileLogger, type Logger } from './logger.ts';
 import { createIpcKey, DAEMON_LOCK_NAME, removePointer, writePointer } from './runtime-files.ts';
 import { ensurePrivateDirectory } from './secure-dir.ts';
@@ -57,9 +66,9 @@ export interface DaemonOptions {
   version: string;
   fs?: StoreFs;
   probe?: ProcessProbe;
-  // Port of the management UI. Assigned by the OS if not given.
+  // Port of the management UI for this start only. Otherwise listeners.json, then the default.
   managementPort?: number;
-  // Port of the listener that serves documents. Assigned by the OS if not given.
+  // Port of the listener that serves documents for this start only. Otherwise listeners.json, then the default.
   previewPort?: number;
   // Replaces document parsing (used in tests to reproduce slow parsing).
   parse?: ParseService;
@@ -73,6 +82,25 @@ export interface DaemonHandle {
   // Resolves once the daemon has finished stopping.
   readonly stopped: Promise<void>;
   stop(reason: string): Promise<void>;
+}
+
+// Wrap a bind failure with the listener's purpose, port, and OS error, so the CLI can report which one failed.
+async function listenOrFail<T>(
+  listener: string,
+  port: number,
+  start: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await start();
+  } catch (error) {
+    const cause = (error as NodeJS.ErrnoException | undefined)?.code ?? 'unknown';
+    throw new VdeError(
+      'E_DAEMON_START_FAILED',
+      `The ${listener} listener could not listen on 127.0.0.1:${String(port)} (${cause}).`,
+      { reason: 'listen', listener, port, cause },
+      { cause: error },
+    );
+  }
 }
 
 interface MethodResult {
@@ -115,6 +143,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   let ipc: IpcServer | null = null;
   let management: ManagementServer | null = null;
   let preview: PreviewServer | null = null;
+  // The phone reader's two listeners (ADR-0017). Both run or neither.
+  let mobileUi: MobileServer | null = null;
+  let mobilePreview: PreviewServer | null = null;
   let watcher: WatchService | null = null;
   let parse: ParseService | null = null;
   // A worker of its own for print documents (PDF export), so a long print never fails a parse by its time limit.
@@ -184,6 +215,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // Stop a browser printing a PDF and remove its temporary directory.
     await step('pdf', () => pdf?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
     await step('preview', () => preview?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
+    await step('mobile-ui', () => mobileUi?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
+    await step('mobile-preview', () => mobilePreview?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
     await step('store', () => store?.close());
     await step('parse', () => parse?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
     await step('print', () => printer?.close(), SHUTDOWN_CLOSE_TIMEOUT_MS);
@@ -219,6 +252,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   };
 
   try {
+    // Read once at start; changes apply on the next start. Start arguments are never written back.
+    const listenerConfig = await readListenerConfig(stateRoot);
+    const ephemeral = ephemeralPortsAllowed(environment);
+    const ports = resolvePcPorts(options, listenerConfig, ephemeral);
+    // A broken mobile section only turns the phone reader off; the PC starts and reports why.
+    const mobileConfig = resolveMobileConfig(listenerConfig.mobile, ports);
     store = await StateStore.open({ root: stateRoot, fs: options.fs ?? nodeStoreFs });
     const openedStore = store;
     // After a save failure whose outcome cannot be guaranteed, exit instead of continuing to write (spec 7.2).
@@ -252,7 +291,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       analyze: (format, text) => parser.analyze(format, text),
     });
     const searching = search;
+    let views: ViewEpochs | null = null;
     const emit = (event: DocumentEvent) => {
+      // Advance the view generations before anyone hears of the change.
+      views?.observe();
       // When the open documents, the published revisions, or readability change, sync the index.
       if (
         event.type !== 'focus-requested' &&
@@ -280,6 +322,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       scan: (kind, text) => parser.scan(kind, text),
       emit,
     });
+    const viewing = createViewEpochs(documents);
+    views = viewing;
     // Before any request is accepted, so the first list already shows repositories (waits up to 2 seconds).
     await documents.initializeRepositories();
     feedback = new FeedbackService({ store: openedStore, documents, emit });
@@ -296,6 +340,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       documents,
       parse: parser,
       previewOrigin: () => previewOrigin,
+      mobile:
+        mobileConfig.state === 'enabled'
+          ? {
+              previewOrigin: () =>
+                `https://${mobileConfig.settings.host}:${String(mobileConfig.settings.previewPort)}`,
+              viewEpochOf: (documentId) => viewing.of(documentId),
+            }
+          : undefined,
       // When a view tries to load an unregistered file, notify the UI (the path is not included in the notification).
       onMissing: (documentId) => emit({ type: 'render-diagnostics', documentId }),
     });
@@ -310,38 +362,116 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       onEvent: (event, fields) => logger.log(event, fields),
     });
     pdf = exporting;
-    preview = await startPreviewServer(
-      {
-        render,
-        // Only the management UI may embed the view.
-        frameAncestors: () =>
-          [managementOrigin, devOrigin].filter((origin): origin is string => origin !== null),
-        onEvent: (event, fields) => logger.log(event, fields),
-      },
-      options.previewPort === undefined ? {} : { port: options.previewPort },
+    preview = await listenOrFail('preview', ports.preview, () =>
+      startPreviewServer(
+        {
+          resolve: (grant, logicalPath) => render.resolve(grant, logicalPath),
+          // Only the management UI may embed the view.
+          frameAncestors: () =>
+            [managementOrigin, devOrigin].filter((origin): origin is string => origin !== null),
+          onEvent: (event, fields) => logger.log(event, fields),
+        },
+        { port: ports.preview },
+      ),
     );
     previewOrigin = preview.origin;
 
-    management = await startManagementServer(
-      {
-        daemonId,
-        version,
-        documents,
-        events,
-        render,
-        search: searching,
-        feedback: answering,
-        pdf: exporting,
-        previewOrigin,
-        webRoot: webRootPath(),
-        devOrigin,
-        isStopping: () => stopping !== null,
-        onEvent: (event, fields) => logger.log(event, fields),
-      },
-      options.managementPort === undefined ? {} : { port: options.managementPort },
+    management = await listenOrFail('management', ports.management, () =>
+      startManagementServer(
+        {
+          daemonId,
+          version,
+          documents,
+          events,
+          render,
+          search: searching,
+          feedback: answering,
+          pdf: exporting,
+          previewOrigin,
+          webRoot: webRootPath(),
+          devOrigin,
+          isStopping: () => stopping !== null,
+          onEvent: (event, fields) => logger.log(event, fields),
+        },
+        { port: ports.management },
+      ),
     );
     managementOrigin = management.origin;
     const uiUrl = `${management.origin}/`;
+
+    // The phone reader. Behind Tailscale Serve, the configured ports are both the public HTTPS ports and the local
+    // ones. In test mode the local sockets get free ports (diagnostics report them) and the public numbers stay.
+    let mobileStatus: MobileStatus =
+      mobileConfig.state === 'disabled'
+        ? { state: 'disabled' }
+        : mobileConfig.state === 'error'
+          ? { state: 'error', listener: null, port: null, reason: mobileConfig.reason }
+          : { state: 'disabled' };
+    let mobileOpen = false;
+    if (mobileConfig.state === 'enabled') {
+      const settings = mobileConfig.settings;
+      const local = ephemeral
+        ? { ui: 0, preview: 0 }
+        : { ui: settings.uiPort, preview: settings.previewPort };
+      let failing: 'ui' | 'preview' = 'preview';
+      try {
+        mobilePreview = await listenOrFail('mobile preview', local.preview, () =>
+          startPreviewServer(
+            {
+              resolve: (grant, logicalPath) => render.resolveMobile(grant, logicalPath),
+              // Only the phone screen may embed its views.
+              frameAncestors: () => [`https://${settings.host}:${String(settings.uiPort)}`],
+              publicHost: `${settings.host}:${String(settings.previewPort)}`,
+              authorize: (request) => isConfiguredPerson(request, settings.login),
+              isOpen: () => mobileOpen,
+              onEvent: (event, fields) => logger.log(`mobile.${event}`, fields),
+            },
+            { port: local.preview },
+          ),
+        );
+        failing = 'ui';
+        mobileUi = await listenOrFail('mobile UI', local.ui, () =>
+          startMobileServer(
+            {
+              daemonId,
+              settings,
+              documents,
+              events,
+              render,
+              views: viewing,
+              cursors,
+              webRoot: webRootPath(),
+              isStopping: () => stopping !== null,
+              isOpen: () => mobileOpen,
+              onEvent: (event, fields) => logger.log(event, fields),
+            },
+            { port: local.ui },
+          ),
+        );
+        mobileOpen = true;
+        mobileStatus = {
+          state: 'ready',
+          uiUrl: `https://${settings.host}:${String(settings.uiPort)}/`,
+        };
+      } catch (error) {
+        // Close whichever started, so no half of the phone reader stays reachable. The PC keeps running.
+        await mobileUi?.close();
+        await mobilePreview?.close();
+        mobileUi = null;
+        mobilePreview = null;
+        const cause =
+          error instanceof VdeError && typeof error.details['cause'] === 'string'
+            ? error.details['cause']
+            : 'unknown';
+        mobileStatus = {
+          state: 'error',
+          listener: failing,
+          port: failing === 'ui' ? settings.uiPort : settings.previewPort,
+          reason: cause,
+        };
+        logger.log('mobile.start-failed', { listener: failing, code: cause });
+      }
+    }
     watcher = createWatchService({
       documents,
       onEvent: (event, fields) => logger.log(event, fields),
@@ -364,6 +494,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           openDocuments: openedStore.payload.openOrder.length,
           catalogVersion: openedStore.payload.catalogVersion,
           uiUrl,
+          mobile: mobileStatus,
         };
         return { data: status, catalogVersion: openedStore.payload.catalogVersion };
       },
@@ -389,6 +520,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             eventSubscribers: events.subscriberCount,
             eventStreams: management?.eventStreams() ?? { streams: 0, maxPending: 0 },
             renderGrants: render.grantCount,
+            mobileEventStreams: mobileUi?.eventStreams() ?? { streams: 0, maxPending: 0 },
+            // Test mode only: the local sockets of the phone reader, for the test's HTTPS proxy.
+            ...(ephemeral && mobileStatus.state === 'ready' && mobileUi && mobilePreview
+              ? { mobileBoundPorts: { ui: mobileUi.port, preview: mobilePreview.port } }
+              : {}),
             // Number of retained items. If it keeps growing after iterations, something is not being released.
             retained: {
               documents: documents.retainedCounts(),

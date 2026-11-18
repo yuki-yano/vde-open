@@ -65,14 +65,26 @@ afterEach(() => {
 interface ProbeProps {
   revision?: string | null;
   updatedAt: string;
+  daemonId?: string;
   // A value that causes a screen update unrelated to the grant.
   tick?: number;
   // Called right after this render reaches the screen (before effects run).
   onCommit?: () => void;
 }
 
-function Probe({ revision = 'rev_1', updatedAt, tick = 0, onCommit }: ProbeProps): ReactNode {
-  const state = useRenderGrant(api, 'doc_1', revision, updatedAt);
+function Probe({
+  revision = 'rev_1',
+  updatedAt,
+  daemonId = 'daemon_a',
+  tick = 0,
+  onCommit,
+}: ProbeProps): ReactNode {
+  const state = useRenderGrant(api, 'doc_1', revision, updatedAt, {
+    mode: 'static',
+    requestId: null,
+    nonce: 0,
+    daemonId,
+  });
   useLayoutEffect(() => {
     onCommit?.();
   });
@@ -191,6 +203,34 @@ describe('order of releasing render grants', () => {
     await released(2);
     expect(releases.at(-1)).toEqual({ grants: ['g2'], displayed: '' });
     root = createRoot(container);
+  });
+});
+
+describe('a new daemon start', () => {
+  it('takes the view off screen at once, drops a late answer from the old start, and shows the new grant', async () => {
+    // A scan-failed grant is refetched on a state update, which lets a refetch for the old start be in flight.
+    await showFirst(true);
+    // The same daemon refetching the list does not replace the view.
+    root.render(<Probe updatedAt={T0} tick={1} />);
+    await settle();
+    expect(pending).toHaveLength(1);
+    expect(displayedGrant()).toBe('g1');
+    expect(releases).toEqual([]);
+
+    // A refetch for the old start is still pending when the daemon restarts.
+    root.render(<Probe updatedAt={T1} />);
+    await requested(2);
+    root.render(<Probe updatedAt={T1} daemonId="daemon_b" />);
+    await requested(3);
+    // The old view leaves the screen without waiting for the new grant.
+    expect(displayedGrant()).toBe('');
+    pending[1]?.resolve(grant('stale', false));
+    await until(() => releases.some((release) => release.grants.includes('stale')));
+    expect(displayedGrant()).toBe('');
+    pending[2]?.resolve(grant('g2', false));
+    await until(() => displayedGrant() === 'g2');
+    await until(() => releases.some((release) => release.grants.includes('g1')));
+    expect(releases.flatMap((release) => release.grants).toSorted()).toEqual(['g1', 'stale']);
   });
 });
 

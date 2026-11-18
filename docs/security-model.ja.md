@@ -17,6 +17,7 @@
 | 文書の表示（iframe） | 信頼しない。管理画面と別のport（origin）で配信し、`sandbox`とCSPで制限する。管理APIを直接利用できない |
 | 文書の中のscript（interactive） | 信頼しない。利用者が明示的に許可したHTMLだけで動かす。読み込めるのは登録したfileだけ。回答の連携では回答案を取得・置換できる。確定は管理画面で行う |
 | PDF出力のbrowser | 人が「Export PDF」を押したときだけ、daemonが起動する。通常の場所に入っているGoogle Chrome・Microsoft Edgeか、`VDE_OPEN_BROWSER`で指定した実行file。一時profileでheadlessに動かし、pipeで操作する（portを開かない）。印刷するpageはdaemonが書いたもの。HTMLのCSSは登録済みのものを安全化した一時fileだけを読み込む |
+| スマホの閲覧（任意、ADR-0017） | `listeners.json`に`mobile`がなければ無効。2つのlistenerを`127.0.0.1`で待ち受け、Tailscale ServeのHTTPS経由で届く。すべてのrequestに、設定した`Host`と、設定したloginと一致する`Tailscale-User-Login`がちょうど1つ必要。APIは開いている文書の一覧・本文・表示だけで、errorは固定の文言とし、pathを返さない。表示の権限はPCと別枠（64件）で、版か表示世代が変わると失効する |
 | 外部のnetwork | daemonは外部へ通信しない。外部の画像・CSS・fontを読み込まない |
 
 単体画像にも同じ表示の権限とsourceのsize上限を適用する。SVGを含む元のbytesは画像assetとして配信し、管理画面では`<img>`で表示する。assetのCSP（`default-src 'none'; style-src 'unsafe-inline'; sandbox`）は、SVGのURLを直接開いた場合もscriptと外部参照を遮断する。未登録fileは配信しない。
@@ -30,12 +31,15 @@
 - Interactive の HTML は、CSPの`script-src`でinlineと登録済みのscript、`connect-src`で表示の権限内の通信を許可する。回答の連携ではMessagePortをiframeへ1回だけ渡し、messageの大きさ・件数・順番・形を検証する。HTMLからの回答案の保存は、表示の権限を保存のtransactionの中でも確かめる（ADR-0012）。
 - 回答は、管理画面の送信buttonでだけ確定する。確定する内容は、serverが保存済みの回答案から取る。送信はIDで冪等にし、条件が違えば競合にする（ADR-0011）。
 - MarkdownのPDF出力の印刷用の文書は、表示と同じ規則で作る。生のHTMLはescapeし、linkは文書の中の見出し・http(s)・mailtoだけを残し、画像はその版に登録したものだけをdata URLで入れる。pageにはCSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'`を付け、scriptを動かさず、通信もしない。page headerの文書名はCSSの文字列としてescapeする。HTMLのPDFも静的表示と同じ安全化を行い、scriptは動かさない。登録済みのCSSだけを名前を付け直した一時fileにし、画像とfontはdata URLで入れる。CSPは`default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline' file:; base-uri 'none'; form-action 'none'`で、元文書が参照した未登録file・外部URLは静的変換で取り除く。HTMLとCSS（埋め込んだ画像・fontを含めて256MiBまで）とbrowserのprofileは、出力ごとに消す非公開の一時directory（0700）に置く。daemonが強制終了されて残ったものは、次にdaemonが起動したときに、1時間より古ければ消す（実directoryで、その利用者が所有するものだけ）。browserのsandboxは外さない。出力は1件ずつ、60秒以内に行い、時間切れ・requestの中断・daemonの停止で、browserを補助processごと止める（POSIXはprocess group、Windowsはprocess tree）。browserから読めないmessageが届いたときは、その出力だけを終え、daemonは止めない（ADR-0013）。
+- スマホの閲覧: スマホ用の表示の権限は、スマホ用のlistenerだけが配信・確認・返却・link解決に使う。文書が開いていて、発行時の版と表示世代が現在と一致することを毎回求める（表示世代は版かscriptの許可が変わるたびに進み、前の値に戻らない）。スマホのiframeは同一originなしの`sandbox="allow-scripts"`で、回答のSDKを渡さない。linkは既に開いている文書だけに解決し、PCで開く・確認する・focusすることはない。スマホの画面はスマホ用のlistenerだけが配信し、PCの画面は返さない（ADR-0017）。
 - logには、IPCの鍵・表示の権限・回答・本文を残さない。
 - 文書がどのrepoに属するかを示すため、daemonは開いている文書の近くのGitのmetadata（`.git`ファイル、`commondir`、`HEAD`、worktreeの`gitdir`の逆向きのlink）を読む。これはそのdirectoryの持ち主が自由に書けるので、信頼できない入力として扱う。通常のfileだけを、最後のsymlinkをたどらず、FIFOで止まらないように開き、それぞれ4KiBまで読む。`git`は起動しない（そのdirectoryのGitの設定を読ませないため）。別のrepoを指す`.git`ファイルやsymlinkで、そのrepoに入れることはできない（worktreeはrepoから指し返されている必要があり、symlinkの`.git`と`commondir`のない`.git`ファイルはcheckout自体をrepoにする）。Windowsでは、metadataから得たpathのrootがdrive文字でなく（UNC、device path）、文書のrootと違うとき、filesystemに触れる前に拒否する。metadataに直接書いて、daemonを別のhostへ接続させることはできない。UIとCLIに渡すのは、repoとcheckoutのpath、worktreeの名前、branch名、文書のcanonical pathだけ（すでに渡している絶対pathと同じ種類の情報）。
 
 ## 守らないもの
 
 - 同じ端末から管理listenerへ接続するprocessや別のOS user。管理画面/APIは本人確認をせず、ローカルの接続から文書や回答を読み、操作できる。
+- 設定した本人の端末どうしの区別。本人のheaderは人を表し、端末を表さない。2つのportに届く端末は、tailnetの接続ルールで限定する。このMac上のprocessは、ローカルのスマホ用listenerへ任意のheaderを送れる（管理listenerと同じ境界）。
+- 休止中・圏外のスマホで既に読み込まれたscriptを止めること。復帰時に表示を再確認し、新しい読み込みはすぐに失敗する。
 - browser自体の脆弱性。
 - PDF出力のために起動したbrowserが自分で行う通信。background networking・component update・sync・拡張機能を無効にして起動し、印刷するpageは通信しない。
 - interactiveのHTMLの中のscriptによる、iframe自身の移動、CPU・memoryの消費。interactiveは、任意の敵対的なscriptを安全に動かす仕組みではない。

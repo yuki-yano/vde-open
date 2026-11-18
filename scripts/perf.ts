@@ -163,7 +163,7 @@ async function measure(fixture: Fixture): Promise<Record<string, unknown>> {
   const home = join(base, 'home');
   const work = join(base, 'work');
   mkdirSync(join(work, 'docs'), { recursive: true });
-  const env = { ...process.env, VDE_OPEN_HOME: home };
+  const env = { ...process.env, VDE_OPEN_HOME: home, VDE_OPEN_TEST_EPHEMERAL_PORTS: '1' };
   const perDocument = Math.floor(fixture.totalBytes / fixture.documents);
   for (let index = 0; index < fixture.documents; index += 1) {
     writeFileSync(

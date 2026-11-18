@@ -12,6 +12,8 @@ import { useFeedback } from '@/lib/use-feedback';
 interface DocumentWorkspaceProps {
   api: Api;
   document: DocumentSummary;
+  // The daemon start the list came from (passed to the view).
+  daemonId?: string | null;
   // How many question-change notifications have been received. Refetch the question each time it changes.
   feedbackSignal: number;
   // How many times the view tried to load an unregistered file.
@@ -92,6 +94,7 @@ const isAnswerWidth = (value: unknown): value is number =>
 export function DocumentWorkspace({
   api,
   document,
+  daemonId = null,
   feedbackSignal,
   renderSignal,
   sectionTarget = null,
@@ -140,6 +143,7 @@ export function DocumentWorkspace({
       <Viewer
         api={api}
         document={document}
+        daemonId={daemonId}
         fixedRevision={fixedRevision}
         request={request}
         renderSignal={renderSignal}

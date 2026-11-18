@@ -36,6 +36,15 @@ import type { IpcConnection } from '../server/ipc-client.ts';
 import { normalizeArgv } from './argv.ts';
 import { createBrowserLauncher } from './browser.ts';
 import { createDaemonControl, type DaemonControl } from './daemon-control.ts';
+import {
+  createTailscale,
+  disableMobile,
+  enableMobile,
+  mobileStatus,
+  type DisableResult,
+  type EnableResult,
+  type MobileStatusResult,
+} from './mobile-setup.ts';
 import { escapeContentForTerminal, escapeForTerminal, safeJson } from './output.ts';
 import { waitForAnswer } from './wait-for-answer.ts';
 
@@ -964,9 +973,16 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
       );
     });
 
+  const renderMobile = (mobile: DaemonStatus['mobile']): string => {
+    if (mobile === null || mobile.state === 'disabled') return '';
+    if (mobile.state === 'ready') return `\nphone reader: ready  ${mobile.uiUrl}`;
+    const where =
+      mobile.listener === null ? '' : ` (${mobile.listener} port ${String(mobile.port)})`;
+    return `\nphone reader: error${where}: ${escapeForTerminal(mobile.reason)}`;
+  };
   const renderStatus = (status: DaemonStatus) =>
     status.state === 'running'
-      ? `running  pid=${String(status.pid)}  open documents: ${String(status.openDocuments)}  ${status.uiUrl ?? ''}`
+      ? `running  pid=${String(status.pid)}  open documents: ${String(status.openDocuments)}  ${status.uiUrl ?? ''}${renderMobile(status.mobile)}`
       : 'stopped';
 
   const daemon = program.command('daemon').description('Start, inspect, and stop the daemon');
@@ -1030,17 +1046,134 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
       );
     });
 
+  // The phone reader over Tailscale (ADR-0017): settings from this machine's Tailscale, and the two Serve forwards.
+  const mobile = program
+    .command('mobile')
+    .description('Set up reading open documents on your phone over Tailscale');
+  const restartDaemon = async (): Promise<DaemonStatus> => {
+    await control.stop();
+    return (await viaDaemon<DaemonStatus>('daemon.status', {})).data;
+  };
+  const renderServe = (serve: Record<string, string>) =>
+    Object.entries(serve)
+      .map(([port, state]) => `${port} ${state}`)
+      .join(', ');
+  mobile
+    .command('enable')
+    .description(
+      "Read this machine's Tailscale name and your login into listeners.json, restart the daemon, and add the two Tailscale Serve forwards",
+    )
+    .option('--no-serve', 'Do not change Tailscale Serve (add the forwards yourself)')
+    .option('--json', 'Output the result as JSON', false)
+    .action(async (options: { serve: boolean; json: boolean }) => {
+      await execute<EnableResult>(
+        'mobile.enable',
+        options.json,
+        async () => ({
+          data: await enableMobile(
+            {
+              environment: context.environment,
+              tailscale: createTailscale(context.environment.env),
+              restartDaemon,
+            },
+            { serve: options.serve },
+          ),
+        }),
+        (data) =>
+          [
+            `phone reader: ${data.uiUrl}`,
+            `login: ${escapeForTerminal(data.login)}`,
+            `serve: ${renderServe(data.serve)}`,
+            options.serve
+              ? 'Open the URL on your phone (signed in to the same tailnet) and bookmark it.'
+              : `Add the forwards: tailscale serve --bg --https=<port> http://127.0.0.1:<port> (for ${Object.keys(data.serve).join(' and ')})`,
+          ].join('\n'),
+      );
+    });
+  mobile
+    .command('disable')
+    .description(
+      'Remove the phone reader settings and only its own Tailscale Serve forwards, then restart the daemon',
+    )
+    .option('--no-serve', 'Do not change Tailscale Serve')
+    .option('--json', 'Output the result as JSON', false)
+    .action(async (options: { serve: boolean; json: boolean }) => {
+      await execute<DisableResult>(
+        'mobile.disable',
+        options.json,
+        async () => ({
+          data: await disableMobile(
+            {
+              environment: context.environment,
+              tailscale: createTailscale(context.environment.env),
+              restartDaemon,
+              daemonRunning: async () => {
+                const connection = await control.connectExisting();
+                connection?.close();
+                return connection !== null;
+              },
+            },
+            { serve: options.serve },
+          ),
+        }),
+        (data) =>
+          data.wasEnabled
+            ? `phone reader: disabled\nserve: ${renderServe(data.serve)}`
+            : 'phone reader: was not enabled',
+      );
+    });
+  mobile
+    .command('status')
+    .description(
+      'Show the phone reader settings, its state in the daemon, and the Tailscale Serve forwards',
+    )
+    .option('--json', 'Output the result as JSON', false)
+    .action(async (options: { json: boolean }) => {
+      await execute<MobileStatusResult>(
+        'mobile.status',
+        options.json,
+        async () => ({
+          data: await mobileStatus({
+            environment: context.environment,
+            tailscale: createTailscale(context.environment.env),
+            daemonStatus: async () => {
+              const connection = await control.connectExisting();
+              if (!connection) return control.stoppedStatus();
+              try {
+                return unwrap(await connection.request<DaemonStatus>('daemon.status', {})).data;
+              } finally {
+                connection.close();
+              }
+            },
+          }),
+        }),
+        // The daemon's state is shown even without settings: a daemon not yet restarted may still serve the reader.
+        (data) =>
+          [
+            data.configured === null
+              ? 'settings: none (vo mobile enable)'
+              : `settings: https://${data.configured.host}:${String(data.configured.uiPort)}/  login: ${escapeForTerminal(data.configured.login)}`,
+            `daemon: ${data.daemon === null ? 'stopped' : data.daemon.state === 'error' ? `error (${escapeForTerminal(data.daemon.reason)})` : data.daemon.state === 'ready' ? `ready ${data.daemon.uiUrl}` : data.daemon.state}`,
+            ...(data.configured === null
+              ? []
+              : [
+                  `serve: ${data.serve === null ? 'unknown (tailscale not available)' : renderServe(data.serve)}`,
+                ]),
+          ].join('\n'),
+      );
+    });
+
   program
     .command('serve')
     .description('Run the daemon in the foreground. Press Ctrl+C to stop')
     .option(
       '--port <n>',
-      'Port for the management UI. Defaults to a free port',
+      'Port for the management UI for this run only. Defaults to listeners.json, then 43180',
       parseInteger('--port', 1, 65535),
     )
     .option(
       '--preview-port <n>',
-      'Port for the listener that shows documents. Defaults to a free port',
+      'Port for the listener that shows documents for this run only. Defaults to listeners.json, then 43181',
       parseInteger('--preview-port', 1, 65535),
     )
     .action(async (options: { port?: number; previewPort?: number }) => {

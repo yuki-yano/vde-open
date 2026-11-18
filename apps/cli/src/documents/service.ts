@@ -1632,16 +1632,8 @@ export class DocumentService {
     return { record, entry: this.#requireRevision(record, revision ?? record.currentRevision) };
   }
 
-  // Opens the local document a link in the document points to (spec 10.4). Only hrefs extracted by analysis are accepted.
-  // If the document is already open, only switches the view. An unregistered document is opened only with the user's confirmation.
-  async openLinked(link: {
-    documentId: string;
-    revision: string;
-    linkId: string;
-    href: string;
-    confirmation: string | undefined;
-  }): Promise<ServiceResult<LinkOpenResult>> {
-    const { documentId, href } = link;
+  // The canonical path a document link points to. Shared by opening links on the PC and resolving them on the phone.
+  async #linkTarget(documentId: string, href: string): Promise<string> {
     const record = this.#requireOpen(documentId);
     const target = classifyLink(href);
     const base =
@@ -1656,8 +1648,29 @@ export class DocumentService {
         'This link does not point to a document that can be opened.',
       );
     }
-    const absolute = resolve(base, ...target.segments);
-    const canonical = await canonicalizePath(absolute);
+    return canonicalizePath(resolve(base, ...target.segments));
+  }
+
+  // The phone reader's link: the ID of the target only if it is already open. Never opens, confirms, or focuses
+  // anything, so the PC and other screens stay as they are (ADR-0017).
+  async openDocumentOfLink(documentId: string, href: string): Promise<string | null> {
+    const canonical = await this.#linkTarget(documentId, href).catch(() => null);
+    if (canonical === null) return null;
+    const existing = this.#existingFile(canonical);
+    return existing?.isOpen ? existing.documentId : null;
+  }
+
+  // Opens the local document a link in the document points to (spec 10.4). Only hrefs extracted by analysis are accepted.
+  // If the document is already open, only switches the view. An unregistered document is opened only with the user's confirmation.
+  async openLinked(link: {
+    documentId: string;
+    revision: string;
+    linkId: string;
+    href: string;
+    confirmation: string | undefined;
+  }): Promise<ServiceResult<LinkOpenResult>> {
+    const { documentId, href } = link;
+    const canonical = await this.#linkTarget(documentId, href);
     // A confirmation can be used once. The given confirmation is consumed here whatever the outcome.
     const now = this.#now().getTime();
     const offered =

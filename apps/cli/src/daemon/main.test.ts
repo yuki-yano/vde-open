@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, symlink, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,7 +13,7 @@ import {
 } from '../persistence/paths.ts';
 import { nodeStoreFs, type StoreFs } from '../persistence/store-fs.ts';
 import { createParseService, type ParseService } from '../workers/parse-service.ts';
-import { holdsLock } from './lock.ts';
+import { holdsLock, readCurrentLock } from './lock.ts';
 import { startDaemon, type DaemonHandle } from './main.ts';
 
 let base: string;
@@ -22,7 +23,7 @@ let daemon: DaemonHandle | null;
 beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'vde-open-daemon-'));
   environment = {
-    env: { ...process.env, VDE_OPEN_HOME: join(base, 'home') },
+    env: { ...process.env, VDE_OPEN_HOME: join(base, 'home'), VDE_OPEN_TEST_EPHEMERAL_PORTS: '1' },
     platform: process.platform,
     homeDir: base,
     uid: typeof process.getuid === 'function' ? process.getuid() : null,
@@ -268,5 +269,145 @@ describe('unknown method and invalid arguments', () => {
     } finally {
       connection?.close();
     }
+  });
+});
+
+// A port another socket keeps in use, and a port that is free right now (released before returning).
+async function occupy(): Promise<Server> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return server;
+}
+const portOf = (server: Server) => (server.address() as { port: number }).port;
+async function freePort(): Promise<number> {
+  const server = await occupy();
+  const port = portOf(server);
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+async function previewOriginOf(uiUrl: string): Promise<string> {
+  const response = await fetch(`${uiUrl}_/api/v1/status`);
+  return ((await response.json()) as { data: { previewOrigin: string } }).data.previewOrigin;
+}
+
+describe('fixed listener ports (listeners.json)', () => {
+  const configPath = () => join(base, 'home', 'listeners.json');
+  const writeConfig = async (text: string) => {
+    await mkdir(join(base, 'home'), { recursive: true, mode: 0o700 });
+    await writeFile(configPath(), text);
+  };
+  // No daemon holds the state after a failed start.
+  const lockFree = async () => {
+    const lock = await readCurrentLock(resolveStateRoot(environment), 'daemon.lock');
+    return lock === null || (lock !== 'invalid' && lock.released);
+  };
+
+  it('a restart with the saved ports gets the same URLs; start arguments are used once and not saved', async () => {
+    // First start on OS-assigned ports, then save the ports it got.
+    daemon = await startDaemon({ environment, version: 'test' });
+    const first = { ui: daemon.uiUrl, preview: await previewOriginOf(daemon.uiUrl) };
+    const ports = {
+      managementPort: Number(new URL(first.ui).port),
+      previewPort: Number(new URL(first.preview).port),
+    };
+    await daemon.stop('test');
+    await writeConfig(JSON.stringify(ports));
+
+    daemon = await startDaemon({ environment, version: 'test' });
+    expect(daemon.uiUrl).toBe(first.ui);
+    expect(await previewOriginOf(daemon.uiUrl)).toBe(first.preview);
+    await daemon.stop('test');
+
+    // An argument overrides the file for this start only.
+    const override = await freePort();
+    daemon = await startDaemon({ environment, version: 'test', managementPort: override });
+    expect(daemon.uiUrl).toBe(`http://127.0.0.1:${String(override)}/`);
+    await daemon.stop('test');
+    expect(JSON.parse(await readFile(configPath(), 'utf8'))).toEqual(ports);
+
+    daemon = await startDaemon({ environment, version: 'test' });
+    expect(daemon.uiUrl).toBe(first.ui);
+  });
+
+  it('a busy management port fails the start with its purpose and port, and leaves nothing behind', async () => {
+    const busy = await occupy();
+    const previewPort = await freePort();
+    try {
+      await writeConfig(JSON.stringify({ managementPort: portOf(busy), previewPort }));
+      await expect(startDaemon({ environment, version: 'test' })).rejects.toMatchObject({
+        code: 'E_DAEMON_START_FAILED',
+        message: expect.stringContaining(`management listener`),
+        details: {
+          reason: 'listen',
+          listener: 'management',
+          port: portOf(busy),
+          cause: 'EADDRINUSE',
+        },
+      });
+      expect(await lockFree()).toBe(true);
+      await expect(
+        access(join(resolveStateRoot(environment), 'runtime-pointer.json')),
+      ).rejects.toThrow();
+      // The preview listener started first was closed: its port can be taken again.
+      const again = createServer();
+      await new Promise<void>((resolve, reject) => {
+        again.once('error', reject);
+        again.listen(previewPort, '127.0.0.1', resolve);
+      });
+      await new Promise((resolve) => again.close(resolve));
+      // The other socket keeps running.
+      expect(busy.listening).toBe(true);
+    } finally {
+      await new Promise((resolve) => busy.close(resolve));
+    }
+    // Once the port is free, the same settings start.
+    daemon = await startDaemon({ environment, version: 'test' });
+  });
+
+  it('a busy preview port names the preview listener', async () => {
+    const busy = await occupy();
+    try {
+      await expect(
+        startDaemon({ environment, version: 'test', previewPort: portOf(busy) }),
+      ).rejects.toMatchObject({
+        code: 'E_DAEMON_START_FAILED',
+        details: { listener: 'preview', port: portOf(busy) },
+      });
+    } finally {
+      await new Promise((resolve) => busy.close(resolve));
+    }
+  });
+
+  it.each([
+    ['not JSON', '{', 'json'],
+    ['an invalid PC port', '{"managementPort": 70000}', 'invalid:managementPort'],
+    ['an unknown key', '{"port": 1}', 'invalid:root'],
+  ])('settings that are %s fail the start with the cause', async (_name, text, issue) => {
+    await writeConfig(text);
+    await expect(startDaemon({ environment, version: 'test' })).rejects.toMatchObject({
+      code: 'E_DAEMON_START_FAILED',
+      details: { reason: 'listener-config', issue },
+    });
+    expect(await lockFree()).toBe(true);
+  });
+
+  it('a listeners.json link whose target is gone is a start error, not the defaults', async () => {
+    await mkdir(join(base, 'home'), { recursive: true, mode: 0o700 });
+    await symlink(join(base, 'moved-away.json'), configPath());
+    await expect(startDaemon({ environment, version: 'test' })).rejects.toMatchObject({
+      code: 'E_DAEMON_START_FAILED',
+      details: { reason: 'listener-config', issue: 'ENOENT' },
+    });
+  });
+
+  it('the same port for both PC listeners is a start error', async () => {
+    const port = await freePort();
+    await expect(
+      startDaemon({ environment, version: 'test', managementPort: port, previewPort: port }),
+    ).rejects.toMatchObject({
+      code: 'E_DAEMON_START_FAILED',
+      details: { reason: 'duplicate-port' },
+    });
   });
 });

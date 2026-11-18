@@ -9,6 +9,7 @@ import {
   type DocumentFormat,
   type HtmlMode,
   type LinkOpenParams,
+  type MobileGrantResult,
   type RenderDiagnostic,
   type RenderGrantResult,
   type RenderLink,
@@ -50,7 +51,11 @@ interface Snapshot {
   headingTargets: RenderGrantResult['headingTargets'];
 }
 
+// Who a grant was issued to. Each listener serves, checks, and releases only its own audience's grants.
+export type GrantAudience = 'pc' | 'mobile';
+
 interface Grant {
+  audience: GrantAudience;
   documentId: string;
   // The document's close count at issue time. Unusable after a close, even if reopened.
   openEpoch: number;
@@ -63,6 +68,8 @@ interface Grant {
   bridge: { instanceId: string; requestId: string; config: Buffer } | null;
   // Unregistered files the view tried to load.
   missing: Set<string>;
+  // Phone grants only: the view generation at issue. The grant dies when the document's revision or view generation moves.
+  viewEpoch: string | null;
 }
 
 // Information about the request that issued the view.
@@ -92,6 +99,18 @@ export interface RenderService {
   pruneClosed(): void;
   // Unregistered files the specified view tried to load.
   missingOf(grant: string): string[];
+  // The phone reader (ADR-0017). Grants live in their own quota and never serve or touch the PC's.
+  // Issues a view of the current revision, in the mode the PC allows, if `expected` still describes it.
+  createMobileGrant(
+    documentId: string,
+    expected: { revision: string; viewEpoch: string },
+  ): Promise<MobileGrantResult>;
+  resolveMobile(grant: string, logicalPath: string): Promise<PreviewFile | null>;
+  releaseMobile(grants: string[]): number;
+  // Whether a phone grant still serves (same audience, open, current revision and view generation).
+  checkMobile(grant: string): boolean;
+  // A link of a live phone grant's view, with the document the view shows.
+  mobileLinkOf(grant: string, linkId: string): { documentId: string; link: RenderLink } | null;
   readonly grantCount: number;
   // Counts of retained entries (used to check for resource leaks; daemon.diagnostics).
   retainedCounts(): Record<string, number>;
@@ -102,6 +121,8 @@ export interface RenderServiceOptions {
   documents: DocumentService;
   parse: ParseService;
   previewOrigin: () => string;
+  // The phone reader's preview origin (the public HTTPS one) and view generations. Absent when the reader is off.
+  mobile?: { previewOrigin: () => string; viewEpochOf: (documentId: string) => string } | undefined;
   // Called when the view tries to load a new unregistered file (to notify the UI).
   onMissing?: (documentId: string) => void;
 }
@@ -232,15 +253,20 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
 
   // A grant is valid only while the document is open.
   // An interactive view is unusable once the script permission is revoked.
-  const liveGrant = (key: string): Grant | null => {
+  // A phone grant also needs the revision and view generation it was issued for to still be current.
+  const liveGrant = (key: string, audience: GrantAudience = 'pc'): Grant | null => {
     const grant = grants.get(key);
-    if (!grant) return null;
+    // Another audience's key is unknown here; it is not revoked by being probed.
+    if (grant?.audience !== audience) return null;
     const record = documents.state.documents[grant.documentId];
     if (
       !record?.isOpen ||
       documents.openEpoch(grant.documentId) !== grant.openEpoch ||
       (grant.mode === 'interactive' &&
-        documents.interactiveGeneration(grant.documentId) !== grant.permission)
+        documents.interactiveGeneration(grant.documentId) !== grant.permission) ||
+      (audience === 'mobile' &&
+        (record.currentRevision !== grant.revision ||
+          options.mobile?.viewEpochOf(grant.documentId) !== grant.viewEpoch))
     ) {
       grants.delete(key);
       return null;
@@ -257,7 +283,10 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       requestId: string | null;
     },
     context: GrantContext,
-  ): Promise<RenderGrantResult> => {
+    audience: GrantAudience = 'pc',
+    // Checked again after rendering, before the grant exists (phone grants: revision and view generation).
+    stillCurrent: () => void = () => undefined,
+  ): Promise<RenderGrantResult & { viewEpoch: string | null }> => {
     const interactive = params.mode === 'interactive';
     // The interactive view is only for HTML documents the user explicitly allowed (spec 10.2).
     // The issued view is bound to the permission (generation) at that time.
@@ -290,6 +319,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     }
     // If the permission was revoked while rendering, do not issue.
     const permission = permissionOf();
+    stillCurrent();
     const { record, entry, snapshot } = prepared;
     // If the question ended while rendering (cancelled, submitted, or forgotten), do not issue an SDK-enabled view (spec 11.6).
     if (params.requestId !== null) {
@@ -335,7 +365,11 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     }
     // 256-bit random value. Usable only to view this document and revision, never for the management API.
     const key = randomBytes(32).toString('base64url');
+    const viewEpoch =
+      audience === 'mobile' ? (options.mobile?.viewEpochOf(record.documentId) ?? null) : null;
     grants.set(key, {
+      audience,
+      viewEpoch,
       documentId: record.documentId,
       openEpoch,
       revision: entry.revision,
@@ -345,15 +379,21 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       bridge,
       missing: new Set(),
     });
-    // Bound retained views across the daemon. Excess grants are revoked oldest first.
-    while (grants.size > LIMITS.renderGrants) {
-      const oldest = grants.keys().next().value;
-      if (oldest === undefined) break;
-      grants.delete(oldest);
+    // Bound retained views per audience. Excess grants are revoked oldest first, so a phone never pushes out the PC's.
+    let count = 0;
+    for (const grant of grants.values()) if (grant.audience === audience) count += 1;
+    for (const [oldKey, grant] of grants) {
+      if (count <= LIMITS.renderGrants) break;
+      if (grant.audience !== audience) continue;
+      grants.delete(oldKey);
+      count -= 1;
     }
-    const filesBaseUrl = `${options.previewOrigin()}/r/${key}/files/`;
+    const origin =
+      audience === 'mobile' ? (options.mobile?.previewOrigin() ?? '') : options.previewOrigin();
+    const filesBaseUrl = `${origin}/r/${key}/files/`;
     return {
       grant: key,
+      viewEpoch,
       documentId: record.documentId,
       revision: entry.revision,
       format: snapshot.format,
@@ -385,7 +425,11 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
 
     async createGrant(rawParams, context) {
       const params = renderGrantParamsSchema.parse(rawParams);
-      return issue({ ...params, requestId: null }, context);
+      const { viewEpoch: _viewEpoch, ...result } = await issue(
+        { ...params, requestId: null },
+        context,
+      );
+      return result;
     },
 
     async createGrantForRequest(requestId, context) {
@@ -405,7 +449,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       // A question created as interactive falls back to the static view if the script permission was revoked.
       const interactive =
         request.renderMode === 'interactive' && documents.interactiveAllowed(request.documentId);
-      return issue(
+      const { viewEpoch: _viewEpoch, ...result } = await issue(
         {
           documentId: request.documentId,
           revision: request.revision,
@@ -414,6 +458,7 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
         },
         context,
       );
+      return result;
     },
 
     bridgeOf(key) {
@@ -429,43 +474,68 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
     },
 
     release(keys) {
-      let released = 0;
-      for (const key of keys) {
-        if (grants.delete(key)) released += 1;
-      }
-      return released;
+      return releaseOf(keys, 'pc');
+    },
+
+    releaseMobile(keys) {
+      return releaseOf(keys, 'mobile');
     },
 
     async resolve(key, logicalPath) {
-      const grant = liveGrant(key);
-      if (!grant) return null;
-      // Looked up only by exact match with a registered path. Never resolved to a filesystem path.
-      const file = grant.snapshot.files.get(logicalPath);
-      if (!file) {
-        // Records loads of unregistered files so the UI can show how to register them (spec 10.3).
-        if (!grant.missing.has(logicalPath) && grant.missing.size < LIMITS.renderMissingPerGrant) {
-          grant.missing.add(logicalPath);
-          options.onMissing?.(grant.documentId);
+      return resolveOf(key, logicalPath, 'pc');
+    },
+
+    async resolveMobile(key, logicalPath) {
+      return resolveOf(key, logicalPath, 'mobile');
+    },
+
+    checkMobile(key) {
+      return liveGrant(key, 'mobile') !== null;
+    },
+
+    mobileLinkOf(key, linkId) {
+      const grant = liveGrant(key, 'mobile');
+      const link = grant?.snapshot.links.find((candidate) => candidate.linkId === linkId);
+      return grant && link ? { documentId: grant.documentId, link } : null;
+    },
+
+    async createMobileGrant(documentId, expected) {
+      const mobile = options.mobile;
+      if (!mobile) throw new VdeError('E_UNKNOWN_METHOD', 'The phone reader is off.');
+      // The view must still be the one the phone listed: same revision and view generation, before and after rendering.
+      const stillCurrent = () => {
+        const record = documents.state.documents[documentId];
+        if (!record?.isOpen) {
+          throw new VdeError('E_DOCUMENT_NOT_OPEN', 'The document is not open.', { documentId });
         }
-        return null;
-      }
-      const body =
-        file.kind === 'inline'
-          ? file.body
-          : file.kind === 'bridged'
-            ? Buffer.concat([file.before, grant.bridge?.config ?? Buffer.from('null'), file.after])
-            : await store.readBlob(file.sha256);
-      // If the grant was revoked while reading the content, do not serve it.
-      if (!liveGrant(key)) return null;
-      return {
-        body,
-        mime: file.mime,
-        role: file.role,
-        grant: key,
-        mode: grant.mode,
-        hasDocumentLinks:
-          file.role === 'document' && grant.snapshot.links.some((link) => link.kind === 'document'),
+        if (
+          record.currentRevision !== expected.revision ||
+          mobile.viewEpochOf(documentId) !== expected.viewEpoch
+        ) {
+          throw new VdeError('E_VIEW_STALE', 'The document changed. Fetch the list again.');
+        }
       };
+      stillCurrent();
+      const interactive = documents.interactiveAllowed(documentId);
+      const issued = await issue(
+        {
+          documentId,
+          revision: expected.revision,
+          mode: interactive ? 'interactive' : 'static',
+          requestId: null,
+        },
+        { origin: '' },
+        'mobile',
+        stillCurrent,
+      ).catch((error: unknown) => {
+        // The permission changed while rendering: to the phone that is a changed view, like a new revision.
+        if (error instanceof VdeError && error.code === 'E_INTERACTIVE_NOT_ALLOWED') {
+          throw new VdeError('E_VIEW_STALE', 'The document changed. Fetch the list again.');
+        }
+        throw error;
+      });
+      const { bridge: _bridge, diagnostics: _diagnostics, viewEpoch, ...result } = issued;
+      return { ...result, viewEpoch: viewEpoch ?? expected.viewEpoch };
     },
 
     missingOf(key) {
@@ -489,4 +559,48 @@ export function createRenderService(options: RenderServiceOptions): RenderServic
       return link;
     },
   };
+
+  function releaseOf(keys: string[], audience: GrantAudience): number {
+    let released = 0;
+    for (const key of keys) {
+      if (grants.get(key)?.audience === audience && grants.delete(key)) released += 1;
+    }
+    return released;
+  }
+
+  async function resolveOf(
+    key: string,
+    logicalPath: string,
+    audience: GrantAudience,
+  ): Promise<PreviewFile | null> {
+    const grant = liveGrant(key, audience);
+    if (!grant) return null;
+    // Looked up only by exact match with a registered path. Never resolved to a filesystem path.
+    const file = grant.snapshot.files.get(logicalPath);
+    if (!file) {
+      // Records loads of unregistered files so the UI can show how to register them (spec 10.3).
+      if (!grant.missing.has(logicalPath) && grant.missing.size < LIMITS.renderMissingPerGrant) {
+        grant.missing.add(logicalPath);
+        options.onMissing?.(grant.documentId);
+      }
+      return null;
+    }
+    const body =
+      file.kind === 'inline'
+        ? file.body
+        : file.kind === 'bridged'
+          ? Buffer.concat([file.before, grant.bridge?.config ?? Buffer.from('null'), file.after])
+          : await store.readBlob(file.sha256);
+    // If the grant was revoked while reading the content, do not serve it.
+    if (!liveGrant(key, audience)) return null;
+    return {
+      body,
+      mime: file.mime,
+      role: file.role,
+      grant: key,
+      mode: grant.mode,
+      hasDocumentLinks:
+        file.role === 'document' && grant.snapshot.links.some((link) => link.kind === 'document'),
+    };
+  }
 }

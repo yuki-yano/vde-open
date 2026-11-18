@@ -113,7 +113,7 @@ beforeEach(() => {
     refresh: () => Promise.resolve(),
     documents: () =>
       Promise.resolve({ documents: current.documents, catalogVersion: 1, cursor: null }),
-    status: () => Promise.resolve({ activeDocumentId: 'doc_1' }),
+    status: () => Promise.resolve({ activeDocumentId: 'doc_1', daemonId: 'd1' }),
     feedback: () => {
       feedbackRequests += 1;
       return Promise.resolve(current.request);
@@ -226,6 +226,86 @@ describe('SYS-013 notification reconnect and question refetch', () => {
     handlers?.onEvent({ type: 'resync-required', daemonId: 'd1', sequence: 6, catalogVersion: 1 });
     await until(() => feedbackRequests > before);
     expect(feedbackRequests).toBeGreaterThan(before);
+  });
+});
+
+describe('a new daemon start (PC restart)', () => {
+  it('a hello from a new start removes the old frame at once, even when the list cannot be fetched, and shows a grant from the new start', async () => {
+    window.localStorage.setItem('vde-open.pref.view-mode', JSON.stringify('preview'));
+    const issued: string[] = [];
+    let daemon = 'd1';
+    api.renderMissing = () => Promise.resolve([]);
+    api.renderGrant = (() => {
+      const name = `grant-${daemon}-${String(issued.length)}`;
+      issued.push(name);
+      return Promise.resolve({
+        grant: name,
+        documentId: 'doc_1',
+        revision: REV1,
+        format: 'html',
+        mode: 'static',
+        documentUrl: `http://127.0.0.1:1/r/${name}/files/a.html`,
+        filesBaseUrl: `http://127.0.0.1:1/r/${name}/files/`,
+        documentLogicalPath: 'a.html',
+        assets: [],
+        links: [],
+        diagnostics: [],
+        headingTargets: [],
+        bridge: null,
+      } as RenderGrantResult);
+    }) as Api['renderGrant'];
+    const frameSrc = () => container.querySelector('iframe')?.getAttribute('src') ?? '';
+    root.render(<Workspace api={api} />);
+    await until(() => handlers !== null);
+    handlers?.onConnect();
+    handlers?.onEvent({ type: 'hello', daemonId: 'd1', sequence: 0, catalogVersion: 1 });
+    await until(() => frameSrc().includes('grant-d1'));
+    expect(frameSrc()).toContain('grant-d1');
+
+    // The daemon restarts. Its first list fetch fails, and no further notification arrives.
+    daemon = 'd2';
+    api.documents = () => Promise.reject(new Error('not reachable yet'));
+    api.status = (() =>
+      Promise.resolve({ activeDocumentId: 'doc_1', daemonId: 'd2' })) as Api['status'];
+    handlers?.onConnect();
+    handlers?.onEvent({ type: 'hello', daemonId: 'd2', sequence: 0, catalogVersion: 1 });
+    await until(() => frameSrc().includes('grant-d2'));
+    expect(frameSrc()).toContain('grant-d2');
+    expect(issued).toEqual(['grant-d1-0', 'grant-d2-1']);
+  });
+
+  it('a list fetch started before the restart and answered by the previous start does not take the views back to it', async () => {
+    window.localStorage.setItem('vde-open.pref.view-mode', JSON.stringify('preview'));
+    let requests = 0;
+    api.renderMissing = () => Promise.resolve([]);
+    api.renderGrant = (() => {
+      requests += 1;
+      return new Promise<RenderGrantResult>(() => undefined);
+    }) as Api['renderGrant'];
+    root.render(<Workspace api={api} />);
+    await until(() => handlers !== null);
+    handlers?.onConnect();
+    handlers?.onEvent({ type: 'hello', daemonId: 'd1', sequence: 0, catalogVersion: 1 });
+    await until(() => requests === 1);
+
+    // A list fetch starts before the restart; the previous start's answer is held back.
+    let answerFromPrevious: () => void = () => undefined;
+    api.status = (() =>
+      new Promise((resolve) => {
+        answerFromPrevious = () =>
+          resolve({ activeDocumentId: 'doc_1', daemonId: 'd1' } as Awaited<
+            ReturnType<Api['status']>
+          >);
+      })) as Api['status'];
+    handlers?.onEvent({ type: 'catalog-changed', daemonId: 'd1', sequence: 1, catalogVersion: 1 });
+    await settle();
+    // The daemon restarts and the new start's hello prepares the view for it.
+    handlers?.onEvent({ type: 'hello', daemonId: 'd2', sequence: 0, catalogVersion: 1 });
+    await until(() => requests === 2);
+    // Only now does the fetch started before the restart complete.
+    answerFromPrevious();
+    await settle(80);
+    expect(requests).toBe(2);
   });
 });
 
