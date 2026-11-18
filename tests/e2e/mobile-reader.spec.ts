@@ -545,3 +545,26 @@ test('a static view stays scrollable while it is checked again, and its document
   await expect(mobile.getByRole('heading', { name: '文書B' }).first()).toBeVisible();
   await mobile.context().close();
 });
+
+test('both screens declare an icon and a home-screen icon that load', async ({ page, browser }) => {
+  t.write('a.md', '# a\n');
+  await t.json(['open', 'a.md', '--no-open']);
+  const mobile = await phone(browser);
+  for (const [target, url] of [
+    [page, await t.uiUrl()],
+    [mobile, MOBILE_UI_URL],
+  ] as const) {
+    await target.goto(url);
+    for (const [rel, type] of [
+      ['icon', 'image/svg+xml'],
+      ['apple-touch-icon', 'image/png'],
+    ] as const) {
+      const href = await target.locator(`link[rel="${rel}"]`).getAttribute('href');
+      expect(href).toMatch(/^\/assets\//);
+      const response = await target.request.get(new URL(href ?? '', url).toString());
+      expect(response.status()).toBe(200);
+      expect(response.headers()['content-type']).toBe(type);
+    }
+  }
+  await mobile.context().close();
+});
