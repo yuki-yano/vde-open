@@ -1,14 +1,26 @@
+import { buildLabels, type DocumentSummary, type MobileDocument } from '@vde-open/shared';
 import { describe, expect, it } from 'vitest';
 
-import { documentAt, inRepository, inWorktree } from './document.fixture.ts';
 import {
-  buildTree,
+  documentAt,
+  inRepository,
+  inWorktree,
+} from '../../../../packages/shared/src/document.fixture.ts';
+import { pcEntry, phoneEntry } from './repository-labels.ts';
+import {
+  buildTree as buildTreeOf,
   INPUT_GROUP_NAME,
   OUTSIDE_GROUP_NAME,
   PENDING_GROUP_NAME,
   UNKNOWN_CHECKOUT_NAME,
   type TreeNode,
 } from './tree.ts';
+
+// The PC's tree: its documents with the names computed from the whole list.
+function buildTree(documents: DocumentSummary[]): TreeNode<DocumentSummary>[] {
+  const labels = buildLabels(documents);
+  return buildTreeOf(documents.map((document) => pcEntry(document, labels)));
+}
 
 // Names of each node, nested. Repository and worktree rows are marked, and a hidden worktree row shows as such.
 function shape(nodes: TreeNode[]): unknown {
@@ -160,6 +172,76 @@ describe('DOC-007 tree grouped by repository', () => {
       { [PENDING_GROUP_NAME]: [{ 'mnt/slow': ['y.md'] }] },
       // The whole path stays (no shared parent is dropped); single-child directories collapse.
       { [OUTSIDE_GROUP_NAME]: [{ 'home/u': [{ notes: ['plan.md'] }, { other: ['x.md'] }] }] },
+      { [INPUT_GROUP_NAME]: ['レビュー'] },
+    ]);
+  });
+});
+
+describe('the same tree on the phone', () => {
+  let counter = 0;
+  const row = (title: string, location: MobileDocument['location']): MobileDocument => {
+    counter += 1;
+    return {
+      documentId: `doc_00000000-0000-4000-8000-${String(counter).padStart(12, '0')}`,
+      title,
+      format: 'markdown',
+      location,
+      openedAt: '',
+      updatedAt: '',
+      revision: null,
+      sourceState: 'ready',
+      effectiveMode: null,
+      viewEpoch: '0.0',
+    };
+  };
+
+  it('builds the PC hierarchy from the names and paths the phone gets, with file names only outside', () => {
+    const tree = buildTreeOf(
+      [
+        row('Plan', {
+          kind: 'repository',
+          key: 'k1',
+          name: 'me/dotfiles',
+          checkout: { kind: 'linked', key: 'w1', label: 'feature/x', full: 'feature/x (x)' },
+          path: ['docs', 'plan.md'],
+        }),
+        row('Other', {
+          kind: 'repository',
+          key: 'k2',
+          name: 'app',
+          checkout: { kind: 'main' },
+          path: ['docs', 'guide', 'b.md'],
+        }),
+        row('Gone', {
+          kind: 'repository',
+          key: 'k2',
+          name: 'app',
+          checkout: { kind: 'unknown' },
+          path: ['.git', 'wt', 'x', 'a.md'],
+        }),
+        row('Copy', {
+          kind: 'unresolved',
+          key: 'k3',
+          name: 'copy',
+          reason: 'link-mismatch',
+          path: ['c.md'],
+        }),
+        row('Slow', { kind: 'pending', fileName: 'y.md' }),
+        row('Notes', { kind: 'outside', fileName: 'plan.md' }),
+        row('レビュー', { kind: 'stdin' }),
+      ].map(phoneEntry),
+    );
+    expect(shape(tree)).toEqual([
+      { '[repo] me/dotfiles ⑂ feature/x': [{ '(hidden) ⑂ feature/x': [{ docs: ['plan.md'] }] }] },
+      {
+        '[repo] app': [
+          { 'docs/guide': ['b.md'] },
+          { [UNKNOWN_CHECKOUT_NAME]: [{ '.git/wt/x': ['a.md'] }] },
+        ],
+      },
+      { '[repo] copy !link-mismatch': ['c.md'] },
+      { [PENDING_GROUP_NAME]: ['y.md'] },
+      { [OUTSIDE_GROUP_NAME]: ['plan.md'] },
       { [INPUT_GROUP_NAME]: ['レビュー'] },
     ]);
   });

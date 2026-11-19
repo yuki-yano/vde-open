@@ -1,58 +1,54 @@
-import type { DocumentSummary, RepositoryReason } from '@vde-open/shared';
+import type { RepositoryReason } from '@vde-open/shared';
 
-import {
-  buildLabels,
-  directoriesOf,
-  fileNameOf,
-  placementOf,
-  type Labels,
-} from './repository-labels.ts';
+import type { ListDocument, ListEntry } from './repository-labels.ts';
 
-// The sidebar tree (spec 13.1). A view built from the paths and repositories of registered documents; it never touches the filesystem.
+// The sidebar tree (spec 13.1), and the same tree on the phone. A view built from the paths and repositories of
+// registered documents; it never touches the filesystem.
 // The top level is one node per repository. Inside it, the main checkout comes first, then each linked worktree.
 // Every node has a key that stays the same as long as it shows the same thing, so the DOM is not rebuilt
 // (and focus is not lost) when, for example, a repository with one worktree turns into one with two.
-export type TreeNode =
+export type TreeNode<D extends ListDocument = ListDocument> =
   | {
       kind: 'repository';
       key: string;
       name: string;
       // The repository folder (or the folder of an unresolved checkout) as a full path, for the tooltip.
-      location: string;
+      // null on the phone.
+      location: string | null;
       // Why the checkout could not be verified. null for a verified repository.
       reason: RepositoryReason | null;
       // Set when the only child is one worktree: the row shows both, and the worktree's own row is hidden.
       merged: string | null;
-      children: TreeNode[];
+      children: TreeNode<D>[];
     }
   | {
       kind: 'worktree';
       key: string;
       name: string;
-      location: string;
+      location: string | null;
       // The row is shown on the repository row instead (see merged). It stays for screen readers.
       hidden: boolean;
-      children: TreeNode[];
+      children: TreeNode<D>[];
     }
-  | { kind: 'group'; key: string; name: string; children: TreeNode[] }
-  | { kind: 'directory'; key: string; name: string; children: TreeNode[] }
-  | { kind: 'document'; key: string; name: string; document: DocumentSummary };
+  | { kind: 'group'; key: string; name: string; children: TreeNode<D>[] }
+  | { kind: 'directory'; key: string; name: string; children: TreeNode<D>[] }
+  | { kind: 'document'; key: string; name: string; document: D };
 
 export const INPUT_GROUP_NAME = 'Input and generated documents';
 export const OUTSIDE_GROUP_NAME = 'Outside a repository';
 export const PENDING_GROUP_NAME = 'Checking repositories';
 export const UNKNOWN_CHECKOUT_NAME = 'Unknown checkout';
 
-interface Branch {
-  directories: Map<string, Branch>;
-  documents: Array<{ document: DocumentSummary; name: string }>;
+interface Branch<D> {
+  directories: Map<string, Branch<D>>;
+  documents: Array<{ document: D; name: string }>;
 }
 
-function emptyBranch(): Branch {
+function emptyBranch<D>(): Branch<D> {
   return { directories: new Map(), documents: [] };
 }
 
-function insert(root: Branch, directories: string[], document: DocumentSummary, name: string) {
+function insert<D>(root: Branch<D>, directories: string[], document: D, name: string) {
   let branch = root;
   for (const segment of directories) {
     let next = branch.directories.get(segment);
@@ -65,14 +61,14 @@ function insert(root: Branch, directories: string[], document: DocumentSummary, 
   branch.documents.push({ document, name });
 }
 
-function toNodes(branch: Branch, parentKey: string): TreeNode[] {
-  const nodes: TreeNode[] = [];
+function toNodes<D extends ListDocument>(branch: Branch<D>, parentKey: string): TreeNode<D>[] {
+  const nodes: TreeNode<D>[] = [];
   for (const [name, child] of branch.directories) {
     // If the only child is a single directory, collapse it into one row like `a/b/c`.
     let label = name;
     let current = child;
     while (current.documents.length === 0 && current.directories.size === 1) {
-      const [nextName, next] = [...current.directories.entries()][0] as [string, Branch];
+      const [nextName, next] = [...current.directories.entries()][0] as [string, Branch<D>];
       label = `${label}/${nextName}`;
       current = next;
     }
@@ -85,88 +81,68 @@ function toNodes(branch: Branch, parentKey: string): TreeNode[] {
   return nodes;
 }
 
-// The folder of a repository for the tooltip: its common Git directory without the trailing .git.
-function folderOf(id: string): string {
-  return id.replace(/[\\/]\.git$/, '');
-}
-
-interface RepositoryBucket {
+interface RepositoryBucket<D> {
   key: string;
   name: string;
-  location: string;
+  location: string | null;
   reason: RepositoryReason | null;
-  main: Branch;
-  unknown: Branch | null;
-  worktrees: Map<string, { name: string; location: string; branch: Branch }>;
+  main: Branch<D>;
+  unknown: Branch<D> | null;
+  worktrees: Map<string, { name: string; location: string | null; branch: Branch<D> }>;
 }
 
-export function buildTree(
-  documents: DocumentSummary[],
-  labels: Labels = buildLabels(documents),
-): TreeNode[] {
+export function buildTree<D extends ListDocument>(entries: ListEntry<D>[]): TreeNode<D>[] {
   // Repositories in the order their first document appears in the list.
-  const repositories = new Map<string, RepositoryBucket>();
-  const pending = emptyBranch();
-  const outside = emptyBranch();
-  const inputs: DocumentSummary[] = [];
+  const repositories = new Map<string, RepositoryBucket<D>>();
+  const pending = emptyBranch<D>();
+  const outside = emptyBranch<D>();
+  const inputs: D[] = [];
   let hasPending = false;
   let hasOutside = false;
 
-  for (const document of documents) {
-    const placement = placementOf(document);
-    if (placement.kind === 'input') {
+  for (const { document, place, directories, fileName } of entries) {
+    if (place.kind === 'input') {
       inputs.push(document);
       continue;
     }
-    if (placement.kind === 'pending' || placement.kind === 'outside') {
-      // The whole path is shown, so documents in different places can be told apart without a shared parent.
-      insert(
-        placement.kind === 'pending' ? pending : outside,
-        document.pathSegments.slice(0, -1),
-        document,
-        fileNameOf(document),
-      );
-      if (placement.kind === 'pending') hasPending = true;
+    if (place.kind === 'pending' || place.kind === 'outside') {
+      // The PC shows the whole path, so documents in different places can be told apart without a shared parent.
+      // The phone has no path here: only file names.
+      insert(place.kind === 'pending' ? pending : outside, directories, document, fileName);
+      if (place.kind === 'pending') hasPending = true;
       else hasOutside = true;
       continue;
     }
-    let bucket = repositories.get(placement.key);
+    let bucket = repositories.get(place.key);
     if (!bucket) {
       bucket = {
-        key: placement.key,
-        name:
-          labels.repository.get(placement.key) ?? placement.repository.nameSegments.at(-1) ?? '',
-        location: folderOf(placement.repository.id),
-        reason: placement.kind === 'unresolved' ? placement.repository.reason : null,
+        key: place.key,
+        name: place.name,
+        location: place.location,
+        reason: place.kind === 'unresolved' ? place.reason : null,
         main: emptyBranch(),
         unknown: null,
         worktrees: new Map(),
       };
-      repositories.set(placement.key, bucket);
+      repositories.set(place.key, bucket);
     }
-    const directories = directoriesOf(document);
-    const name = fileNameOf(document);
-    const checkout = placement.kind === 'repository' ? placement.repository.checkout : undefined;
-    if (checkout === null) {
+    const checkout = place.kind === 'repository' ? place.checkout : undefined;
+    if (checkout?.kind === 'unknown') {
       bucket.unknown ??= emptyBranch();
-      insert(bucket.unknown, directories, document, name);
+      insert(bucket.unknown, directories, document, fileName);
     } else if (checkout?.kind === 'linked') {
-      let worktree = bucket.worktrees.get(checkout.id);
+      let worktree = bucket.worktrees.get(checkout.key);
       if (!worktree) {
-        worktree = {
-          name: labels.worktree.get(checkout.id) ?? checkout.name,
-          location: checkout.id,
-          branch: emptyBranch(),
-        };
-        bucket.worktrees.set(checkout.id, worktree);
+        worktree = { name: checkout.label, location: checkout.location, branch: emptyBranch() };
+        bucket.worktrees.set(checkout.key, worktree);
       }
-      insert(worktree.branch, directories, document, name);
+      insert(worktree.branch, directories, document, fileName);
     } else {
-      insert(bucket.main, directories, document, name);
+      insert(bucket.main, directories, document, fileName);
     }
   }
 
-  const nodes: TreeNode[] = [];
+  const nodes: TreeNode<D>[] = [];
   for (const bucket of repositories.values()) {
     const children = toNodes(bucket.main, bucket.key);
     if (bucket.unknown) {

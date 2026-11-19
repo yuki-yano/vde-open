@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/lib/api';
 import { orderDocuments, type MobileApi } from '@/lib/mobile-api';
 
-import { CLOSED_NOTICE, MobileReader } from './mobile-reader.tsx';
+import { CLOSED_NOTICE, MobileReader, REMOVE_FAILED_NOTICE } from './mobile-reader.tsx';
 
 // happy-dom has no Worker: parse on the spot, as the worker would.
 vi.mock('@/lib/use-markdown', () => ({
@@ -26,7 +26,9 @@ function row(overrides: Partial<MobileDocument> = {}): MobileDocument {
     documentId: id(1),
     title: 'デモ',
     format: 'html',
+    location: { kind: 'stdin' },
     openedAt: '2026-11-18T00:00:00.000Z',
+    updatedAt: '2026-11-18T00:00:00.000Z',
     revision: REV1,
     sourceState: 'ready',
     effectiveMode: 'interactive',
@@ -49,6 +51,7 @@ let grants: Pending[];
 let released: Array<{ grants: string[]; keepalive: boolean }>;
 let valid: Set<string>;
 let handlers: Parameters<MobileApi['events']>[0] | null;
+let closed: string[];
 let api: MobileApi;
 
 function grantOf(name: string, viewEpoch = '0.0', mode: 'interactive' | 'static' = 'interactive') {
@@ -80,6 +83,8 @@ beforeEach(() => {
   released = [];
   valid = new Set();
   handlers = null;
+  closed = [];
+  window.localStorage.clear();
   api = {
     documents: () =>
       listFails
@@ -96,6 +101,11 @@ beforeEach(() => {
       return Promise.resolve();
     },
     resolveLink: () => Promise.resolve({ status: 'not-open' }),
+    close: (documentId) => {
+      closed.push(documentId);
+      documents = documents.filter((document) => document.documentId !== documentId);
+      return Promise.resolve();
+    },
     events: (next) => {
       handlers = next;
       return { close: () => undefined };
@@ -114,11 +124,16 @@ async function until(condition: () => boolean): Promise<void> {
   while (!condition() && Date.now() < deadline) await settle(10);
 }
 const text = () => container.textContent ?? '';
-const rows = () =>
-  [...container.querySelectorAll('main nav li button')].map((item) => item.textContent);
+const titles = (scope: ParentNode) =>
+  [...scope.querySelectorAll('li button [data-part="title"]')].map((item) => item.textContent);
+const rows = () => titles(container.querySelector('main') ?? container);
 const frame = () => container.querySelector<HTMLIFrameElement>('[data-testid="document-frame"]');
 const paused = () => container.querySelector('[data-testid="frame-paused"]') !== null;
 const emit = (event: MobileEvent) => handlers?.onEvent(event);
+const buttonNamed = (name: string, scope: ParentNode = document) =>
+  [...scope.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => (button.getAttribute('aria-label') ?? button.textContent?.trim()) === name,
+  ) as HTMLButtonElement;
 
 async function start(): Promise<void> {
   root.render(<MobileReader api={api} />);
@@ -156,7 +171,7 @@ describe('the list', () => {
     await until(() => text().includes('Could not load the documents from the PC.'));
     listFails = false;
     documents = [];
-    (container.querySelector('button') as HTMLButtonElement).click();
+    buttonNamed('Try again').click();
     await until(() => text().includes('No documents are open on the PC.'));
     expect(text()).toContain('No documents are open on the PC.');
   });
@@ -182,6 +197,12 @@ describe('moving between the list and documents', () => {
     await until(() => text().includes(CLOSED_NOTICE));
     expect(frame()).toBeNull();
     expect(rows()).toEqual(['次の文書']);
+    expect(new URLSearchParams(window.location.search).get('document')).toBeNull();
+    // Forward to an entry that still names it, as when it was closed while the list was shown.
+    window.history.pushState(null, '', `/?document=${id(1)}`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await settle();
+    expect(text()).toContain(CLOSED_NOTICE);
     expect(new URLSearchParams(window.location.search).get('document')).toBeNull();
   });
 });
@@ -511,7 +532,7 @@ describe('the document drawer and static frames', () => {
     await until(() => toggle.getAttribute('aria-expanded') === 'true');
     const drawer = container.querySelector('#mobile-document-list') as HTMLElement;
     const items = [...drawer.querySelectorAll('li button')];
-    expect(items.map((item) => item.textContent)).toEqual(['A', 'B']);
+    expect(titles(drawer)).toEqual(['A', 'B']);
     expect(items[0]?.getAttribute('aria-current')).toBe('page');
     (items[1] as HTMLButtonElement).click();
     await until(() => new URLSearchParams(window.location.search).get('document') === id(2));
@@ -606,5 +627,207 @@ describe('drawer review follow-ups', () => {
     await until(() => drawerHidden());
     await settle(30);
     expect(document.activeElement).toBe(back);
+  });
+});
+
+describe('the list layout and the document menu', () => {
+  const inRepository = (n: number, title: string, path: string[]): MobileDocument =>
+    row({
+      documentId: id(n),
+      title,
+      format: 'markdown',
+      effectiveMode: null,
+      openedAt: `2026-11-18T0${String(9 - n)}:00:00.000Z`,
+      location: {
+        kind: 'repository',
+        key: 'k1',
+        name: 'me/dotfiles',
+        checkout: { kind: 'linked', key: 'w1', label: 'feature/x', full: 'feature/x (x)' },
+        path,
+      },
+    });
+  const locationLines = () =>
+    [...container.querySelectorAll('[data-part="location"]')].map((line) => line.textContent);
+  const rowButton = (title: string) =>
+    [...container.querySelectorAll<HTMLButtonElement>('li button')].find((button) =>
+      button.textContent?.includes(title),
+    ) as HTMLButtonElement;
+  const sheet = () => document.querySelector('[role="dialog"]');
+  const press = (target: Element, type: string, at: { x: number; y: number }) =>
+    target.dispatchEvent(
+      new PointerEvent(type, {
+        bubbles: true,
+        isPrimary: true,
+        button: 0,
+        pointerType: 'touch',
+        clientX: at.x,
+        clientY: at.y,
+      }),
+    );
+  const contextMenu = (target: Element) =>
+    target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+  it('shows the location line in flat, switches to the tree, and keeps both choices after a restart', async () => {
+    documents = [
+      inRepository(1, 'Plan', ['docs', 'old', 'plan.md']),
+      row({ documentId: id(2), title: 'Notes', location: { kind: 'outside', fileName: 'c.md' } }),
+    ];
+    await start();
+    await until(() => rows().length === 2);
+    expect(locationLines()).toEqual(['me/dotfilesfeature/x…/old/plan.md', 'c.md']);
+    expect(rowButton('Plan').getAttribute('aria-describedby')).not.toBeNull();
+
+    buttonNamed('Locations').click();
+    await until(() => locationLines().length === 0);
+    expect(buttonNamed('Locations').getAttribute('aria-pressed')).toBe('false');
+
+    buttonNamed('Tree').click();
+    await until(() => container.querySelector('[data-node="repository"]') !== null);
+    // The tree has no second line, so its toggle is gone; rows show the file name, as on the PC.
+    expect(buttonNamed('Locations')).toBeUndefined();
+    expect(container.querySelector('[data-node="repository"]')?.textContent).toContain(
+      'me/dotfiles',
+    );
+    expect([...container.querySelectorAll('li button')].map((item) => item.textContent)).toEqual([
+      'plan.md',
+      'c.md',
+    ]);
+
+    root.unmount();
+    root = createRoot(container);
+    handlers = null;
+    await start();
+    await until(() => container.querySelector('[data-node="repository"]') !== null);
+    buttonNamed('Flat').click();
+    await until(() => rows().length === 2);
+    expect(locationLines()).toEqual([]);
+  });
+
+  it('a held press opens the menu without opening the document; a moving finger does not', async () => {
+    documents = [inRepository(1, 'Plan', ['plan.md'])];
+    await start();
+    await until(() => rows().length === 1);
+    const target = rowButton('Plan');
+
+    press(target, 'pointerdown', { x: 10, y: 10 });
+    press(target, 'pointermove', { x: 10, y: 40 });
+    await settle(600);
+    expect(sheet()).toBeNull();
+    press(target, 'pointercancel', { x: 10, y: 40 });
+
+    // A mouse that leaves the row is released where the row sees no pointerup.
+    target.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        isPrimary: true,
+        button: 0,
+        pointerType: 'mouse',
+      }),
+    );
+    target.dispatchEvent(
+      new PointerEvent('pointerout', {
+        bubbles: true,
+        isPrimary: true,
+        pointerType: 'mouse',
+        relatedTarget: document.body,
+      }),
+    );
+    await settle(600);
+    expect(sheet()).toBeNull();
+
+    press(target, 'pointerdown', { x: 10, y: 10 });
+    press(target, 'pointermove', { x: 12, y: 13 });
+    await until(() => sheet() !== null);
+    expect(sheet()?.textContent).toContain('Remove from the PC list');
+    press(target, 'pointerup', { x: 12, y: 13 });
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    await settle();
+    expect(new URLSearchParams(window.location.search).get('document')).toBeNull();
+    expect(sheet()).not.toBeNull();
+
+    // Closed on the PC, the menu goes with it; opened again there, the menu does not come back.
+    const other = row({ documentId: id(2), title: 'Notes', openedAt: '2026-11-17T00:00:00.000Z' });
+    const plan = documents.map((document) => ({ ...document, viewEpoch: '1.0' }));
+    documents = [other];
+    emit({ type: 'changed', daemonId: 'd1' });
+    await until(() => sheet() === null);
+    expect(sheet()).toBeNull();
+    documents = [...plan, other];
+    emit({ type: 'changed', daemonId: 'd1' });
+    await until(() => rows().length === 2);
+    await settle();
+    expect(sheet()).toBeNull();
+  });
+
+  it('removing the document being read returns to the list without saying the PC closed it', async () => {
+    documents = [
+      row({ title: 'A' }),
+      row({ documentId: id(2), title: 'B', openedAt: '2026-11-17T00:00:00.000Z' }),
+    ];
+    await showDemo('ra');
+    const length = window.history.length;
+    let finish: () => void = () => undefined;
+    api.close = (documentId) => {
+      closed.push(documentId);
+      documents = documents.filter((document) => document.documentId !== documentId);
+      // The PC announces the change before the request returns.
+      emit({ type: 'changed', daemonId: 'd1' });
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    };
+    buttonNamed('Switch document').click();
+    const drawer = container.querySelector('#mobile-document-list') as HTMLElement;
+    await until(() => !drawer.classList.contains('hidden'));
+    contextMenu(rowButton('A'));
+    await until(() => sheet() !== null);
+    buttonNamed('Remove from the PC list', sheet() as Element).click();
+    await until(() => rows().length === 1);
+    finish();
+    await settle();
+    expect(closed).toEqual([id(1)]);
+    expect(frame()).toBeNull();
+    expect(rows()).toEqual(['B']);
+    expect(text()).not.toContain(CLOSED_NOTICE);
+    expect(new URLSearchParams(window.location.search).get('document')).toBeNull();
+    // It went back to the list entry it came from: the next document replaces A's entry, so Back reaches the list once.
+    rowButton('B').click();
+    await until(() => new URLSearchParams(window.location.search).get('document') === id(2));
+    expect(window.history.length).toBe(length);
+  });
+
+  it('a row being removed cannot be chosen meanwhile; a failed removal says so and brings the row back', async () => {
+    documents = [row({ title: 'A' })];
+    let fail: (error: Error) => void = () => undefined;
+    api.close = () =>
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      });
+    await start();
+    await until(() => rows().length === 1);
+    contextMenu(rowButton('A'));
+    await until(() => sheet() !== null);
+    buttonNamed('Remove from the PC list', sheet() as Element).click();
+    await until(() => rows().length === 0);
+    expect(rows()).toEqual([]);
+    fail(new Error('offline'));
+    await until(() => text().includes(REMOVE_FAILED_NOTICE));
+    expect(rows()).toEqual(['A']);
+
+    // Removed on the PC, but the list fetched next fails: the old list still holds A, which stays hidden.
+    api.close = () => Promise.resolve();
+    listFails = true;
+    contextMenu(rowButton('A'));
+    await until(() => sheet() !== null);
+    buttonNamed('Remove from the PC list', sheet() as Element).click();
+    await until(() => rows().length === 0);
+    await settle();
+    expect(rows()).toEqual([]);
+    // Opened again on the PC: a new open of the same document shows.
+    listFails = false;
+    documents = [row({ title: 'A', viewEpoch: '1.0' })];
+    emit({ type: 'changed', daemonId: 'd1' });
+    await until(() => rows().length === 1);
+    expect(rows()).toEqual(['A']);
   });
 });

@@ -1,13 +1,15 @@
 // @vitest-environment happy-dom
-import type { DocumentSummary } from '@vde-open/shared';
+import { buildLabels, type DocumentSummary } from '@vde-open/shared';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { documentAt, inRepository, inWorktree } from '@/lib/document.fixture';
+import {
+  documentAt,
+  inRepository,
+  inWorktree,
+} from '../../../../packages/shared/src/document.fixture.ts';
 import type { SidebarView } from '@/lib/preferences';
-
-import { buildLabels } from '@/lib/repository-labels';
 
 import { DocumentLocation, RepositoryLabelsContext } from './document-location.tsx';
 import { Sidebar } from './sidebar.tsx';

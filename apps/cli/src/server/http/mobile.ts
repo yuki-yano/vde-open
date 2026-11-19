@@ -1,12 +1,16 @@
+import { createHmac, randomBytes } from 'node:crypto';
 import type { IncomingHttpHeaders, IncomingMessage, Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { serve, type HttpBindings } from '@hono/node-server';
 import {
+  buildLabels,
+  documentIdSchema,
   errorEnvelope,
   isVdeError,
   LIMITS,
   mobileCheckParamsSchema,
+  mobileCloseParamsSchema,
   mobileGrantParamsSchema,
   mobileLinkParamsSchema,
   mobileReleaseParamsSchema,
@@ -15,6 +19,7 @@ import {
   VdeError,
   viewEpochSchema,
   type DocumentSummary,
+  type Labels,
   type MobileContentResult,
   type MobileDocument,
   type MobileEvent,
@@ -34,6 +39,7 @@ import type { ViewEpochs } from '../../render/view-epochs.ts';
 import type { EventHub } from '../event-hub.ts';
 import { createEventStreams } from './event-stream.ts';
 import { loadStaticAssets } from './management.ts';
+import { mobileLocationOf } from './mobile-location.ts';
 
 // The phone reader (ADR-0017). Reached only through Tailscale Serve, which adds the person's login.
 const API_PREFIX = '/_/mobile/v1';
@@ -201,11 +207,17 @@ export async function startMobileServer(
     return next();
   });
 
-  const rowOf = (summary: DocumentSummary): MobileDocument => ({
+  // Keys for the phone that cannot be turned back into the repository or checkout path. A new start gives new keys.
+  const salt = randomBytes(32);
+  const opaque = (value: string) => createHmac('sha256', salt).update(value).digest('base64url');
+
+  const rowOf = (summary: DocumentSummary, labels: Labels): MobileDocument => ({
     documentId: summary.documentId,
     title: summary.title,
     format: summary.format,
+    location: mobileLocationOf(summary, labels, opaque),
     openedAt: summary.openedAt,
+    updatedAt: summary.updatedAt,
     revision: summary.revision,
     sourceState: summary.sourceState,
     effectiveMode:
@@ -221,6 +233,22 @@ export async function startMobileServer(
       throw new VdeError('E_VIEW_STALE', 'Stale.');
     }
     return record;
+  };
+
+  // Names depend on every open document, as on the PC, not only on one page. Listing is synchronous, so all the
+  // pages read here come from the same state as the page returned.
+  const labelsOfAllOpen = (): Labels => {
+    const all: DocumentSummary[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = documents.list({
+        limit: LIMITS.listLimitMax,
+        ...(cursor === null ? {} : { cursor }),
+      });
+      all.push(...page.data.documents);
+      cursor = page.data.nextCursor;
+    } while (cursor !== null);
+    return buildLabels(all);
   };
 
   const api = new Hono<HttpEnv>();
@@ -241,10 +269,11 @@ export async function startMobileServer(
       limit: limit === undefined ? LIMITS.listLimitMax : limitQuery.parse(limit),
       ...(inner === undefined ? {} : { cursor: inner }),
     });
+    const labels = labelsOfAllOpen();
     const data: MobileListResult = {
       daemonId: deps.daemonId,
       catalogVersion: result.catalogVersion,
-      documents: result.data.documents.map(rowOf),
+      documents: result.data.documents.map((summary) => rowOf(summary, labels)),
       nextCursor:
         result.data.nextCursor === null
           ? null
@@ -321,6 +350,24 @@ export async function startMobileServer(
         command: 'mobile.render-grant',
         catalogVersion: documents.state.catalogVersion,
       }),
+    );
+  });
+
+  // Removes the document from the PC list, as the PC's close button does (pending questions on it are cancelled).
+  // Only by document ID: a path is never accepted. A document that is already gone counts as closed, so a retry is safe.
+  api.post('/documents/:id/close', async (c) => {
+    mobileCloseParamsSchema.parse(await jsonBody(c));
+    const documentId = documentIdSchema.parse(c.req.param('id'));
+    try {
+      await documents.close({ cwd: '/', targets: [documentId], all: false });
+    } catch (error) {
+      if (!isVdeError(error) || error.code !== 'E_DOCUMENT_NOT_FOUND') throw error;
+    }
+    return c.json(
+      successEnvelope(
+        {},
+        { command: 'mobile.close', catalogVersion: documents.state.catalogVersion },
+      ),
     );
   });
 

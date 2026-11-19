@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { Viewer, type ViewerProps } from '@/components/viewer';
 import type { Api } from '@/lib/api';
-import { documentAt } from '@/lib/document.fixture';
+import { documentAt } from '../../../../packages/shared/src/document.fixture.ts';
 
 const REV1 = `rev_${'1'.repeat(64)}`;
 const REV2 = `rev_${'2'.repeat(64)}`;

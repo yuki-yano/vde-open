@@ -26,8 +26,8 @@ PCで開いた文書を本人のスマホで読み、PCで許可したHTMLデモ
   - 設定の`login`と一致する`Tailscale-User-Login`がちょうど1つあること
 
   UIは403、プレビューは未知のgrantと同じ404で拒否する。
-- スマホのAPIは`/_/mobile/v1`の一覧・Markdown本文・表示の権限の発行／返却／確認・linkの解決・通知だけとする。
-  - 応答は項目を列挙したDTOで返し、パス・repository・key・質問IDを含めない。
+- スマホのAPIは`/_/mobile/v1`の一覧・Markdown本文・表示の権限の発行／返却／確認・linkの解決・通知と、PCの一覧から外す操作（後述）だけとする。
+  - 応答は項目を列挙したDTOで返し、絶対パス・repositoryのID・質問IDを含めない。一覧の場所は表示名・不透明なkey・checkout内の相対パスだけで表す（後述）。
   - errorは固定の文言とし、detailsを返さない。
   - 変更系はOriginが一致し、`application/json`の正しいJSONのときだけ受け付ける。
 - cursorは用途名を分けて既存のcodecで包む。一覧のcursorはcatalogVersionに、本文のcursorは文書・版・表示世代に結び付ける。
@@ -36,7 +36,7 @@ PCで開いた文書を本人のスマホで読み、PCで許可したHTMLデモ
 - 表示世代（`<openEpoch>.<世代>`）は、版か実効的なスクリプト許可が変わるたびに進む。daemonの通知のたびに全文書を照合するため、切断中にStatic→Interactive→Staticと変わっても前の値に戻らない。
 - linkは既に開いている文書のIDだけに解決する。PCでの登録・確認token・focusは行わない。参照先の解決は`openLinked`と共有する。
 - スマホの画面は`mobile.html`で、PCの`index.html`は返さない。未ビルド時は専用の503を返す。
-  - スマホは一覧・閲覧・デモ操作だけを行い、選択をPCに伝えない。
+  - スマホは一覧・閲覧・デモ操作と、PCの一覧から外す操作だけを行い、選択をPCに伝えない。
   - Interactiveは`sandbox="allow-scripts"`で動かし、回答SDKを渡さない。
   - 切断・非表示・再検証中は、スクリプトを動かすInteractiveのiframeへの入力を止める。Staticのiframeはリンク中継しか動かないので止めずにスクロールでき、文書リンクのタップは再検証が終わるまで無視する。
   - 通知を35秒（heartbeat 2周期＋5秒）受け取らなければ切断として扱い、再接続して再検証する。
@@ -56,6 +56,21 @@ PCで開いた文書を本人のスマホで読み、PCで許可したHTMLデモ
 - 引っ張ってリロード（後から追加）: ホーム画面から開いたとき（`display-mode: standalone`または`navigator.standalone`）だけ、画面の上端から72px以上下に引っ張って離すと再読み込みする。ブラウザのタブでは、ブラウザ自身の機能に任せる。iframeの中のタッチは親に届かないため、HTMLではヘッダーから引っ張る。
 - コマンドは`tailscale`（PATH、またはmacOSアプリ同梱のCLI）を実行する。`VDE_OPEN_TAILSCALE`（絶対パス）で明示できる。daemon自身はTailscaleを呼ばない。
 
+### 一覧の場所と、PCの一覧から外す操作（後から追加）
+
+- スマホの一覧をPCのサイドバーと同じように使えるよう、Flat／Treeの切り替え、repository・worktree・パスの2行目、行の長押しメニュー（詳細、PCの一覧から外す）を追加した。当初はスマホを読むだけにし、パスもrepositoryも渡さないとしていたが、利用者の求めで変更した。
+- 一覧の各行に`location`と`updatedAt`を加えた。
+  - repositoryとworktreeの表示名は、PCの一覧と同じ規則（同名repositoryは親フォルダで区別、worktreeはbranchと名前）で、daemonが開いている全文書から計算する。そのため表示名に親フォルダの名前が入ることがある。
+  - 同名repositoryをPCが親フォルダ2つ以上かパス全体で区別する場合（別ドライブ、深さの違う同じ並びなど）、スマホにはその表示名を渡さず、名前とkeyの先頭6文字で区別する。表示名に入る親フォルダは1つまでで、表示名がパス全体になることはない。
+  - repositoryとworktreeのkeyは、daemonの起動ごとの乱数を鍵にしたHMACで、元のパスに戻せない。起動の間だけ同じ値になる。
+  - パスはcheckout内の相対パスだけを渡す。repositoryの外の文書と、repositoryの判定中の文書と、ディスクのルート（`/`、ドライブの直下、ネットワーク共有のルート）にあるcheckout（linked worktreeを含む）の文書は、ファイル名だけを渡す。
+  - 絶対パス・repositoryのID・`nameSegments`・checkoutのID・ホームディレクトリは渡さない。
+- 状態を変える操作を1つ加えた。`POST /_/mobile/v1/documents/:id/close`は、PCの閉じるボタンと同じ処理（`DocumentService.close`）でPCの一覧から外す。
+  - ファイルは消さない。未回答の質問は、PCで閉じたときと同じく取り消す。
+  - 文書IDだけを受け付け、パスは受け付けない。既に閉じた文書と知らないIDも成功として返し、再試行を安全にする。
+  - 他の変更系と同じく、Originの一致と`application/json`の正しいJSON（空のobject）を求める。
+  - スマホの確認は長押しメニューで「PCの一覧から外す」を選ぶことだけで、PCの閉じるボタンと同じく追加の確認はしない。
+
 ## 既存のADRへの変更
 
 - ADR-0008・0014: 表示の権限の上限64件は、PCとスマホそれぞれの枠に変える。権限に発行先と（スマホのみ）表示世代を加える。
@@ -64,7 +79,7 @@ PCで開いた文書を本人のスマホで読み、PCで許可したHTMLデモ
 
 ## 採らなかった案
 
-- PCの管理画面をそのまま転送する案。文書を閉じる・回答・許可などの操作もスマホに届いてしまう。
+- PCの管理画面をそのまま転送する案。回答・許可・並べ替えなどの操作もスマホに届いてしまう（閉じる操作だけは、後から専用の経路で加えた）。
 - 同じHTTPSポートのパスで画面とデモを分ける案。同一originになり、HTML隔離が崩れる。
 - スマホ用に文書を複製して同期する案。open・版・許可を二重に追跡することになる。
 - 環境変数での公開切り替え。daemonからServe設定を操作すること（Serveの追加・削除は利用者が実行する`vo mobile`コマンドだけが行う）。
@@ -74,6 +89,7 @@ PCで開いた文書を本人のスマホで読み、PCで許可したHTMLデモ
 - 自動試験:
   - `pnpm check`
   - `tests/integration/mobile-reader.test.ts`（本人・Host・発行先・表示世代・ページング・link・通知・待受失敗）
+  - `apps/cli/src/server/http/mobile-location.test.ts`（一覧の場所に絶対パスが入らないこと、同名repositoryの表示名）
   - `tests/e2e/mobile-reader.spec.ts`（ローカルのHTTPS転送でChromium・Firefox・WebKit）
   - `tests/e2e/restart.spec.ts`（PCの再起動復帰）
   - `pnpm test:pack`（両画面の同梱）

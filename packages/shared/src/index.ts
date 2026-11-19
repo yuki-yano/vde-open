@@ -8,5 +8,6 @@ export * from './feedback.ts';
 export * from './limits.ts';
 export * from './mobile.ts';
 export * from './pdf.ts';
+export * from './repository-labels.ts';
 export * from './strict-json.ts';
 export * from './versions.ts';

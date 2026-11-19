@@ -136,7 +136,7 @@ Images are searchable by title and path (`vo search diagram --mode path`). Text 
 
 ## Reading on your phone over Tailscale
 
-The documents open on this machine can be read on your own phone, and HTML demos that you allowed on the PC can be tapped and dragged there. The phone gets a list and a reader only: it cannot open, close, reorder, or focus documents, answer questions, or allow scripts. Choosing a document on the phone never changes what the PC shows.
+The documents open on this machine can be read on your own phone, and HTML demos that you allowed on the PC can be tapped and dragged there. The phone gets a list and a reader. The list can be flat (with the repository, worktree, and path under each title, as on the PC) or the PC's tree, and a long press on a document shows its details or removes it from the PC list, as the PC's close button does (the file is not deleted). The phone cannot open, reorder, or focus documents, answer questions, or allow scripts. Choosing a document on the phone never changes what the PC shows.
 
 ```bash
 vo mobile enable     # set up and print the URL to bookmark on your phone

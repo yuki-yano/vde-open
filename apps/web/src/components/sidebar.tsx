@@ -9,6 +9,7 @@ import {
 } from '@dnd-kit/react';
 import { isSortable, useSortable } from '@dnd-kit/react/sortable';
 import type { DocumentSummary } from '@vde-open/shared';
+import { buildLabels, placementOf, type Labels } from '@vde-open/shared/repository-labels';
 import {
   CircleAlert,
   FileLock,
@@ -38,6 +39,7 @@ import {
 
 import { DetailsPopover } from '@/components/details-popover';
 import { FormatIcon } from '@/components/format-icon';
+import { LocationLine } from '@/components/location-line';
 import { Button } from '@/components/ui/button';
 import { canDragFileOut, downloadUrlOf } from '@/lib/api';
 import {
@@ -48,16 +50,13 @@ import {
 } from '@/components/ui/toggle-group';
 import type { SidebarView } from '@/lib/preferences';
 import {
-  buildLabels,
-  fileNameOf,
   FORMAT_LABEL,
   locationText,
-  placementOf,
+  pcEntry,
   REPOSITORY_REASON,
   shortDirectories,
-  splitFileName,
   visible,
-  type Labels,
+  type ListEntry,
   type ShortDirectory,
 } from '@/lib/repository-labels';
 import { buildTree, type TreeNode } from '@/lib/tree';
@@ -167,89 +166,6 @@ function tooltipOf(document: DocumentSummary, labels: Labels, movable = false): 
   return [...new Set(lines)].join('\n');
 }
 
-// The second line of a flat row: repository, worktree, then the path within the checkout.
-// Only the nearest directory is shown (more where two documents would look the same).
-// When the line is too narrow, the worktree name shrinks first, then the directory, then the file name.
-// The repository name (up to 60% of the line) and the extension never shrink.
-// Flex shares shrinking by weight, so the weights differ by orders of magnitude: a part shrinks
-// by a negligible fraction (well under a pixel) until the parts before it are gone.
-function LocationLine({
-  document,
-  labels,
-  short,
-}: {
-  document: DocumentSummary;
-  labels: Labels;
-  short: ShortDirectory | undefined;
-}) {
-  const placement = placementOf(document);
-  if (placement.kind === 'input') {
-    return (
-      <span className="truncate">
-        {document.sourceKind === 'stdin' ? 'Standard input' : 'Generated'} ·{' '}
-        {FORMAT_LABEL[document.format]}
-      </span>
-    );
-  }
-  const { stem, extension } = splitFileName(visible(fileNameOf(document)));
-  const directory =
-    short === undefined || short.shown.length === 0
-      ? ''
-      : `${short.elided ? '…/' : ''}${short.shown.map(visible).join('/')}/`;
-  const path = (
-    <span className="flex min-w-0 shrink">
-      {/* At least wide enough for the ellipsis, so a squeezed directory never shows a stray letter. */}
-      {directory !== '' && <span className="min-w-3 shrink-[100000] truncate">{directory}</span>}
-      <span className="min-w-0 shrink truncate">{stem}</span>
-      <span className="shrink-0" data-part="extension">
-        {extension}
-      </span>
-    </span>
-  );
-  if (placement.kind === 'outside') return path;
-  if (placement.kind === 'pending') {
-    return (
-      <>
-        <span className="shrink-0">Checking repository…</span>
-        {path}
-      </>
-    );
-  }
-  const name = visible(labels.repository.get(placement.key) ?? '');
-  const checkout = placement.kind === 'repository' ? placement.repository.checkout : undefined;
-  return (
-    <>
-      <span
-        className="flex max-w-[50%] shrink-0 items-center gap-1 font-medium @min-[13rem]/list:max-w-[60%]"
-        data-part="repository"
-      >
-        {placement.kind === 'unresolved' && (
-          <CircleAlert className="size-3 shrink-0" aria-hidden="true" />
-        )}
-        <bdi className="min-w-0 truncate" data-part="repository-name">
-          {name}
-        </bdi>
-      </span>
-      {checkout?.kind === 'linked' && (
-        // The branch icon stays whole even when the name has no room left.
-        <span
-          className="flex min-w-3 shrink-[100000] items-center gap-0.5 overflow-hidden"
-          data-part="worktree"
-        >
-          <GitBranch className="size-3 shrink-0" aria-hidden="true" />
-          <bdi className="min-w-0 truncate">
-            {visible(labels.worktree.get(checkout.id) ?? checkout.name)}
-          </bdi>
-        </span>
-      )}
-      {checkout === null && (
-        <span className="min-w-0 shrink-[100000] truncate">(unknown checkout)</span>
-      )}
-      {path}
-    </>
-  );
-}
-
 // Rows off screen skip style and layout until they scroll into view (the list can hold 2,000 documents).
 // Their content stays in the accessibility tree and in find-in-page. Painting is clipped to the row,
 // so the focus ring of the row button is drawn inside it.
@@ -279,6 +195,7 @@ const ROW_SENSORS = [
 
 function FlatRow({
   document,
+  entry,
   index,
   count,
   labels,
@@ -290,6 +207,7 @@ function FlatRow({
   onMove,
 }: {
   document: DocumentSummary;
+  entry: ListEntry<DocumentSummary>;
   index: number;
   count: number;
   labels: Labels;
@@ -384,7 +302,7 @@ function FlatRow({
           aria-hidden="true"
           data-part="location"
         >
-          <LocationLine document={document} labels={labels} short={short} />
+          <LocationLine entry={entry} short={short} />
         </span>
         {/* With keyboard focus the whole location shows, wrapped, since the row cannot show a tooltip. */}
         <span
@@ -492,7 +410,7 @@ function Tree({
   labels,
   props,
 }: {
-  nodes: TreeNode[];
+  nodes: TreeNode<DocumentSummary>[];
   depth: number;
   labels: Labels;
   props: Pick<SidebarProps, 'activeId' | 'onSelect' | 'onClose'>;
@@ -569,7 +487,7 @@ function Tree({
                 <div
                   className={node.hidden ? 'sr-only' : cn(STICKY_ROW, 'top-7 z-10')}
                   style={node.hidden ? undefined : indent(depth)}
-                  title={node.location}
+                  title={node.location ?? undefined}
                 >
                   <GitBranch
                     className="size-3.5 shrink-0 text-muted-foreground"
@@ -734,11 +652,12 @@ export function Sidebar(props: SidebarProps) {
   const given = props.labels;
   const labels = useMemo(() => given ?? buildLabels(documents), [given, documents]);
   const pressedOn = useRef<Element | null>(null);
-  const shortened = useMemo(() => shortDirectories(documents), [documents]);
-  const tree = useMemo(
-    () => (view === 'tree' ? buildTree(documents, labels) : []),
-    [documents, labels, view],
+  const entries = useMemo(
+    () => documents.map((document) => pcEntry(document, labels)),
+    [documents, labels],
   );
+  const shortened = useMemo(() => shortDirectories(entries), [entries]);
+  const tree = useMemo(() => (view === 'tree' ? buildTree(entries) : []), [entries, view]);
   const list = useRef<HTMLDivElement>(null);
   useKeepFocus(list);
 
@@ -857,6 +776,7 @@ export function Sidebar(props: SidebarProps) {
                 <FlatRow
                   key={document.documentId}
                   document={document}
+                  entry={pcEntry(document, labels)}
                   index={index}
                   count={(dragDocuments ?? documents).length}
                   labels={labels}

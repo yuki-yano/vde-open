@@ -1,4 +1,12 @@
-import type { DocumentFormat, DocumentSummary, RepositoryReason } from '@vde-open/shared';
+import type {
+  DocumentFormat,
+  DocumentSummary,
+  MobileDocument,
+  RepositoryReason,
+} from '@vde-open/shared';
+// Web code takes these from the subpath, not the package root: the root builds zod schemas on load, and zod's eval
+// probe is a violation of the phone screen's CSP.
+import { placementOf, worktreeText, type Labels } from '@vde-open/shared/repository-labels';
 
 // Names and locations shown for each document: which repository and worktree it is in, and where.
 // Everything is derived from the list of open documents; nothing touches the filesystem.
@@ -29,125 +37,11 @@ export function visible(text: string): string {
   );
 }
 
-type Repository = NonNullable<DocumentSummary['repository']>;
-type Resolved = Extract<Repository, { state: 'resolved' }>;
-type Unresolved = Extract<Repository, { state: 'unresolved' }>;
-
-// The group a document is placed in.
-export type Placement =
-  | { kind: 'repository'; key: string; repository: Resolved }
-  | { kind: 'unresolved'; key: string; repository: Unresolved }
-  | { kind: 'pending' }
-  | { kind: 'outside' }
-  | { kind: 'input' };
-
-export function placementOf(document: DocumentSummary): Placement {
-  if (document.sourceKind !== 'file') return { kind: 'input' };
-  const repository = document.repository;
-  if (repository === null) return { kind: 'outside' };
-  if (repository.state === 'pending') return { kind: 'pending' };
-  if (repository.state === 'unresolved') {
-    return { kind: 'unresolved', key: `unresolved:${repository.id}`, repository };
-  }
-  return { kind: 'repository', key: `repository:${repository.id}`, repository };
-}
-
 // Splits a file name into the stem and the extension (".md"). A leading dot is part of the stem.
 export function splitFileName(name: string): { stem: string; extension: string } {
   const dot = name.lastIndexOf('.');
   if (dot <= 0) return { stem: name, extension: '' };
   return { stem: name.slice(0, dot), extension: name.slice(dot) };
-}
-
-// The shortest trailing part of each path that tells it apart from the others with the same last segment.
-// Used for repository names: "dotfiles" alone, or "me/dotfiles" and "other/dotfiles" when both are open.
-function distinctSuffixes(paths: Map<string, string[]>): Map<string, string> {
-  const labels = new Map<string, string>();
-  const byName = new Map<string, string[]>();
-  for (const [key, segments] of paths) {
-    const name = segments.at(-1) ?? '';
-    byName.set(name, [...(byName.get(name) ?? []), key]);
-  }
-  for (const keys of byName.values()) {
-    for (const key of keys) {
-      const segments = paths.get(key) ?? [];
-      let length = 1;
-      const suffix = (of: string[], size: number) => of.slice(-size).join('/');
-      while (
-        length < segments.length &&
-        keys.some(
-          (other) =>
-            other !== key && suffix(paths.get(other) ?? [], length) === suffix(segments, length),
-        )
-      ) {
-        length += 1;
-      }
-      labels.set(key, suffix(segments, length));
-    }
-  }
-  return labels;
-}
-
-export interface Labels {
-  // The display name of a repository (or of the folder of an unresolved checkout), by placement key.
-  repository: Map<string, string>;
-  // The display name of each linked worktree, by checkout id.
-  worktree: Map<string, string>;
-}
-
-// Names depend on which documents are open: opening or closing a repository with the same name changes them.
-export function buildLabels(documents: DocumentSummary[]): Labels {
-  const locations = new Map<string, string[]>();
-  const ids = new Map<string, string>();
-  // Linked checkouts of each repository, with their name and branch.
-  const checkouts = new Map<string, Map<string, { name: string; branch: string | null }>>();
-  for (const document of documents) {
-    const placement = placementOf(document);
-    if (placement.kind !== 'repository' && placement.kind !== 'unresolved') continue;
-    locations.set(placement.key, placement.repository.nameSegments);
-    ids.set(placement.key, placement.repository.id);
-    if (placement.kind !== 'repository') continue;
-    const checkout = placement.repository.checkout;
-    if (checkout?.kind !== 'linked') continue;
-    let linked = checkouts.get(placement.key);
-    if (!linked) {
-      linked = new Map();
-      checkouts.set(placement.key, linked);
-    }
-    linked.set(checkout.id, { name: checkout.name, branch: checkout.branch });
-  }
-
-  // A worktree shows its branch, or its name when there is no branch.
-  // When two worktrees of the same repository would show the same text, every one of them also shows its name.
-  const worktree = new Map<string, string>();
-  for (const linked of checkouts.values()) {
-    const shown = new Map<string, string[]>();
-    for (const [id, { name, branch }] of linked) {
-      const text = branch ?? name;
-      shown.set(text, [...(shown.get(text) ?? []), id]);
-    }
-    for (const [text, sharing] of shown) {
-      for (const id of sharing) {
-        const name = linked.get(id)?.name ?? '';
-        worktree.set(id, sharing.length > 1 && name !== text ? `${text} (${name})` : text);
-      }
-    }
-  }
-  // Two repositories can have the same location: a repository at app/ and a bare one at app.git.
-  // Those are named after their Git directory instead (app and app.git).
-  const byLocation = new Map<string, string[]>();
-  for (const [key, segments] of locations) {
-    const location = segments.join('/');
-    byLocation.set(location, [...(byLocation.get(location) ?? []), key]);
-  }
-  for (const keys of byLocation.values()) {
-    if (keys.length < 2) continue;
-    for (const key of keys) {
-      const raw = (ids.get(key) ?? '').split(/[\\/]/).filter((part) => part !== '');
-      locations.set(key, raw.at(-1) === '.git' ? raw.slice(0, -1) : raw);
-    }
-  }
-  return { repository: distinctSuffixes(locations), worktree };
 }
 
 // The directories of a document: within its checkout, or the whole path outside a repository.
@@ -167,14 +61,162 @@ export function fileNameOf(document: DocumentSummary): string {
   return document.pathSegments.at(-1) ?? document.title;
 }
 
-// Documents whose short paths are compared: the same checkout, the same unresolved folder, or the same group.
-function scopeOf(document: DocumentSummary): string {
+// A document as a list shows it, on the PC or the phone: the group it goes in with the names to show, and its path
+// as directories and a file name. The tree and the short paths are built from these on both screens.
+export interface ListDocument {
+  documentId: string;
+  title: string;
+  format: DocumentFormat;
+}
+
+export type ListCheckout =
+  | { kind: 'main' }
+  // Inside the .git directory, for example a removed worktree.
+  | { kind: 'unknown' }
+  // location: the folder, for the tooltip. null on the phone, which never gets paths.
+  | { kind: 'linked'; key: string; label: string; location: string | null };
+
+export type ListPlace =
+  | { kind: 'input'; source: 'stdin' | 'generated' }
+  | { kind: 'pending' }
+  | { kind: 'outside' }
+  | {
+      kind: 'repository';
+      key: string;
+      name: string;
+      location: string | null;
+      checkout: ListCheckout;
+    }
+  | {
+      kind: 'unresolved';
+      key: string;
+      name: string;
+      location: string | null;
+      reason: RepositoryReason;
+    };
+
+export interface ListEntry<D extends ListDocument = ListDocument> {
+  document: D;
+  place: ListPlace;
+  // Within the checkout in a repository. Outside one: the whole path on the PC, none on the phone.
+  directories: string[];
+  fileName: string;
+}
+
+// The folder of a repository for the tooltip: its common Git directory without the trailing .git.
+function folderOf(id: string): string {
+  return id.replace(/[\\/]\.git$/, '');
+}
+
+export function pcEntry(document: DocumentSummary, labels: Labels): ListEntry<DocumentSummary> {
   const placement = placementOf(document);
-  if (placement.kind === 'repository') {
-    return `${placement.key}\0${placement.repository.checkout?.id ?? ''}`;
+  const entry = { document, directories: directoriesOf(document), fileName: fileNameOf(document) };
+  switch (placement.kind) {
+    case 'input':
+      return {
+        ...entry,
+        place: { kind: 'input', source: document.sourceKind === 'stdin' ? 'stdin' : 'generated' },
+      };
+    case 'outside':
+    case 'pending':
+      return { ...entry, place: { kind: placement.kind } };
+    case 'unresolved':
+    case 'repository': {
+      const { repository } = placement;
+      const name = labels.repository.get(placement.key) ?? repository.nameSegments.at(-1) ?? '';
+      const location = folderOf(repository.id);
+      if (placement.kind === 'unresolved') {
+        const reason = placement.repository.reason;
+        return {
+          ...entry,
+          place: { kind: 'unresolved', key: placement.key, name, location, reason },
+        };
+      }
+      const checkout = placement.repository.checkout;
+      return {
+        ...entry,
+        place: {
+          kind: 'repository',
+          key: placement.key,
+          name,
+          location,
+          checkout:
+            checkout === null
+              ? { kind: 'unknown' }
+              : checkout.kind === 'main'
+                ? { kind: 'main' }
+                : {
+                    kind: 'linked',
+                    key: checkout.id,
+                    label: labels.worktree.get(checkout.id) ?? checkout.name,
+                    location: checkout.id,
+                  },
+        },
+      };
+    }
   }
-  if (placement.kind === 'unresolved') return placement.key;
-  return placement.kind;
+}
+
+// The phone's row already carries the names the PC shows. A document outside a repository has only its file name.
+export function phoneEntry(row: MobileDocument): ListEntry<MobileDocument> {
+  const { location } = row;
+  switch (location.kind) {
+    case 'stdin':
+    case 'generated':
+      return {
+        document: row,
+        place: { kind: 'input', source: location.kind },
+        directories: [],
+        fileName: row.title,
+      };
+    case 'outside':
+    case 'pending':
+      return {
+        document: row,
+        place: { kind: location.kind },
+        directories: [],
+        fileName: location.fileName,
+      };
+    case 'unresolved':
+    case 'repository': {
+      const path = {
+        document: row,
+        directories: location.path.slice(0, -1),
+        fileName: location.path.at(-1) ?? row.title,
+      };
+      const { key, name } = location;
+      if (location.kind === 'unresolved') {
+        return {
+          ...path,
+          place: { kind: 'unresolved', key, name, location: null, reason: location.reason },
+        };
+      }
+      const { checkout } = location;
+      return {
+        ...path,
+        place: {
+          kind: 'repository',
+          key,
+          name,
+          location: null,
+          checkout:
+            checkout.kind === 'linked'
+              ? { kind: 'linked', key: checkout.key, label: checkout.label, location: null }
+              : checkout,
+        },
+      };
+    }
+  }
+}
+
+// Documents whose short paths are compared: the same checkout, the same unresolved folder, or the same group.
+function scopeOf(place: ListPlace): string {
+  if (place.kind === 'repository') {
+    const checkout = place.checkout;
+    return `${place.key}\0${checkout.kind === 'linked' ? `linked:${checkout.key}` : checkout.kind}`;
+  }
+  if (place.kind === 'unresolved') return place.key;
+  return place.kind;
 }
 
 export interface ShortDirectory {
@@ -186,12 +228,12 @@ export interface ShortDirectory {
 // Shows only the nearest directory, and more of them only where two documents with the same file name would look the same.
 // Decided from the list, without measuring widths. Documents are split by their last directories one level at a time,
 // so the work grows with the number of documents, not with its square (many README.md files are common).
-export function shortDirectories(documents: DocumentSummary[]): Map<string, ShortDirectory> {
+export function shortDirectories(entries: ListEntry[]): Map<string, ShortDirectory> {
   const groups = new Map<string, Array<{ id: string; directories: string[] }>>();
-  for (const document of documents) {
-    if (document.sourceKind !== 'file') continue;
-    const key = `${scopeOf(document)}\0${fileNameOf(document)}`;
-    const entry = { id: document.documentId, directories: directoriesOf(document) };
+  for (const { document, place, directories, fileName } of entries) {
+    if (place.kind === 'input') continue;
+    const key = `${scopeOf(place)}\0${fileName}`;
+    const entry = { id: document.documentId, directories };
     const group = groups.get(key);
     if (group) group.push(entry);
     else groups.set(key, [entry]);
@@ -226,16 +268,6 @@ export function shortDirectories(documents: DocumentSummary[]): Map<string, Shor
     }
   }
   return result;
-}
-
-// A worktree in full: its branch, and its own name too when that differs (the branch can be stale, the name cannot).
-export function worktreeText(
-  checkout: { id: string; name: string; branch: string | null },
-  labels: Labels,
-): string {
-  const label = labels.worktree.get(checkout.id) ?? checkout.branch ?? checkout.name;
-  const named = label === checkout.name || label.endsWith(`(${checkout.name})`);
-  return named ? label : `${label} (${checkout.name})`;
 }
 
 // The whole location as one line of text: for the description read out and for the tooltip.

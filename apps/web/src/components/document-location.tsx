@@ -1,15 +1,10 @@
 import type { DocumentSummary } from '@vde-open/shared';
+import { placementOf, worktreeText, type Labels } from '@vde-open/shared/repository-labels';
 import { CircleAlert, GitBranch } from 'lucide-react';
 import { createContext, useContext } from 'react';
 
 import { CopyButton } from '@/components/copy-button';
-import {
-  placementOf,
-  REPOSITORY_REASON,
-  visible,
-  worktreeText,
-  type Labels,
-} from '@/lib/repository-labels';
+import { REPOSITORY_REASON, visible } from '@/lib/repository-labels';
 
 // The names the list shows (same-named repositories told apart, worktree names added where branches meet).
 // Provided by the workspace from the whole document list, so the header names a repository the way the list does.

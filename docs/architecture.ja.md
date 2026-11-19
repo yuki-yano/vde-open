@@ -30,7 +30,7 @@ CLI（vde-open／vo） ──IPC（Unix socket、鍵で相互確認）──▶ 
 - 解析と検索: worker thread（`apps/cli/src/workers/`）。解析は時間と構造の上限つき。検索はMiniSearchで、節ごとに索引する（ADR-0010）。
 - 表示: `apps/cli/src/render/render-service.ts`が、文書・版・表示方法に結び付いた表示の権限を発行し、`apps/cli/src/server/http/preview.ts`が配信する（ADR-0008、0009、0012）。
 - listener: `apps/cli/src/daemon/listener-config.ts`が起動時に任意の`listeners.json`を読む。PCのlistenerは、起動引数かfileの指定がなければ43180と43181を使い、再起動しても管理画面のURLが変わらない。portが使用中なら、用途とportを示して`E_DAEMON_START_FAILED`で起動に失敗する。
-- スマホの閲覧（ADR-0017）: `mobile`があるとき、`apps/cli/src/server/http/mobile.ts`が`mobile.html`と`/_/mobile/v1`（一覧・Markdownの本文・表示の権限・linkの解決・通知）を配信し、2つ目のpreview listenerがスマホ用の表示の権限を配信する。2つは揃って開くか、どちらも開かない。`apps/cli/src/render/view-epochs.ts`が、スマホ用の権限を結び付ける表示世代を持つ。
+- スマホの閲覧（ADR-0017）: `mobile`があるとき、`apps/cli/src/server/http/mobile.ts`が`mobile.html`と`/_/mobile/v1`（PCの一覧と同じ名前で場所を示す一覧・Markdownの本文・表示の権限・linkの解決・通知・PCの一覧から外す操作）を配信し、2つ目のpreview listenerがスマホ用の表示の権限を配信する。2つは揃って開くか、どちらも開かない。`apps/cli/src/render/view-epochs.ts`が、スマホ用の権限を結び付ける表示世代を持つ。
 - 質問と回答: `apps/cli/src/feedback/service.ts`（ADR-0011）。
 - PDF出力: `apps/cli/src/export/pdf-service.ts`（ADR-0013）。`POST /documents/:id/pdf`で、専用のworkerが版を1つの印刷用の文書にする（`packages/document/src/print.ts`。TanStack MarkdownのHTMLの描画器と、表示と共有するlink・画像の規則`rendering-rules.ts`を使う）。daemonは、登録済みの画像をdata URLで埋めながら非公開の一時directoryへ書き、`apps/cli/src/export/browser.ts`で見つけたGoogle Chrome・Microsoft Edgeで印刷する。browserは一時profileでheadlessに動かし、`--remote-debugging-pipe`で操作する（`apps/cli/src/export/cdp.ts`、`Page.printToPDF`）。出力は1件ずつ行う。HTMLは同じ印刷workerの`html-print.ts`で静的表示の変換を使い、登録済みのCSSを安全化した一時file、画像とfontをdata URLにして渡す。CSSの`@import`・`@media print`・`@page`は保ち、印刷用fontの読み込みを待つ。
 - repo: `apps/cli/src/documents/repository.ts`が、file文書のpathから上へ最も近い`.git`を探し、属するGitのrepoとcheckoutを決める。`git`は起動しない。repoの鍵はcommon git dir（`.git`がsymlinkのときと、`commondir`のない`.git`ファイルのときは、つながりを確かめられないのでcheckoutのdirectory）。linked worktreeは、管理directoryが`<common>/worktrees/<name>`で、その`gitdir`がcheckoutを指し返すときだけ認める。確かめられないものは`unresolved`とし、親のrepoには入れない。`apps/cli/src/documents/repository-tracker.ts`が結果をdaemonのmemoryだけに持つ（pathから決まり、古くなりうる値なのでstateには書かない）。判定するのは、daemonの起動時（受け付けの前）、open、reopen、明示的なrefresh、監視ruleでの追加のとき。保存の後の自動の再読み込みでは判定しない。各操作は判定を最大2秒待ち、終わらない文書は前の値（なければ`pending`）のまま処理を終え、判定が終わったら反映する。判定のfilesystem処理はdaemon全体で同時に2つまでにし、応答しないnetwork mountでもlibuvのpoolを使い切らない。判定ごとに増える番号を付け、その文書・checkoutにもっと新しい判定が反映済みなら捨てる。閉じた文書、判定の後に閉じて開き直した文書には反映しない。一覧の表示が変わるときはcatalogVersionを上げ、`catalog-changed`を1件送る。
@@ -47,7 +47,7 @@ CLI（vde-open／vo） ──IPC（Unix socket、鍵で相互確認）──▶ 
 
 ## スマホの画面
 
-`apps/web/mobile.html`と`apps/web/src/components/mobile-reader.tsx`。新しく開いた順の一覧（ホーム）と、Markdownのworkerと描画・画像の表示（`ImageCanvas`）・HTMLのlink中継・管理画面のドロワー（`components/drawer.tsx`、本文から文書を切り替える）を共有する閲覧画面。管理APIは呼ばない。版・表示世代・権限が同じ間は表示を保ち、再接続・`pageshow`・表示状態への復帰・通知が35秒届かないときに再確認する。それまでInteractiveのiframeは入力を受けず、Staticのiframeはスクロールでき、文書linkは再確認を待つ。
+`apps/web/mobile.html`と`apps/web/src/components/mobile-reader.tsx`。新しく開いた順の一覧（ホーム。`components/mobile-document-list.tsx`。PCと同じ2行目を出すFlatと、同じ`lib/tree.ts`で作るPCと同じTreeを切り替え、長押しメニューで詳細とPCの一覧から外す操作を出す）と、Markdownのworkerと描画・画像の表示（`ImageCanvas`）・HTMLのlink中継・管理画面のドロワー（`components/drawer.tsx`、本文から文書を切り替える）を共有する閲覧画面。管理APIは呼ばない。版・表示世代・権限が同じ間は表示を保ち、再接続・`pageshow`・表示状態への復帰・通知が35秒届かないときに再確認する。それまでInteractiveのiframeは入力を受けず、Staticのiframeはスクロールでき、文書linkは再確認を待つ。
 
 ## 配布
 

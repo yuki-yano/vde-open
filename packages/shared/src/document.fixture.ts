@@ -1,5 +1,5 @@
 // Document summaries for tests of the list and the tree.
-import type { DocumentRepository, DocumentSummary } from '@vde-open/shared';
+import type { DocumentRepository, DocumentSummary } from './documents.ts';
 
 let counter = 0;
 export const segments = (path: string) => path.split('/').filter(Boolean);

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { DocumentSwitcher } from '@/components/document-workspace';
 import type { Api } from '@/lib/api';
-import { documentAt } from '@/lib/document.fixture';
+import { documentAt } from '../../../../packages/shared/src/document.fixture.ts';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

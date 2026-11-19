@@ -10,7 +10,7 @@ import type {
 import { ApiError } from './api.ts';
 import { createSseParser } from './sse.ts';
 
-// The phone reader's client (ADR-0017). It talks only to `/_/mobile/v1` on its own origin: no management calls.
+// The phone reader's client (ADR-0017). It talks only to `/_/mobile/v1` on its own origin, never the management API.
 const API = '/_/mobile/v1';
 const RECONNECT_MAX_MS = 10_000;
 // Two heartbeat periods (15 s) plus 5 s without receiving anything, including heartbeat comments.
@@ -36,6 +36,8 @@ export interface MobileApi {
   check(grant: string): Promise<boolean>;
   release(grants: string[], keepalive?: boolean): Promise<void>;
   resolveLink(grant: string, linkId: string): Promise<MobileLinkResult>;
+  // Removes the document from the PC list, as the PC's close button does.
+  close(documentId: string): Promise<void>;
   events(handlers: {
     onEvent: (event: MobileEvent) => void;
     onConnect: () => void;
@@ -135,6 +137,9 @@ export function createMobileApi(): MobileApi {
     },
     resolveLink(grant, linkId) {
       return post<MobileLinkResult>('/links/resolve', { grant, linkId });
+    },
+    async close(documentId) {
+      await post(`/documents/${documentId}/close`, {});
     },
     events({ onEvent, onConnect, onDisconnect }) {
       const controller = new AbortController();

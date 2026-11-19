@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Workspace } from '@/App';
 import type { Api } from '@/lib/api';
-import { inRepository, inWorktree } from '@/lib/document.fixture';
+import { inRepository, inWorktree } from '../../../../packages/shared/src/document.fixture.ts';
 import { writeHeadingToUrl, type HeadingInUrl } from '@/lib/location';
 
 import { Viewer } from './viewer.tsx';

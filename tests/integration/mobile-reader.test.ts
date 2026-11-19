@@ -460,7 +460,7 @@ describe('phone reader: who may read', () => {
       404,
     );
     expect((await t.run(['list', '--json'])).json<{ documents: unknown[] }>().data).toEqual(before);
-    // The list rows carry only what reading needs.
+    // The list rows carry only what reading and the list need.
     const listed = (await reader.api('/documents')).json<{
       documents: Array<Record<string, unknown>>;
     }>().data.documents[0];
@@ -469,10 +469,12 @@ describe('phone reader: who may read', () => {
         'documentId',
         'effectiveMode',
         'format',
+        'location',
         'openedAt',
         'revision',
         'sourceState',
         'title',
+        'updatedAt',
         'viewEpoch',
       ].toSorted(),
     );

@@ -9,24 +9,33 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
 } from 'react';
 
 import { DrawerPanel, DrawerToggle } from '@/components/drawer';
-import { FormatIcon } from '@/components/format-icon';
 import { ImageCanvas } from '@/components/image-viewer';
+import { MobileDocumentList, MobileListControls } from '@/components/mobile-document-list';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api';
 import type { MobileApi, MobileCatalog } from '@/lib/mobile-api';
+import {
+  isSidebarView,
+  isVisibility,
+  usePreference,
+  type SidebarView,
+  type Visibility,
+} from '@/lib/preferences';
 import { createRefresher } from '@/lib/refresher';
 import { useMarkdown } from '@/lib/use-markdown';
 import { isStandalone, usePullToReload } from '@/lib/use-pull-to-reload';
 
 // The phone reader (ADR-0017): the open documents of the PC, read on the phone. Choosing, scrolling, and using a
-// demo stay on the phone; nothing here changes what the PC shows.
+// demo stay on the phone. The one change it makes on the PC is removing a document from the PC list.
 
 export const NOT_OPEN_NOTICE = 'Open this document on the PC to read it here.';
 export const CLOSED_NOTICE = 'That document is no longer open on the PC.';
+export const REMOVE_FAILED_NOTICE = 'Could not remove the document from the PC list.';
 
 const DOCUMENT_PARAM = 'document';
 const DRAWER_TOGGLE = 'mobile-drawer-toggle';
@@ -41,6 +50,10 @@ const urlOf = (documentId: string | null) => {
 
 type Phase = 'connecting' | 'ready' | 'failed';
 
+// One open of a document in one daemon start: the view epoch starts with the open epoch (ADR-0017).
+const openOf = (catalog: MobileCatalog, document: MobileDocument) =>
+  `${catalog.daemonId}\n${document.documentId}\n${document.viewEpoch.split('.')[0] ?? ''}`;
+
 // The history state of a document entry added by this screen.
 interface DocumentEntry {
   depth: number;
@@ -52,6 +65,22 @@ export function MobileReader({ api }: { api: MobileApi }) {
   const [phase, setPhase] = useState<Phase>('connecting');
   const [selected, setSelected] = useState<string | null>(documentInUrl);
   const [notice, setNotice] = useState<string | null>(null);
+  // The last choice of a document that is not open, which was let go (see below).
+  const [letGo, setLetGo] = useState<{ documentId: string } | null>(null);
+  // Opens of documents removed from this phone (see openOf): hidden from the lists, history, and links even while a list
+  // fetched before the removal is shown. The same document opened again on the PC is a new open and shows.
+  const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
+  // The list's layout and second line, for the list page and the drawer alike.
+  const [listView, setListView] = usePreference<SidebarView>(
+    'mobile-list-view',
+    'flat',
+    isSidebarView,
+  );
+  const [locations, setLocations] = usePreference<Visibility>(
+    'mobile-list-location',
+    'shown',
+    isVisibility,
+  );
   // The document drawer of the reader (narrow screens show the list as a drawer, as in the management UI).
   const [drawerOpen, setDrawerOpen] = useState(false);
   const page = useRef<HTMLDivElement>(null);
@@ -177,13 +206,24 @@ export function MobileReader({ api }: { api: MobileApi }) {
     [selected],
   );
 
-  const row = catalog?.documents.find((document) => document.documentId === selected) ?? null;
+  const listed = useMemo(
+    () =>
+      catalog === null || removed.size === 0
+        ? catalog
+        : {
+            ...catalog,
+            documents: catalog.documents.filter((item) => !removed.has(openOf(catalog, item))),
+          },
+    [catalog, removed],
+  );
+  const row = listed?.documents.find((document) => document.documentId === selected) ?? null;
   // The drawer belongs to the document view: whatever way leads back to the list closes it.
   if (row === null && drawerOpen) setDrawerOpen(false);
   // A document that is not open (closed on the PC, or an unknown ID) returns to the list, saying why.
   if (catalog !== null && selected !== null && row === null) {
     setSelected(null);
     setNotice(CLOSED_NOTICE);
+    setLetGo({ documentId: selected });
   }
   // Keep the URL on the list then, so a reload or Back does not ask for the closed document again.
   useEffect(() => {
@@ -191,6 +231,12 @@ export function MobileReader({ api }: { api: MobileApi }) {
       window.history.replaceState(null, '', urlOf(null));
     }
   }, [selected]);
+  // Forward to a closed document chooses it and lets it go within one render, so `selected` stays null.
+  useEffect(() => {
+    if (letGo !== null && documentInUrl() === letGo.documentId) {
+      window.history.replaceState(null, '', urlOf(null));
+    }
+  }, [letGo]);
 
   useEffect(() => {
     document.title = row === null ? 'vo' : `vo - ${row.title}`;
@@ -208,6 +254,45 @@ export function MobileReader({ api }: { api: MobileApi }) {
     window.history.pushState(null, '', urlOf(null));
     setNotice(null);
     setSelected(null);
+  };
+  // Leaves the document being removed as Back to the documents does, without adding a list entry. Resolves once the
+  // list is shown, so a failure notice set after it is not cleared by the popstate.
+  const leave = () =>
+    new Promise<void>((resolve) => {
+      const entry = window.history.state as DocumentEntry | null;
+      if (entry?.fromList === true && entry.depth > 0) {
+        window.addEventListener('popstate', () => resolve(), { once: true });
+        window.history.go(-entry.depth);
+        return;
+      }
+      setSelected(null);
+      resolve();
+    });
+  // Removing the document being read leaves it first, so the list that no longer has it does not say the PC closed it.
+  const remove = async (documentId: string) => {
+    const target = catalog?.documents.find((document) => document.documentId === documentId);
+    if (catalog === null || target === undefined) return;
+    const listedOpen = openOf(catalog, target);
+    setNotice(null);
+    if (documentId === selected) await leave();
+    setRemoved((current) => new Set(current).add(listedOpen));
+    try {
+      await api.close(documentId);
+    } catch {
+      setRemoved((current) => {
+        const next = new Set(current);
+        next.delete(listedOpen);
+        return next;
+      });
+      setNotice(REMOVE_FAILED_NOTICE);
+      return;
+    }
+    void load();
+  };
+  const listProps = {
+    view: listView,
+    location: locations,
+    onRemove: (documentId: string) => void remove(documentId),
   };
   return (
     <div ref={page} className="flex h-svh flex-col bg-background text-foreground">
@@ -243,7 +328,15 @@ export function MobileReader({ api }: { api: MobileApi }) {
             />
           </>
         ) : (
-          <h1 className="flex-1 px-2 text-sm font-medium">Open documents</h1>
+          <>
+            <h1 className="flex-1 px-2 text-sm font-medium">Open documents</h1>
+            <MobileListControls
+              view={listView}
+              onViewChange={setListView}
+              location={locations}
+              onLocationChange={setLocations}
+            />
+          </>
         )}
         {!connected && phase === 'ready' && (
           <span role="status" className="shrink-0 px-2 text-xs text-muted-foreground">
@@ -256,17 +349,18 @@ export function MobileReader({ api }: { api: MobileApi }) {
           {notice}
         </p>
       )}
-      {row !== null && catalog !== null ? (
+      {row !== null && catalog !== null && listed !== null ? (
         <div className="relative flex min-h-0 flex-1 flex-col">
           <DrawerPanel id={DRAWER_PANEL} open={drawerOpen}>
             <div className="h-full overflow-y-auto">
-              <DocumentRows
-                documents={catalog.documents}
+              <MobileDocumentList
+                documents={listed.documents}
                 current={row.documentId}
                 onOpen={(documentId) => {
                   closeDrawerFromInside();
                   open(documentId);
                 }}
+                {...listProps}
               />
             </div>
           </DrawerPanel>
@@ -284,9 +378,10 @@ export function MobileReader({ api }: { api: MobileApi }) {
         </div>
       ) : (
         <DocumentList
-          catalog={catalog}
+          catalog={listed}
           phase={phase}
           onOpen={open}
+          {...listProps}
           onRetry={() => {
             setPhase('connecting');
             revalidate();
@@ -302,7 +397,8 @@ function DocumentList({
   phase,
   onOpen,
   onRetry,
-}: {
+  ...list
+}: Pick<ComponentProps<typeof MobileDocumentList>, 'view' | 'location' | 'onRemove'> & {
   catalog: MobileCatalog | null;
   phase: Phase;
   onOpen: (documentId: string) => void;
@@ -333,39 +429,8 @@ function DocumentList({
   }
   return (
     <main className="min-h-0 flex-1 overflow-y-auto">
-      <DocumentRows documents={catalog.documents} current={null} onOpen={onOpen} />
+      <MobileDocumentList documents={catalog.documents} current={null} onOpen={onOpen} {...list} />
     </main>
-  );
-}
-
-// The rows of the open documents, for the list page and the drawer. Reading only: no PC operations.
-function DocumentRows({
-  documents,
-  current,
-  onOpen,
-}: {
-  documents: MobileDocument[];
-  current: string | null;
-  onOpen: (documentId: string) => void;
-}) {
-  return (
-    <nav aria-label="Open documents">
-      <ul>
-        {documents.map((document) => (
-          <li key={document.documentId} className="border-b">
-            <button
-              type="button"
-              className="flex min-h-12 w-full items-center gap-3 px-4 py-3 text-left active:bg-muted aria-[current=page]:bg-muted aria-[current=page]:font-medium"
-              aria-current={document.documentId === current ? 'page' : undefined}
-              onClick={() => onOpen(document.documentId)}
-            >
-              <FormatIcon format={document.format} />
-              <span className="min-w-0 flex-1 break-words">{document.title}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </nav>
   );
 }
 

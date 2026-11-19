@@ -73,6 +73,6 @@ export type MarkdownWidth = 'standard' | 'wide';
 export const isMarkdownWidth = (value: unknown): value is MarkdownWidth =>
   value === 'standard' || value === 'wide';
 
-export type OutlineVisibility = 'shown' | 'hidden';
-export const isOutlineVisibility = (value: unknown): value is OutlineVisibility =>
+export type Visibility = 'shown' | 'hidden';
+export const isVisibility = (value: unknown): value is Visibility =>
   value === 'shown' || value === 'hidden';

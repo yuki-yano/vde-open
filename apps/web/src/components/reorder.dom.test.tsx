@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Workspace } from '@/App';
 import type { Api } from '@/lib/api';
-import { inRepository } from '@/lib/document.fixture';
+import { inRepository } from '../../../../packages/shared/src/document.fixture.ts';
 
 // Saving the order of the list: moves are saved one at a time on the latest catalog version,
 // and lists fetched while saves are pending keep the order the user set.

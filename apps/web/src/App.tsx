@@ -4,6 +4,7 @@ import {
   type SearchHit,
   type ServerEvent,
 } from '@vde-open/shared';
+import { buildLabels } from '@vde-open/shared/repository-labels';
 import { Monitor, Moon, Palette, Search, Sun } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 
@@ -39,7 +40,6 @@ import {
   type Theme,
 } from '@/lib/preferences';
 import { createRefresher } from '@/lib/refresher';
-import { buildLabels } from '@/lib/repository-labels';
 
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 480;

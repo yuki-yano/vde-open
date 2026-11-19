@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 
@@ -119,6 +119,7 @@ async function scrollOver(page: Page, at: Locator, scroller: Locator, dy: number
 }
 
 const list = (page: Page) => page.getByRole('navigation', { name: 'Open documents' });
+const titles = (page: Page) => list(page).locator('[data-part="title"]');
 const frameOf = (page: Page) => page.frameLocator('[data-testid="document-frame"]');
 
 test('Lanes 1 and 4: Markdown with its image and a registered JS + JSON demo on the phone; the PC keeps its own document', async ({
@@ -142,11 +143,7 @@ test('Lanes 1 and 4: Markdown with its image and a registered JS + JSON demo on 
   const mobile = await phone(browser);
   await mobile.goto(MOBILE_UI_URL);
   // Newest opened first.
-  await expect(list(mobile).getByRole('button')).toHaveText([
-    'デモ',
-    'PCで見ている文書',
-    '画像メモ',
-  ]);
+  await expect(titles(mobile)).toHaveText(['デモ', 'PCで見ている文書', '画像メモ']);
   await list(mobile).getByRole('button', { name: 'デモ' }).click();
   await expect(mobile.getByTestId('document-frame')).toHaveAttribute('data-mode', 'interactive');
   await expect(frameOf(mobile).locator('#value')).toHaveText('a:1,2,3');
@@ -421,7 +418,7 @@ test('Lane 9: a document closed on the PC sends the phone back to the list, and 
   await t.json(['open', 'next.md', '--no-open']);
   await expect(mobile.getByRole('status')).toHaveText('That document is no longer open on the PC.');
   await expect(mobile.getByTestId('document-frame')).toHaveCount(0);
-  await expect(list(mobile).getByRole('button')).toHaveText(['次の文書']);
+  await expect(titles(mobile)).toHaveText(['次の文書']);
   await mobile.screenshot({ path: test.info().outputPath('bfcache-close.png') });
   await mobile.context().close();
 });
@@ -453,7 +450,7 @@ test('opened from the home screen, pulling down from the top reloads the reader'
     Object.defineProperty(navigator, 'standalone', { value: true });
   });
   await mobile.goto(MOBILE_UI_URL);
-  await expect(list(mobile).getByText('a', { exact: true })).toBeVisible();
+  await expect(titles(mobile)).toHaveText(['a']);
   await mobile.evaluate(() => {
     (window as Window & { beforeReload?: boolean }).beforeReload = true;
   });
@@ -475,7 +472,7 @@ test('opened from the home screen, pulling down from the top reloads the reader'
   await drag(240);
   await load;
   expect(await reloaded()).toBe(true);
-  await expect(list(mobile).getByText('a', { exact: true })).toBeVisible();
+  await expect(titles(mobile)).toHaveText(['a']);
   await mobile.context().close();
 });
 
@@ -604,5 +601,78 @@ test('both screens declare an icon and a home-screen icon that load', async ({ p
       expect(response.headers()['content-type']).toBe(type);
     }
   }
+  await mobile.context().close();
+});
+
+// Styles or scripts the phone screen's CSP blocked, recorded from the first load.
+async function watchCsp(page: Page): Promise<() => Promise<string[]>> {
+  await page.addInitScript(() => {
+    const blocked: string[] = [];
+    (window as unknown as { blocked: string[] }).blocked = blocked;
+    document.addEventListener('securitypolicyviolation', (event) => {
+      blocked.push(`${event.violatedDirective} ${event.blockedURI}`);
+    });
+  });
+  return () => page.evaluate(() => (window as unknown as { blocked: string[] }).blocked);
+}
+
+// A held press, released after the menu opened. Chromium holds a real touch (the release lands on the row, as on a
+// phone); Playwright has no touch hold for WebKit, so a mouse button holds there.
+async function longPress(page: Page, target: Locator): Promise<void> {
+  const box = await target.boundingBox();
+  if (!box) throw new Error('the row is not on screen');
+  const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  if (test.info().project.name === 'chromium') {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] });
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+    return;
+  }
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.mouse.up();
+}
+
+test('a long press offers the details and removing the document from the PC list, as the PC close button does', async ({
+  browser,
+}) => {
+  t.write('a.md', '# 文書A\n');
+  t.write('b.md', '# 文書B\n');
+  await t.json(['open', 'a.md', 'b.md', '--no-open']);
+  const mobile = await phone(browser);
+  const blocked = await watchCsp(mobile);
+  await mobile.goto(MOBILE_UI_URL);
+  const row = list(mobile).getByRole('button', { name: '文書A' });
+
+  await longPress(mobile, row);
+  const sheet = mobile.getByRole('dialog');
+  // The release does not also open the document behind the sheet.
+  await expect(sheet.getByRole('button', { name: 'Remove from the PC list' })).toBeVisible();
+  expect(new URL(mobile.url()).searchParams.get('document')).toBeNull();
+  await mobile.screenshot({ path: test.info().outputPath('long-press-sheet.png') });
+  await sheet.getByRole('button', { name: 'Details' }).tap();
+  // The menu gives way to the details.
+  await expect(mobile.getByText('Remove from the PC list')).toHaveCount(0);
+  await expect(sheet.getByRole('heading', { name: '文書A' })).toBeVisible();
+  // The menu finished leaving without taking focus out of the details.
+  await expect
+    .poll(() => mobile.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null))
+    .toBe(true);
+  await expect(sheet).toContainText('a.md');
+  await expect(sheet).not.toContainText(realpathSync(t.work));
+  await mobile.screenshot({ path: test.info().outputPath('details.png') });
+  await sheet.getByRole('button', { name: 'Close' }).tap();
+  await expect(sheet).toHaveCount(0);
+  await expect(row).toBeFocused();
+
+  await longPress(mobile, row);
+  await sheet.getByRole('button', { name: 'Remove from the PC list' }).tap();
+  await expect(titles(mobile)).toHaveText(['文書B']);
+  const { documents } = await t.json<{ documents: Array<{ title: string }> }>(['list']);
+  expect(documents.map((document) => document.title)).toEqual(['文書B']);
+  expect(await blocked()).toEqual([]);
   await mobile.context().close();
 });

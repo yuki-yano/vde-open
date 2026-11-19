@@ -57,11 +57,11 @@ import type { HeadingInUrl, HeadingRestore } from '@/lib/location';
 import { pdfExports, usePdfExport } from '@/lib/pdf-export';
 import {
   isMarkdownWidth,
-  isOutlineVisibility,
+  isVisibility,
   isViewMode,
   usePreference,
   type MarkdownWidth,
-  type OutlineVisibility,
+  type Visibility,
   type ViewMode,
 } from '@/lib/preferences';
 import { useBridge } from '@/lib/use-bridge';
@@ -195,10 +195,10 @@ function TextViewer({
   const outlineId = useId();
   const panes = useRef<HTMLDivElement>(null);
   const [paneWidth, setPaneWidth] = useState(0);
-  const [outlineVisibility, setOutlineVisibility] = usePreference<OutlineVisibility>(
+  const [outlineVisibility, setOutlineVisibility] = usePreference<Visibility>(
     'outline',
     'shown',
-    isOutlineVisibility,
+    isVisibility,
   );
   const maxOutlineWidth = Math.max(
     OUTLINE_MIN,
