@@ -77,6 +77,7 @@ export interface ManagementDeps {
   pdf: PdfService;
   // Origin of the listener that serves documents.
   previewOrigin: string;
+  phoneUrl: string | null;
   // Directory of the built UI. If absent, the UI is not served.
   webRoot: string | null;
   // UI origin allowed only during development. Always null in distributed builds.
@@ -300,6 +301,7 @@ export async function startManagementServer(
       activeDocumentId: state.activeDocumentId,
       openDocuments: state.openOrder.length,
       previewOrigin: deps.previewOrigin,
+      phoneUrl: deps.phoneUrl,
     };
     return c.json(
       successEnvelope(status, { command: 'status', catalogVersion: state.catalogVersion }),

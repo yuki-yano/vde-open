@@ -260,7 +260,8 @@ export type CloseResult = z.infer<typeof closeResultSchema>;
 // The mobile listeners as the PC sees them (daemon status). Only `ready` carries the bookmark URL.
 export const mobileStatusSchema = z.discriminatedUnion('state', [
   z.strictObject({ state: z.literal('disabled') }),
-  z.strictObject({ state: z.literal('ready'), uiUrl: z.string() }),
+  // previewPort is the public port the running reader serves views on (it may differ from the saved settings).
+  z.strictObject({ state: z.literal('ready'), uiUrl: z.string(), previewPort: z.number().int() }),
   z.strictObject({
     state: z.literal('error'),
     listener: z.enum(['ui', 'preview']).nullable(),
@@ -337,6 +338,8 @@ export const uiStatusSchema = z.strictObject({
   openDocuments: z.number().int().nonnegative(),
   // Origin of the listener that shows documents. Contains no secret.
   previewOrigin: z.string(),
+  // The phone reader's bookmark URL while it is ready, else null. Contains no secret (Tailscale checks the person).
+  phoneUrl: z.string().nullable(),
 });
 export type UiStatus = z.infer<typeof uiStatusSchema>;
 

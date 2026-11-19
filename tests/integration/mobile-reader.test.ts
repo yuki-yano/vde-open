@@ -250,7 +250,11 @@ describe('phone reader: starting and status', () => {
     writeSettings();
     await t.run(['daemon', 'restart', '--json']);
     status = (await t.run(['daemon', 'status', '--json'])).json<{ mobile: unknown }>().data;
-    expect(status.mobile).toEqual({ state: 'ready', uiUrl: `${UI_ORIGIN}/` });
+    expect(status.mobile).toEqual({
+      state: 'ready',
+      uiUrl: `${UI_ORIGIN}/`,
+      previewPort: PREVIEW_PORT,
+    });
     expect((await t.run(['daemon', 'status'])).stdout).toContain(
       `phone reader: ready  ${UI_ORIGIN}/`,
     );
@@ -330,6 +334,7 @@ describe('phone reader: starting and status', () => {
     expect(after.mobile).toEqual({
       state: 'ready',
       uiUrl: `https://${HOST}:${String(ports.uiPort)}/`,
+      previewPort: ports.phonePreview,
     });
     await t.run(['daemon', 'stop'], { env });
   });
@@ -892,6 +897,15 @@ if (args[0] === 'status') {
     expect(text.stdout).toContain(`settings: ${UI_ORIGIN}/`);
     expect(text.stdout).toContain(`daemon: ready ${UI_ORIGIN}/`);
     expect(text.stdout).toContain('serve: 43182 ours, 43183 ours');
+    // The QR code is for a person at a terminal; piped output (agents, scripts) never gets it.
+    expect(text.stdout).not.toContain('\u2588');
+    // The PC screen learns the phone URL from its status.
+    const pcStatus = async () => {
+      const uiUrl = (await t.run(['ui', '--print-url'])).stdout.trim();
+      const response = await fetch(`${uiUrl}_/api/v1/status`);
+      return ((await response.json()) as { data: { phoneUrl: string | null } }).data.phoneUrl;
+    };
+    expect(await pcStatus()).toBe(`${UI_ORIGIN}/`);
 
     const disabled = await t.run(['mobile', 'disable', '--json'], { env: tailscale.env });
     expect(disabled.json().data).toEqual({
@@ -901,6 +915,7 @@ if (args[0] === 'status') {
     expect(tailscale.state().web).toEqual({});
     const status = (await t.run(['daemon', 'status', '--json'])).json<{ mobile: unknown }>().data;
     expect(status.mobile).toEqual({ state: 'disabled' });
+    expect(await pcStatus()).toBeNull();
     // Without settings, status still shows the daemon's reader state.
     const after = await t.run(['mobile', 'status'], { env: tailscale.env });
     expect(after.stdout).toContain('settings: none (vo mobile enable)');

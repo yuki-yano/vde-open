@@ -441,6 +441,44 @@ test('only the configured person gets the screen', async ({ browser }) => {
   await mobile.context().close();
 });
 
+test('opened from the home screen, pulling down from the top reloads the reader', async ({
+  browser,
+}) => {
+  // Real touch input through CDP: Chromium only.
+  test.skip(browser.browserType().name() !== 'chromium', 'touch drags need CDP');
+  t.write('a.md', '# a\n');
+  await t.json(['open', 'a.md', '--no-open']);
+  const mobile = await phone(browser);
+  await mobile.addInitScript(() => {
+    Object.defineProperty(navigator, 'standalone', { value: true });
+  });
+  await mobile.goto(MOBILE_UI_URL);
+  await expect(list(mobile).getByText('a', { exact: true })).toBeVisible();
+  await mobile.evaluate(() => {
+    (window as Window & { beforeReload?: boolean }).beforeReload = true;
+  });
+  const cdp = await mobile.context().newCDPSession(mobile);
+  const drag = async (to: number) => {
+    const at = (y: number) => [{ x: 200, y }];
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(80) });
+    for (let y = 80; y <= to; y += 20) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(y) });
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  const reloaded = () =>
+    mobile.evaluate(() => (window as Window & { beforeReload?: boolean }).beforeReload !== true);
+  // A short pull does nothing.
+  await drag(120);
+  expect(await reloaded()).toBe(false);
+  const load = mobile.waitForEvent('load');
+  await drag(240);
+  await load;
+  expect(await reloaded()).toBe(true);
+  await expect(list(mobile).getByText('a', { exact: true })).toBeVisible();
+  await mobile.context().close();
+});
+
 test('with no documents open, the list says so', async ({ browser }) => {
   t.write('a.md', '# a\n');
   await t.json(['open', 'a.md', '--no-open']);

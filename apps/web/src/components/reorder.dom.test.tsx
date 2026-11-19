@@ -50,7 +50,7 @@ beforeEach(() => {
       if (!lists.hold) return Promise.resolve(answer());
       return new Promise((resolveList) => lists.held.push(() => resolveList(answer())));
     },
-    status: () => Promise.resolve({ activeDocumentId: null }),
+    status: () => Promise.resolve({ activeDocumentId: null, phoneUrl: null }),
     feedback: () => new Promise(() => undefined),
     events: (next: NonNullable<typeof handlers>) => {
       handlers = next;

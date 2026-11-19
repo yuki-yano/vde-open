@@ -63,6 +63,7 @@ async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> 
     },
     feedback: new FeedbackService({ store, documents }),
     previewOrigin: 'http://127.0.0.1:1',
+    phoneUrl: null,
     webRoot: null,
     devOrigin: null,
     isStopping: () => false,

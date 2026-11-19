@@ -102,6 +102,7 @@ function packTarball(): string {
     ['minisearch', 'Copyright'],
     ['hono', 'Copyright'],
     ['zod', 'Copyright'],
+    ['uqr', 'Copyright'],
     ['react-dom', 'Copyright'],
     ['@base-ui/react', 'Copyright'],
     ['tailwindcss', 'Copyright'],

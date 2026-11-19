@@ -11,6 +11,8 @@ import {
   disableMobile,
   enableMobile,
   forwardState,
+  mobileStatus,
+  openableUrl,
   type Tailscale,
 } from './mobile-setup.ts';
 
@@ -93,7 +95,11 @@ let base: string;
 let environment: PathEnvironment;
 let restarts: number;
 const configPath = () => join(base, 'home', 'listeners.json');
-const ready: DaemonStatus['mobile'] = { state: 'ready', uiUrl: `https://${HOST}:43182/` };
+const ready: DaemonStatus['mobile'] = {
+  state: 'ready',
+  uiUrl: `https://${HOST}:43182/`,
+  previewPort: 43183,
+};
 let mobileAfterRestart: DaemonStatus['mobile'];
 const restartDaemon = () => {
   restarts += 1;
@@ -352,5 +358,52 @@ describe('review follow-ups for vo mobile', () => {
       '/',
       '/other',
     ]);
+  });
+});
+
+describe('openableUrl: the URL a QR code may show', () => {
+  const ours = (...ports: number[]) => {
+    const serve: FakeServe = { TCP: {}, Web: {} };
+    for (const port of ports) {
+      serve.TCP[String(port)] = { HTTPS: true };
+      serve.Web[`${HOST}:${String(port)}`] = {
+        Handlers: { '/': { Proxy: `http://127.0.0.1:${String(port)}` } },
+      };
+    }
+    return serve;
+  };
+
+  it('is the reader URL when Serve forwards both ports of the running reader to it', () => {
+    expect(openableUrl(ready, ours(43182, 43183))).toBe(`https://${HOST}:43182/`);
+  });
+
+  it('is null when a port of the running reader is not its forward, Serve is unknown, or no reader runs', () => {
+    expect(openableUrl(ready, ours(43182))).toBeNull();
+    const taken = ours(43182);
+    otherForward(taken, 43183);
+    expect(openableUrl(ready, taken)).toBeNull();
+    expect(openableUrl(ready, null)).toBeNull();
+    expect(openableUrl(null, ours(43182, 43183))).toBeNull();
+    expect(openableUrl({ state: 'disabled' }, ours(43182, 43183))).toBeNull();
+  });
+
+  it('is null when only the saved preview port and its forward changed: the running reader still serves views on its own port', () => {
+    expect(openableUrl(ready, ours(43182, 44183))).toBeNull();
+  });
+
+  it('status reports the URL for settings whose host the daemon normalized (upper case, trailing dot)', async () => {
+    await mkdir(join(base, 'home'), { recursive: true, mode: 0o700 });
+    await writeFile(
+      configPath(),
+      JSON.stringify({ mobile: { host: `${HOST.toUpperCase()}.`, login: LOGIN } }),
+    );
+    const { tailscale, serve } = fakeTailscale();
+    Object.assign(serve, ours(43182, 43183));
+    const result = await mobileStatus({
+      environment,
+      tailscale,
+      daemonStatus: () => Promise.resolve({ mobile: ready } as DaemonStatus),
+    });
+    expect(result.openableUrl).toBe(`https://${HOST}:43182/`);
   });
 });

@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { CopyButton } from '@/components/copy-button';
 import { DocumentLocation, DocumentPathCopyButton } from '@/components/document-location';
 import { FormatIcon } from '@/components/format-icon';
+import { PhoneLinkButton } from '@/components/phone-link';
 
 // The top row of a document view: the title, where the document is, and the view's controls.
 // The list shortens the location; here it wraps instead, so the whole of it can be read on touch devices too.
@@ -38,6 +39,7 @@ export function DocumentHeader({
                 icon={Hash}
                 title={`Copy document ID (${document.documentId})`}
               />
+              <PhoneLinkButton documentId={document.documentId} />
             </span>
           </div>
         </div>

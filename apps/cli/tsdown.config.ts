@@ -54,6 +54,7 @@ export default defineConfig({
       'readdirp',
       'source-map-js',
       'tinyglobby',
+      'uqr',
       'zod',
     ],
   },

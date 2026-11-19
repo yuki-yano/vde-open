@@ -398,6 +398,8 @@ export interface MobileStatusResult {
   configured: { host: string; login: string; uiPort: number; previewPort: number } | null;
   daemon: DaemonStatus['mobile'];
   serve: Record<string, ForwardState> | null;
+  // The running reader's URL when Serve forwards both of its ports to it, else null.
+  openableUrl: string | null;
 }
 
 export async function mobileStatus(
@@ -418,20 +420,36 @@ export async function mobileStatus(
           previewPort: mobile.previewPort ?? DEFAULT_PORTS.mobilePreview,
         }
       : null;
-  let serve: MobileStatusResult['serve'] = null;
-  if (configured) {
-    // Serve is reported when Tailscale answers; without it the rest is still shown.
-    const status = await serveStatus(context.tailscale).catch(() => null);
-    if (status) {
-      serve = {
-        [String(configured.uiPort)]: forwardState(status, configured.host, configured.uiPort),
-        [String(configured.previewPort)]: forwardState(
-          status,
-          configured.host,
-          configured.previewPort,
-        ),
-      };
-    }
-  }
-  return { configured, daemon: (await context.daemonStatus()).mobile, serve };
+  const daemon = (await context.daemonStatus()).mobile;
+  // Serve is reported when Tailscale answers; without it the rest is still shown.
+  const status =
+    configured || daemon?.state === 'ready'
+      ? await serveStatus(context.tailscale).catch(() => null)
+      : null;
+  const serve =
+    configured && status
+      ? {
+          [String(configured.uiPort)]: forwardState(status, configured.host, configured.uiPort),
+          [String(configured.previewPort)]: forwardState(
+            status,
+            configured.host,
+            configured.previewPort,
+          ),
+        }
+      : null;
+  return { configured, daemon, serve, openableUrl: openableUrl(daemon, status) };
+}
+
+// The URL a phone can open right now: judged on the running reader (its normalized host and both of its ports), not
+// on the saved settings, which may have changed since it started.
+export function openableUrl(
+  daemon: DaemonStatus['mobile'],
+  serve: ServeStatus | null,
+): string | null {
+  if (daemon?.state !== 'ready' || serve === null) return null;
+  const { hostname, port } = new URL(daemon.uiUrl);
+  const forwarded = [Number(port), daemon.previewPort].every(
+    (each) => forwardState(serve, hostname, each) === 'ours',
+  );
+  return forwarded ? daemon.uiUrl : null;
 }

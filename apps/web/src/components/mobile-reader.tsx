@@ -1,7 +1,7 @@
 import { HTML_LINK_HELLO, encodeLogicalPath, localImagePath } from '@vde-open/document';
 import { MarkdownView } from '@vde-open/document/react';
 import type { MobileDocument, MobileEvent, MobileGrantResult } from '@vde-open/shared';
-import { ChevronLeft, LoaderCircle, RefreshCw } from 'lucide-react';
+import { ChevronLeft, LoaderCircle, RefreshCw, RotateCw } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -20,6 +20,7 @@ import { ApiError } from '@/lib/api';
 import type { MobileApi, MobileCatalog } from '@/lib/mobile-api';
 import { createRefresher } from '@/lib/refresher';
 import { useMarkdown } from '@/lib/use-markdown';
+import { isStandalone, usePullToReload } from '@/lib/use-pull-to-reload';
 
 // The phone reader (ADR-0017): the open documents of the PC, read on the phone. Choosing, scrolling, and using a
 // demo stay on the phone; nothing here changes what the PC shows.
@@ -53,6 +54,9 @@ export function MobileReader({ api }: { api: MobileApi }) {
   const [notice, setNotice] = useState<string | null>(null);
   // The document drawer of the reader (narrow screens show the list as a drawer, as in the management UI).
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const page = useRef<HTMLDivElement>(null);
+  const [standalone] = useState(isStandalone);
+  const pulled = usePullToReload(page, standalone, () => window.location.reload());
   // Closing the drawer while focus is on one of its rows (Escape, or choosing a document) puts focus back on its
   // toggle, so keyboard users are not left on a hidden row. Focus elsewhere stays where it is.
   const returnFocus = useRef(false);
@@ -206,7 +210,20 @@ export function MobileReader({ api }: { api: MobileApi }) {
     setSelected(null);
   };
   return (
-    <div className="flex h-svh flex-col bg-background text-foreground">
+    <div ref={page} className="flex h-svh flex-col bg-background text-foreground">
+      {pulled > 0 && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-x-0 top-12 z-30 flex justify-center"
+        >
+          <span
+            className={`rounded-full border bg-background p-2 shadow-md ${pulled === 1 ? 'text-primary' : 'text-muted-foreground'}`}
+            style={{ opacity: pulled, transform: `rotate(${String(pulled * 270)}deg)` }}
+          >
+            <RotateCw className="size-4" />
+          </span>
+        </div>
+      )}
       <header className="flex h-11 shrink-0 items-center gap-1 border-b bg-chrome px-2">
         {row !== null ? (
           <>

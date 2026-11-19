@@ -27,6 +27,7 @@ import {
   type WatchListResult,
 } from '@vde-open/shared';
 import { Command, CommanderError, InvalidArgumentError } from 'commander';
+import { renderUnicodeCompact } from 'uqr';
 
 import packageJson from '../../package.json' with { type: 'json' };
 import { startDaemon } from '../daemon/main.ts';
@@ -1054,6 +1055,14 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
     await control.stop();
     return (await viaDaemon<DaemonStatus>('daemon.status', {})).data;
   };
+  // A QR code of the phone reader's URL for a person at a terminal. White on black set explicitly, so a light theme
+  // does not invert it.
+  const phoneQrOf = (url: string | null): string[] =>
+    url !== null && context.stdoutIsTty
+      ? renderUnicodeCompact(url, { border: 2 })
+          .split('\n')
+          .map((line) => `\u001b[97;40m${line}\u001b[0m`)
+      : [];
   const renderServe = (serve: Record<string, string>) =>
     Object.entries(serve)
       .map(([port, state]) => `${port} ${state}`)
@@ -1087,6 +1096,8 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
             options.serve
               ? 'Open the URL on your phone (signed in to the same tailnet) and bookmark it.'
               : `Add the forwards: tailscale serve --bg --https=<port> http://127.0.0.1:<port> (for ${Object.keys(data.serve).join(' and ')})`,
+            // Only when the forwards are in place: before that the code would lead nowhere.
+            ...phoneQrOf(options.serve ? data.uiUrl : null),
           ].join('\n'),
       );
     });
@@ -1159,6 +1170,7 @@ export async function runCli(rawArgv: string[], context: CliContext): Promise<Ex
               : [
                   `serve: ${data.serve === null ? 'unknown (tailscale not available)' : renderServe(data.serve)}`,
                 ]),
+            ...phoneQrOf(data.openableUrl),
           ].join('\n'),
       );
     });

@@ -8,6 +8,7 @@ import { Monitor, Moon, Palette, Search, Sun } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 
 import { RepositoryLabelsContext } from '@/components/document-location';
+import { PhoneUrlContext } from '@/components/phone-link';
 import { DocumentSwitcher } from '@/components/document-workspace';
 import { DetailsPopover } from '@/components/details-popover';
 import { DrawerPanel, DrawerToggle } from '@/components/drawer';
@@ -179,6 +180,9 @@ export function Workspace({ api }: { api: Api }) {
   // How many notifications that the view tried to load an unregistered file have been received.
   const [renderSignal, setRenderSignal] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
+  // The phone URL each daemon start reported in its status. Only the start the views follow is shown, so a restart
+  // hides it until that start's status arrives, and a late status from an earlier start changes nothing shown.
+  const [phoneUrls, setPhoneUrls] = useState<Record<string, string | null>>({});
   // Whether the document list (drawer) is open on screens narrower than 900px.
   const [drawerOpen, setDrawerOpen] = useState(false);
   // The section to jump to from a search result (kept with the revision that was searched).
@@ -212,6 +216,7 @@ export function Workspace({ api }: { api: Api }) {
   // Refetch the list from the daemon. Switch the shown document only if it was closed.
   const fetchList = useCallback(async () => {
     const [list, status] = await Promise.all([api.documents(), api.status()]);
+    setPhoneUrls((current) => ({ ...current, [status.daemonId]: status.phoneUrl }));
     // The notification stream decides which daemon start the views follow; a fetched status only fills it in before
     // the first notification. A fetch that crossed a restart can then never take the views back to the old start.
     // (Documents and revisions are persisted, so a list from either start describes the same documents.)
@@ -504,17 +509,23 @@ export function Workspace({ api }: { api: Api }) {
         />
         {active ? (
           <RepositoryLabelsContext value={labels}>
-            <DocumentSwitcher
-              documents={documents}
-              api={api}
-              document={active}
-              daemonId={catalog.daemonId}
-              feedbackSignal={feedbackSignal}
-              renderSignal={renderSignal}
-              sectionTarget={sectionTarget?.documentId === active.documentId ? sectionTarget : null}
-              restoreHeading={selection.restore}
-              onHeadingShown={showHeading}
-            />
+            <PhoneUrlContext
+              value={catalog.daemonId === null ? null : (phoneUrls[catalog.daemonId] ?? null)}
+            >
+              <DocumentSwitcher
+                documents={documents}
+                api={api}
+                document={active}
+                daemonId={catalog.daemonId}
+                feedbackSignal={feedbackSignal}
+                renderSignal={renderSignal}
+                sectionTarget={
+                  sectionTarget?.documentId === active.documentId ? sectionTarget : null
+                }
+                restoreHeading={selection.restore}
+                onHeadingShown={showHeading}
+              />
+            </PhoneUrlContext>
           </RepositoryLabelsContext>
         ) : (
           <main className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">

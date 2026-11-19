@@ -113,7 +113,7 @@ beforeEach(() => {
     refresh: () => Promise.resolve(),
     documents: () =>
       Promise.resolve({ documents: current.documents, catalogVersion: 1, cursor: null }),
-    status: () => Promise.resolve({ activeDocumentId: 'doc_1', daemonId: 'd1' }),
+    status: () => Promise.resolve({ activeDocumentId: 'doc_1', daemonId: 'd1', phoneUrl: null }),
     feedback: () => {
       feedbackRequests += 1;
       return Promise.resolve(current.request);
@@ -180,6 +180,62 @@ describe('FB-015 showing the revision awaiting an answer', () => {
     );
     await until(() => shownText() === '本文 2');
     expect(shownText()).toBe('本文 2');
+  });
+});
+
+describe('opening the shown document on the phone', () => {
+  it('shows a QR code of the phone URL of the document only while the phone reader is ready', async () => {
+    root.render(<Workspace api={api} />);
+    await until(() => shownText() !== '');
+    expect(document.querySelector('[aria-label="Open on your phone"]')).toBeNull();
+
+    api.status = (() =>
+      Promise.resolve({
+        activeDocumentId: 'doc_1',
+        daemonId: 'd1',
+        phoneUrl: 'https://pc.example.ts.net:43182/',
+      })) as Api['status'];
+    handlers?.onConnect();
+    handlers?.onEvent({ type: 'catalog-changed', daemonId: 'd1', sequence: 1, catalogVersion: 2 });
+    await until(() => document.querySelector('[aria-label="Open on your phone"]') !== null);
+    button('Open on your phone').click();
+    await until(() => document.querySelector('svg[role="img"]') !== null);
+    expect(document.querySelector('svg[role="img"] title')?.textContent).toBe(
+      'QR code for https://pc.example.ts.net:43182/?document=doc_1',
+    );
+  });
+
+  it("a restart hides the button at once, and the previous start's late status never brings it back", async () => {
+    const phoneButton = () => document.querySelector('[aria-label="Open on your phone"]');
+    const statusOf = (daemonId: string, phoneUrl: string | null) =>
+      ({ activeDocumentId: 'doc_1', daemonId, phoneUrl }) as Awaited<ReturnType<Api['status']>>;
+    api.status = (() =>
+      Promise.resolve(statusOf('d1', 'https://pc.example.ts.net:43182/'))) as Api['status'];
+    root.render(<Workspace api={api} />);
+    await until(() => handlers !== null);
+    handlers?.onConnect();
+    handlers?.onEvent({ type: 'hello', daemonId: 'd1', sequence: 0, catalogVersion: 1 });
+    await until(() => phoneButton() !== null);
+    expect(phoneButton()).not.toBeNull();
+
+    // A fetch answered by the previous start is held back; every later fetch reaches the new start, without the reader.
+    let answerFromPrevious: () => void = () => undefined;
+    let calls = 0;
+    api.status = (() => {
+      calls += 1;
+      if (calls > 1) return Promise.resolve(statusOf('d2', null));
+      return new Promise((resolve) => {
+        answerFromPrevious = () => resolve(statusOf('d1', 'https://pc.example.ts.net:43182/'));
+      });
+    }) as Api['status'];
+    handlers?.onEvent({ type: 'catalog-changed', daemonId: 'd1', sequence: 1, catalogVersion: 1 });
+    await settle();
+    handlers?.onEvent({ type: 'hello', daemonId: 'd2', sequence: 0, catalogVersion: 1 });
+    await until(() => phoneButton() === null);
+    expect(phoneButton()).toBeNull();
+    answerFromPrevious();
+    await settle(80);
+    expect(phoneButton()).toBeNull();
   });
 });
 
@@ -266,7 +322,11 @@ describe('a new daemon start (PC restart)', () => {
     daemon = 'd2';
     api.documents = () => Promise.reject(new Error('not reachable yet'));
     api.status = (() =>
-      Promise.resolve({ activeDocumentId: 'doc_1', daemonId: 'd2' })) as Api['status'];
+      Promise.resolve({
+        activeDocumentId: 'doc_1',
+        daemonId: 'd2',
+        phoneUrl: null,
+      })) as Api['status'];
     handlers?.onConnect();
     handlers?.onEvent({ type: 'hello', daemonId: 'd2', sequence: 0, catalogVersion: 1 });
     await until(() => frameSrc().includes('grant-d2'));
@@ -293,7 +353,7 @@ describe('a new daemon start (PC restart)', () => {
     api.status = (() =>
       new Promise((resolve) => {
         answerFromPrevious = () =>
-          resolve({ activeDocumentId: 'doc_1', daemonId: 'd1' } as Awaited<
+          resolve({ activeDocumentId: 'doc_1', daemonId: 'd1', phoneUrl: null } as Awaited<
             ReturnType<Api['status']>
           >);
       })) as Api['status'];

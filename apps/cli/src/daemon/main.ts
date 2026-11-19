@@ -376,29 +376,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     );
     previewOrigin = preview.origin;
 
-    management = await listenOrFail('management', ports.management, () =>
-      startManagementServer(
-        {
-          daemonId,
-          version,
-          documents,
-          events,
-          render,
-          search: searching,
-          feedback: answering,
-          pdf: exporting,
-          previewOrigin,
-          webRoot: webRootPath(),
-          devOrigin,
-          isStopping: () => stopping !== null,
-          onEvent: (event, fields) => logger.log(event, fields),
-        },
-        { port: ports.management },
-      ),
-    );
-    managementOrigin = management.origin;
-    const uiUrl = `${management.origin}/`;
-
     // The phone reader. Behind Tailscale Serve, the configured ports are both the public HTTPS ports and the local
     // ones. In test mode the local sockets get free ports (diagnostics report them) and the public numbers stay.
     let mobileStatus: MobileStatus =
@@ -452,6 +429,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         mobileStatus = {
           state: 'ready',
           uiUrl: `https://${settings.host}:${String(settings.uiPort)}/`,
+          previewPort: settings.previewPort,
         };
       } catch (error) {
         // Close whichever started, so no half of the phone reader stays reachable. The PC keeps running.
@@ -472,6 +450,31 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         logger.log('mobile.start-failed', { listener: failing, code: cause });
       }
     }
+    // After the phone reader, so the PC screen never sees a reader that is still starting.
+    management = await listenOrFail('management', ports.management, () =>
+      startManagementServer(
+        {
+          daemonId,
+          version,
+          documents,
+          events,
+          render,
+          search: searching,
+          feedback: answering,
+          pdf: exporting,
+          previewOrigin,
+          phoneUrl: mobileStatus.state === 'ready' ? mobileStatus.uiUrl : null,
+          webRoot: webRootPath(),
+          devOrigin,
+          isStopping: () => stopping !== null,
+          onEvent: (event, fields) => logger.log(event, fields),
+        },
+        { port: ports.management },
+      ),
+    );
+    managementOrigin = management.origin;
+    const uiUrl = `${management.origin}/`;
+
     watcher = createWatchService({
       documents,
       onEvent: (event, fields) => logger.log(event, fields),
