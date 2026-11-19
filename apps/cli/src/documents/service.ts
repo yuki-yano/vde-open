@@ -1632,6 +1632,12 @@ export class DocumentService {
     return { record, entry: this.#requireRevision(record, revision ?? record.currentRevision) };
   }
 
+  // The bytes of the current revision as loaded, image bytes included.
+  async readCurrentSource(documentId: string): Promise<Buffer> {
+    const { entry } = this.describeRevision(documentId, undefined);
+    return this.#store.readBlob(entry.sourceSha256);
+  }
+
   // The canonical path a document link points to. Shared by opening links on the PC and resolving them on the phone.
   async #linkTarget(documentId: string, href: string): Promise<string> {
     const record = this.#requireOpen(documentId);

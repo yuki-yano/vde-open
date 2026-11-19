@@ -205,6 +205,40 @@ test('a catalog change during a drag cancels that reorder without dropping the n
   ).toEqual(['Alpha', 'Beta', 'Gamma', 'Delta']);
 });
 
+test('dragging a file icon offers its file URL as DownloadURL instead of reordering', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== 'chromium', 'Only Chromium drags a file out of DownloadURL.');
+  await openList(page);
+  // Bubble phase on document, so React's handler on the root has already set the data.
+  await page.evaluate(() => {
+    document.addEventListener('dragstart', (event) => {
+      (window as unknown as { dragged: unknown }).dragged = {
+        url: event.dataTransfer?.getData('DownloadURL'),
+        prevented: event.defaultPrevented,
+      };
+    });
+  });
+  const icon = (await rows(page).first().locator('[data-row-action="drag-file"]').boundingBox())!;
+  await page.mouse.move(icon.x + icon.width / 2, icon.y + icon.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(icon.x + 40, icon.y + 60, { steps: 6 });
+  await expect(sidebar(page).getByTestId('drop-position')).toHaveCount(0);
+  await page.mouse.up();
+  const documentId = await rows(page).first().getAttribute('data-document-id');
+  const url = `${new URL(page.url()).origin}/_/api/v1/documents/${documentId}/file`;
+  expect(await page.evaluate(() => (window as unknown as { dragged?: unknown }).dragged)).toEqual({
+    url: `text/markdown:Alpha.md:${url}`,
+    prevented: false,
+  });
+  const file = await page.evaluate(async (href) => {
+    const response = await fetch(href);
+    return { type: response.headers.get('content-type'), body: await response.text() };
+  }, url);
+  expect(file).toEqual({ type: 'application/octet-stream', body: '# Alpha\n' });
+});
+
 test.describe('touch drag', () => {
   test.use({ hasTouch: true });
   for (const part of ['title', 'location']) {

@@ -1,3 +1,4 @@
+import { assetTypeOf } from '@vde-open/document';
 import type {
   Answers,
   DocumentSummary,
@@ -15,11 +16,32 @@ import type {
   UiStatus,
 } from '@vde-open/shared';
 
+import { fileNameOf } from './repository-labels.ts';
 import { createSseParser } from './sse.ts';
 
 const API = '/_/api/v1';
 const READ_PAGE_BYTES = 1024 * 1024;
 const RECONNECT_MAX_MS = 10_000;
+
+const FILE_MIME = { markdown: 'text/markdown', html: 'text/html' } as const;
+
+// Only Chromium on macOS and Windows turns DownloadURL into a file on drop; Linux Chromium, Firefox and Safari do not.
+export function canDragFileOut(): boolean {
+  const agent = navigator.userAgent;
+  return agent.includes('Chrome/') && /Macintosh|Windows/.test(agent);
+}
+
+// Chromium's DownloadURL drag data: dropped on another app, the browser downloads the URL and hands over the file.
+export function downloadUrlOf(document: DocumentSummary): string {
+  const name = fileNameOf(document);
+  const mime =
+    document.format === 'image'
+      ? (assetTypeOf(name)?.mime ?? 'application/octet-stream')
+      : FILE_MIME[document.format];
+  const url = new URL(`${API}/documents/${document.documentId}/file`, location.href).href;
+  // Chromium splits the value at its first two colons.
+  return `${mime}:${name.replaceAll(':', '_')}:${url}`;
+}
 
 export class ApiError extends Error {
   readonly code: string;

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { connect as connectSocket, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,6 +34,7 @@ afterEach(async () => {
 
 interface Fixture {
   store: StateStore;
+  documents: DocumentService;
   events: ReturnType<typeof createEventHub>;
   // What was received over SSE, and whether the connection ended.
   stream: { received: string; ended: boolean; reading: Promise<void> };
@@ -90,6 +91,7 @@ async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> 
   }
   return {
     store,
+    documents,
     events,
     stream,
   };
@@ -113,6 +115,25 @@ describe('management notifications without authentication', () => {
     await server?.close();
     await ended(stream);
     expect(events.subscriberCount).toBe(0);
+    await store.close();
+  });
+});
+
+describe('document file', () => {
+  it('returns the exact current bytes as an attachment that never renders', async () => {
+    const { store, documents } = await connect(60_000);
+    writeFileSync(join(base, 'a.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const opened = await documents.open({ cwd: base, paths: ['a.png'] });
+    const documentId = opened.data.documents[0]?.documentId as string;
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe, 0x0a]);
+    writeFileSync(join(base, 'a.png'), bytes);
+    await documents.refresh({ documentId });
+    const response = await fetch(`${server?.origin}/_/api/v1/documents/${documentId}/file`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/octet-stream');
+    expect(response.headers.get('content-disposition')).toBe('attachment');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
     await store.close();
   });
 });

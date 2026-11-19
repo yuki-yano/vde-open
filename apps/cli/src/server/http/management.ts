@@ -384,6 +384,16 @@ export async function startManagementServer(
     });
   });
 
+  // The current file of a document, fetched by the browser when its sidebar icon is dragged into another app.
+  api.get('/documents/:id/file', async (c) => {
+    const bytes = await deps.documents.readCurrentSource(c.req.param('id'));
+    // The bytes can be user HTML or SVG; never let them render on the management origin.
+    return c.body(new Uint8Array(bytes), 200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': 'attachment',
+    });
+  });
+
   // Search over open documents. The accepted parameters are the same as the CLI (spec 12.2).
   api.get('/search', async (c) => {
     const { query, mode, limit, maxBytes, cursor } = c.req.query();

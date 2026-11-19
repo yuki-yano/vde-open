@@ -2,7 +2,7 @@
 import type { DocumentSummary } from '@vde-open/shared';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { documentAt, inRepository, inWorktree } from '@/lib/document.fixture';
 import type { SidebarView } from '@/lib/preferences';
@@ -154,6 +154,40 @@ describe('flat rows', () => {
     expect(descriptionOf(rows()[0] as Element)).toContain(
       "This folder's .git does not match its repository",
     );
+  });
+});
+
+describe('dragging a file into another app', () => {
+  const file = {
+    ...inRepository('/r/app', 'docs/a:b.png'),
+    format: 'image' as const,
+    revision: `rev_${'0'.repeat(64)}`,
+  };
+  const agentIs = (agent: string) => vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(agent);
+  afterEach(() => vi.restoreAllMocks());
+
+  it('is not offered where the browser cannot hand over a file', () => {
+    agentIs('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36');
+    show([file]);
+    expect(container.querySelectorAll('[data-row-action="drag-file"]')).toHaveLength(0);
+  });
+
+  it('hands over the daemon copy of a file, and is not offered for standard input', () => {
+    agentIs(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36',
+    );
+    show([file, { ...documentAt(null), revision: `rev_${'1'.repeat(64)}` }]);
+    const handles = container.querySelectorAll('[data-row-action="drag-file"]');
+    expect(handles).toHaveLength(1);
+    // happy-dom's DragEvent ignores dataTransfer, so the event carries one directly.
+    const dataTransfer = new DataTransfer();
+    handles[0]?.dispatchEvent(
+      Object.assign(new Event('dragstart', { bubbles: true }), { dataTransfer }),
+    );
+    expect(dataTransfer.getData('DownloadURL')).toBe(
+      `image/png:a_b.png:${location.origin}/_/api/v1/documents/${file.documentId}/file`,
+    );
+    expect(dataTransfer.effectAllowed).toBe('copy');
   });
 });
 

@@ -39,6 +39,7 @@ import {
 import { DetailsPopover } from '@/components/details-popover';
 import { FormatIcon } from '@/components/format-icon';
 import { Button } from '@/components/ui/button';
+import { canDragFileOut, downloadUrlOf } from '@/lib/api';
 import {
   segmentedGroup,
   segmentedItem,
@@ -115,6 +116,29 @@ function StatusBadges({ document }: { document: DocumentSummary }) {
         </span>
       )}
     </>
+  );
+}
+
+// Dragging the icon of a file into another app (a chat, for example) attaches the file there.
+// Hidden from screen readers, or Chromium puts its tooltip in the row's name. The reorder sensor skips presses on it.
+function FileIcon({ document }: { document: DocumentSummary }) {
+  if (document.canonicalPath === null || document.revision === null || !canDragFileOut()) {
+    return <FormatIcon format={document.format} />;
+  }
+  return (
+    <span
+      draggable
+      aria-hidden="true"
+      className="flex shrink-0 cursor-copy"
+      title="Drag into another app to attach the file"
+      data-row-action="drag-file"
+      onDragStart={(event) => {
+        event.dataTransfer.setData('DownloadURL', downloadUrlOf(document));
+        event.dataTransfer.effectAllowed = 'copy';
+      }}
+    >
+      <FormatIcon format={document.format} />
+    </span>
   );
 }
 
@@ -348,7 +372,7 @@ function FlatRow({
         onKeyDown={onKeyDown}
       >
         <span className="flex w-full min-w-0 items-center gap-1.5 row-open:pr-6">
-          <FormatIcon format={document.format} />
+          <FileIcon document={document} />
           <span className="min-w-12 flex-1 truncate" data-part="title">
             {document.title}
           </span>
@@ -435,7 +459,7 @@ function TreeDocumentRow({
           data-document-id={document.documentId}
           onClick={onSelect}
         >
-          <FormatIcon format={document.format} />
+          <FileIcon document={document} />
           <bdi className="min-w-12 flex-1 truncate">{visible(name)}</bdi>
           <StatusBadges document={document} />
         </button>
