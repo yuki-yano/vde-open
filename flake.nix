@@ -39,6 +39,10 @@
           # package.json の engines.node と packageManager は、ここで入る版に合わせる（pnpm run check:runtime で確かめる）。
           default = pkgs.mkShellNoCC {
             packages = [ nodejs pkgs.pnpm_12 ];
+            # Without the system data directories, Playwright's WebKit on Linux cannot read the MIME database and fails every page load.
+            shellHook = ''
+              export XDG_DATA_DIRS="''${XDG_DATA_DIRS:+$XDG_DATA_DIRS:}/usr/local/share:/usr/share"
+            '';
           };
         });
     };
