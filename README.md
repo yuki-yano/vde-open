@@ -28,7 +28,7 @@ To install from a clone of this repository (set up the [development environment]
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test:pack                                   # builds artifacts/vde-open-<version>.tgz and verifies an install in a separate directory
-bun add -g "$PWD/artifacts/vde-open-0.1.17.tgz"   # bun add -g needs an absolute path
+bun add -g "$PWD/artifacts/vde-open-0.1.18.tgz"   # bun add -g needs an absolute path
 ```
 
 ## `vde-open` and `vo`
