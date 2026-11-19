@@ -20,7 +20,7 @@ import * as csstree from 'css-tree';
 import { parse, serialize } from 'parse5';
 import { describe, expect, it } from 'vitest';
 
-describe('@tanstack/markdown 1.0.0', () => {
+describe('@tanstack/markdown 1.2.0', () => {
   it('the parser returns a serializable AST whose nodes carry no source positions', () => {
     const document = parseMarkdown('# 認証仕様\n\n本文です。\n\n## 節\n');
     expect(document.type).toBe('root');
@@ -73,7 +73,7 @@ describe('@tanstack/markdown 1.0.0', () => {
   });
 });
 
-describe('@tanstack/highlight 1.0.0', () => {
+describe('@tanstack/highlight 1.2.12', () => {
   it('the baseline languages of spec 8.2 can be registered explicitly', () => {
     const highlighter = createHighlighter({
       languages: [js, jsx, ts, tsx, json, yaml, html, css, shell, markdown],
@@ -98,7 +98,7 @@ describe('@tanstack/highlight 1.0.0', () => {
   });
 });
 
-describe('parse5 8.0.1', () => {
+describe('parse5 8.1.1', () => {
   it('parses and serializes HTML without executing scripts', () => {
     const tree = parse(
       '<!doctype html><title>t</title><p>本文<script>globalThis.__ran = 1</script>',

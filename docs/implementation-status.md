@@ -556,7 +556,7 @@ HTMLの実browserでの印刷はmacOSのみ確認した。Linux・Windowsでの�
 
 - [x] `pnpm pack`で作ったtarball（`artifacts/vde-open-0.1.0.tgz`）で、`pnpm test:pack`がPASS。
 - [x] 仕様16.3の文書（README、agent-usage、architecture、security-model、dependency-validation、implementation-status、ADR）とCI定義がある。
-- [x] Node 24（`mise.toml`）と直接依存が完全版番号で固定され、lockfileがある。
+- [x] Node 24（`flake.nix`と`package.json`の`engines.node`）と直接依存が完全版番号で固定され、lockfileがある。
 - [x] 導入で、利用者のshellの設定を変えず、既存の`vo`を上書きしない（CLI-014）。P7の完了までnpm publishとpushをしていない（公開はその後。「0.1.0の公開とその後の変更」）。
 
 ## 受け入れテストの対応

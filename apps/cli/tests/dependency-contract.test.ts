@@ -23,7 +23,7 @@ afterEach(() => {
   rmSync(workDir, { recursive: true, force: true });
 });
 
-describe('hono 4.13.12 + @hono/node-server 2.1.3', () => {
+describe('hono 4.13.19 + @hono/node-server 2.1.9', () => {
   it('listens only on 127.0.0.1 on an OS-assigned port and can return SSE', async () => {
     const app = new Hono();
     app.get('/events', (c) =>

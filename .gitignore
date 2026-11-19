@@ -14,3 +14,5 @@ dist/
 /artifacts/
 /.dev-home/
 /apps/cli/.build-*/
+.direnv/
+!.envrc

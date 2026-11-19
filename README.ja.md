@@ -22,7 +22,7 @@ npm install -g vde-open  # これでも導入できる
 - projectごとに導入しないでください。daemonはuserごとに1つなので、projectごとに版が違うと、同じdaemonに違う版のCLIがつながります。
 - 導入は、`.zshrc`などのshellの設定を変えず、buildやscriptも実行しません（依存はすべて同梱しています）。
 
-このrepositoryのcloneから導入するときは、次のとおりです（`mise.toml`でNode.js 24.22.1に固定しています）。
+このrepositoryのcloneから導入するときは、先に[開発環境](#開発環境)を用意してから、次のとおり実行します。
 
 ```bash
 pnpm install --frozen-lockfile
@@ -190,12 +190,23 @@ vo feedback ack <requestId> --submission-id <id> --json
 
 | 範囲 | 状態 |
 |---|---|
-| CIのLinuxとmacOS（GitHub Actionsの`ubuntu-latest`と`macos-latest`、Node.js 24.21.0） | 検証済み（format・lint・typecheck・unit／integration・build・pack・e2e。`.github/workflows/ci.yml`） |
-| CIのWindows（`windows-latest`、Node.js 24.21.0） | 検証済み: build、pack smoke（導入、両bin、IPC、daemonの起動と停止、JSON出力、管理画面とworker）、daemonと文書の結合試験。そのほかの単体・結合試験とe2eは、Windowsでは実行していない |
+| CIのLinuxとmacOS（GitHub Actionsの`ubuntu-latest`と`macos-latest`、Node.js 24.22.3） | 検証済み（format・lint・typecheck・unit／integration・build・pack・e2e。`.github/workflows/ci.yml`） |
+| CIのWindows（`windows-latest`、Node.js 24.22.3） | 検証済み: build、pack smoke（導入、両bin、IPC、daemonの起動と停止、JSON出力、管理画面とworker）、daemonと文書の結合試験。そのほかの単体・結合試験とe2eは、Windowsでは実行していない |
 | browser | Chromium（PlaywrightのChrome Headless Shell）は全件を検証済み。Firefox・WebKit（Playwright 1.63.0）は、表示の隔離・CSP・HTMLとの通信・URLからの表示の試験（`pnpm test:e2e:cross`）を検証済み。Firefox・WebKitのそれ以外の画面操作（検索、回答panel、狭い画面、1,000文書の一覧など）は未検証 |
 | PDF出力 | macOS（開発機）で、Google Chrome 154とMicrosoft Edge 154での出力を検証済み。CIのLinuxで、runnerのGoogle Chromeでの出力を検証済み（e2e）。Windowsでの実際のbrowserでの印刷は未検証（印刷用の文書の描画はpack smokeで確かめる） |
 
 性能の実測は [docs/performance.ja.md](docs/performance.ja.md)、設計は [docs/architecture.ja.md](docs/architecture.ja.md) と [docs/security-model.ja.md](docs/security-model.ja.md) にあります。開発の記録は [docs/implementation-status.md](docs/implementation-status.md)、[docs/dependency-validation.md](docs/dependency-validation.md)、[docs/adr/](docs/adr/) にあります。
+
+## 開発環境
+
+`flake.nix`と`flake.lock`で、Node.js 24.22.3とpnpm 12.9.0を固定しています。対象はApple SiliconのmacOSとx86_64のLinuxです。Nix（Flakesを有効にする）、direnv、nix-direnvを用意し、`.envrc`の内容を確かめてから、repositoryのrootで次を実行します。
+
+```bash
+direnv allow
+pnpm check:runtime   # PATHのnodeとpnpmの版がpackage.jsonと違うと失敗する
+```
+
+新しいworktreeでも、それぞれ`direnv allow`が必要です。`direnv allow`の前に起動したAgentには環境が入らないので、commandの前に`direnv exec .`を付けます。WindowsではNixを使えないので、`package.json`の`engines.node`と`packageManager`の版を入れてください。
 
 ## リンクしたCLIで開発する
 

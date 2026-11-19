@@ -1,3 +1,6 @@
 packages:
   - apps/*
   - packages/*
+
+# Use the pnpm from flake.nix instead of downloading the packageManager version.
+pmOnFail: error

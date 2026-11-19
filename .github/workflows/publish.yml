@@ -21,10 +21,13 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    defaults:
+      run:
+        shell: nix develop --no-update-lock-file -c bash -eo pipefail {0}
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: jdx/mise-action@v5
+      - uses: cachix/install-nix-action@v31
+      - run: pnpm check:runtime
       - run: pnpm install --frozen-lockfile
       - name: Check that the tag matches the package version
         run: |
