@@ -1,5 +1,5 @@
 import { Smartphone } from 'lucide-react';
-import { createContext, useContext } from 'react';
+import { createContext } from 'react';
 import { encode } from 'uqr';
 
 import { CopyButton } from '@/components/copy-button';
@@ -33,10 +33,14 @@ function QrCode({ text }: { text: string }) {
   );
 }
 
-// Shows the document's URL on the phone reader as a QR code. Hidden while the phone reader is not ready.
-export function PhoneLinkButton({ documentId }: { documentId: string }) {
-  const phoneUrl = useContext(PhoneUrlContext);
-  if (phoneUrl === null) return null;
+// Shows the document's URL on the phone reader as a QR code.
+export function PhoneLinkButton({
+  phoneUrl,
+  documentId,
+}: {
+  phoneUrl: string;
+  documentId: string;
+}) {
   const url = phoneUrlOf(phoneUrl, documentId);
   return (
     <DetailsPopover
@@ -45,7 +49,7 @@ export function PhoneLinkButton({ documentId }: { documentId: string }) {
       trigger={
         <Button
           variant="ghost"
-          size="icon-xs"
+          size="icon-sm"
           aria-label="Open on your phone"
           title="Open on your phone"
         >

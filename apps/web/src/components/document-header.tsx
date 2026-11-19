@@ -1,11 +1,11 @@
 import type { DocumentSummary } from '@vde-open/shared';
 import { Hash } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useContext, type ReactNode } from 'react';
 
 import { CopyButton } from '@/components/copy-button';
 import { DocumentLocation, DocumentPathCopyButton } from '@/components/document-location';
 import { FormatIcon } from '@/components/format-icon';
-import { PhoneLinkButton } from '@/components/phone-link';
+import { PhoneLinkButton, PhoneUrlContext } from '@/components/phone-link';
 
 // The top row of a document view: the title, where the document is, and the view's controls.
 // The list shortens the location; here it wraps instead, so the whole of it can be read on touch devices too.
@@ -16,6 +16,8 @@ export function DocumentHeader({
   document: DocumentSummary;
   children: ReactNode;
 }) {
+  // Hidden while the phone reader is not ready.
+  const phoneUrl = useContext(PhoneUrlContext);
   return (
     <header className="flex min-h-11 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b bg-chrome px-3 py-1">
       <div className="flex min-w-0 flex-1 basis-56 items-start gap-2">
@@ -39,7 +41,6 @@ export function DocumentHeader({
                 icon={Hash}
                 title={`Copy document ID (${document.documentId})`}
               />
-              <PhoneLinkButton documentId={document.documentId} />
             </span>
           </div>
         </div>
@@ -47,6 +48,12 @@ export function DocumentHeader({
       {/* Moves to its own line when the title needs the room, and wraps there in a narrow pane. */}
       <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-0.5">
         {children}
+        {phoneUrl !== null && (
+          <>
+            <ToolbarDivider />
+            <PhoneLinkButton phoneUrl={phoneUrl} documentId={document.documentId} />
+          </>
+        )}
       </div>
     </header>
   );
