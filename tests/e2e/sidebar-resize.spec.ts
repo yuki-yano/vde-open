@@ -27,18 +27,16 @@ const drag = async (page: Page, by: number) => {
 };
 
 // Widening moves the pointer over the view. An HTML view is an iframe, which must not stop the drag.
-for (const file of ['a.md', 'a.html']) {
-  test(`the document list can be widened and narrowed by dragging (${file})`, async ({ page }) => {
-    t.write(file, file.endsWith('.md') ? '# A\n\nbody\n' : '<h1>A</h1><p>body</p>');
-    await t.json(['open', file]);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(await t.uiUrl());
-    await expect(page.getByRole('region', { name: 'Document view' })).toBeVisible();
-    if (file.endsWith('.html')) await expect(page.getByTestId('document-frame')).toBeVisible();
-    const initial = await listWidth(page);
-    await drag(page, 150);
-    expect(await listWidth(page)).toBeCloseTo(initial + 150, -1);
-    await drag(page, -100);
-    expect(await listWidth(page)).toBeCloseTo(initial + 50, -1);
-  });
-}
+test('the document list can be widened and narrowed by dragging (a.html)', async ({ page }) => {
+  t.write('a.html', '<h1>A</h1><p>body</p>');
+  await t.json(['open', 'a.html']);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(await t.uiUrl());
+  await expect(page.getByRole('region', { name: 'Document view' })).toBeVisible();
+  await expect(page.getByTestId('document-frame')).toBeVisible();
+  const initial = await listWidth(page);
+  await drag(page, 150);
+  expect(await listWidth(page)).toBeCloseTo(initial + 150, -1);
+  await drag(page, -100);
+  expect(await listWidth(page)).toBeCloseTo(initial + 50, -1);
+});

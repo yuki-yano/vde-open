@@ -45,8 +45,11 @@ async function startServer(): Promise<void> {
   });
 }
 
-// Sends arbitrary bytes and returns what was received until the peer closes.
-function rawExchange(payloads: Buffer[]): Promise<{ received: string; closed: boolean }> {
+// Sends arbitrary bytes and returns what was received until the peer closes, or with firstFrame, until the first frame.
+function rawExchange(
+  payloads: Buffer[],
+  firstFrame = false,
+): Promise<{ received: string; closed: boolean }> {
   return new Promise((resolve, reject) => {
     const socket = connect(socketPath);
     let received = '';
@@ -59,6 +62,7 @@ function rawExchange(payloads: Buffer[]): Promise<{ received: string; closed: bo
     });
     socket.on('data', (chunk: Buffer) => {
       received += chunk.toString('utf8');
+      if (firstFrame && received.includes('\n')) socket.destroy();
     });
     socket.on('error', reject);
     socket.on('close', () => {
@@ -459,8 +463,9 @@ describe('SYS-005 verifying the peer', () => {
       protocolVersion: IPC_PROTOCOL_VERSION,
       clientNonce,
     });
-    const first = await rawExchange([hello]);
-    const second = await rawExchange([hello]);
+    // The server keeps the connection open after its hello, so stop at that first frame.
+    const first = await rawExchange([hello], true);
+    const second = await rawExchange([hello], true);
     const proofOf = (received: string) =>
       (JSON.parse(received.split('\n')[0] as string) as { proof: string }).proof;
     expect(proofOf(first.received)).not.toBe(proofOf(second.received));

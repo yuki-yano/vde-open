@@ -21,7 +21,7 @@ interface Loaded {
 // Only in that case, if the document's state was updated after the fetch, refetch to bring the view's notes up to date.
 // The decision compares "the update time at fetch" with "the update time now".
 // The fetched result itself is never a reason to refetch (that would loop: every fetch triggers another).
-export function fetchTokenOf(
+function fetchTokenOf(
   loaded: Pick<Loaded, 'updatedAt' | 'state'> | null,
   updatedAt: string,
 ): string {
@@ -34,7 +34,7 @@ export function fetchTokenOf(
 
 // Split the grants retired from the view into those that may be released now and those that may not yet.
 // displayed is the grant of the view currently on screen. It is not released until it leaves the screen.
-export function splitRetired(
+function splitRetired(
   retired: readonly string[],
   displayed: string | null,
 ): { release: string[]; keep: string[] } {

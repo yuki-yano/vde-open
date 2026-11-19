@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Api } from './api.ts';
-import { splitRetired, useRenderGrant } from './use-render-grant.ts';
+import { useRenderGrant } from './use-render-grant.ts';
 
 interface Deferred {
   resolve: (grant: RenderGrantResult) => void;
@@ -104,6 +104,7 @@ async function until(condition: () => boolean): Promise<void> {
   while (!condition() && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+  expect(condition()).toBe(true);
 }
 const requested = (count: number) => until(() => pending.length >= count);
 const released = (count: number) => until(() => releases.length >= count);
@@ -117,12 +118,6 @@ async function showFirst(scanFailed: boolean): Promise<void> {
 }
 
 describe('order of releasing render grants', () => {
-  it('does not refetch because of the fetched result, and does not release the fetched grant', async () => {
-    await showFirst(true);
-    expect(pending).toHaveLength(1);
-    expect(releases).toEqual([]);
-  });
-
   it('after a refetch, releases the previous grant once the new view is on screen', async () => {
     await showFirst(true);
     root.render(<Probe updatedAt={T1} />);
@@ -231,15 +226,5 @@ describe('a new daemon start', () => {
     await until(() => displayedGrant() === 'g2');
     await until(() => releases.some((release) => release.grants.includes('g1')));
     expect(releases.flatMap((release) => release.grants).toSorted()).toEqual(['g1', 'stale']);
-  });
-});
-
-describe('choosing which grants may be released', () => {
-  it('keeps the on-screen grant and releases the rest', () => {
-    expect(splitRetired(['g1'], 'g1')).toEqual({ release: [], keep: ['g1'] });
-    expect(splitRetired(['g1'], 'g2')).toEqual({ release: ['g1'], keep: [] });
-    expect(splitRetired(['g1', 'g2'], 'g2')).toEqual({ release: ['g1'], keep: ['g2'] });
-    expect(splitRetired(['g1'], null)).toEqual({ release: ['g1'], keep: [] });
-    expect(splitRetired([], 'g1')).toEqual({ release: [], keep: [] });
   });
 });

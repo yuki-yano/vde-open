@@ -190,9 +190,9 @@ vo feedback ack <requestId> --submission-id <id> --json
 
 | 範囲 | 状態 |
 |---|---|
-| CIのLinuxとmacOS（GitHub Actionsの`ubuntu-latest`と`macos-latest`、Node.js 24.22.3） | 検証済み（format・lint・typecheck・unit／integration・build・pack・e2e。`.github/workflows/ci.yml`） |
-| CIのWindows（`windows-latest`、Node.js 24.22.3） | 検証済み: build、pack smoke（導入、両bin、IPC、daemonの起動と停止、JSON出力、管理画面とworker）、daemonと文書の結合試験。そのほかの単体・結合試験とe2eは、Windowsでは実行していない |
-| browser | Chromium（PlaywrightのChrome Headless Shell）は全件を検証済み。Firefox・WebKit（Playwright 1.63.0）は、表示の隔離・CSP・HTMLとの通信・URLからの表示の試験（`pnpm test:e2e:cross`）を検証済み。Firefox・WebKitのそれ以外の画面操作（検索、回答panel、狭い画面、1,000文書の一覧など）は未検証 |
+| CIのLinuxとmacOS（GitHub Actionsの`ubuntu-latest`と`macos-latest`、Node.js 24.22.3） | 検証済み（format・lint・typecheck・unit・build・pack・e2e。`.github/workflows/ci.yml`） |
+| CIのWindows（`windows-latest`、Node.js 24.22.3） | 検証済み: buildとpack smoke（導入、両bin、IPC、daemonの起動と停止、JSON出力、管理画面とworker）。unitとe2eの試験は、Windowsでは実行していない |
+| browser | Chromium（PlaywrightのChrome Headless Shell）は全件を検証済み。Firefox・WebKit（Playwright 1.63.0）は、表示の隔離・CSP・HTMLとの通信・URLからの表示の試験（`pnpm test:e2e:cross`）を検証済み。通信の試験のうち、手順がbrowserに依存しないものはChromiumだけで流す。Firefox・WebKitのそれ以外の画面操作（検索、回答panel、狭い画面、1,000文書の一覧など）は未検証 |
 | PDF出力 | macOS（開発機）で、Google Chrome 154とMicrosoft Edge 154での出力を検証済み。CIのLinuxで、runnerのGoogle Chromeでの出力を検証済み（e2e）。Windowsでの実際のbrowserでの印刷は未検証（印刷用の文書の描画はpack smokeで確かめる） |
 
 性能の実測は [docs/performance.ja.md](docs/performance.ja.md)、設計は [docs/architecture.ja.md](docs/architecture.ja.md) と [docs/security-model.ja.md](docs/security-model.ja.md) にあります。開発の記録は [docs/implementation-status.md](docs/implementation-status.md)、[docs/dependency-validation.md](docs/dependency-validation.md)、[docs/adr/](docs/adr/) にあります。

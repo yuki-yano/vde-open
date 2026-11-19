@@ -99,8 +99,15 @@ describe('print document for the PDF export', () => {
       '[a](javascript:alert(1)) [b](data:text/html,x) [c](//evil.example) [d](vbscript:x) [e](JAVASCRIPT:x)',
       '<img src="https://evil.example/x.png"> <a href="javascript:x">raw</a>',
       '',
+      '- ![g](javascript:alert(1)) [g](javascript:x)',
+      '',
+      '> ![h](//evil.example/y.png) [h](vbscript:x)',
+      '',
     ].join('\n');
     const body = bodyOf(render(hostile, { images: ['docs/images/x.png'] }));
+    // The extension must also reach images and links nested in lists and quotes.
+    expect(body).toContain('<li>');
+    expect(body).toContain('<blockquote>');
     for (const [, src] of body.matchAll(/<img [^>]*src="([^"]*)"/g)) {
       expect(src).toMatch(new RegExp(`^${SLOT}-\\d+$`));
     }

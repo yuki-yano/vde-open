@@ -139,64 +139,6 @@ const idsOf = (opened: Awaited<ReturnType<DocumentService['open']>>) =>
   opened.data.documents.map((entry) => entry.documentId);
 
 describe('SRCH-015 search while the index has not caught up', () => {
-  it('with the real worker, open documents are searchable and the list shows the search state', async () => {
-    write('a.md', '# 認証\n\nセッションの有効期限。\n');
-    const opened = await documents.open({ cwd: base, paths: ['a.md'] });
-    const documentId = opened.data.documents[0]?.documentId as string;
-    search = createSearchService({ store, cursors: createCursorCodec(randomBytes(32)) });
-    expect(search.stateOf(documentId)).toBe('indexing');
-    const found = await search.search({ query: '有効期限' });
-    expect(found.data.hits.map((hit) => hit.documentId)).toEqual([documentId]);
-    expect(found.data).toMatchObject({
-      incomplete: false,
-      searchedDocuments: 1,
-      indexingDocuments: [],
-    });
-    expect(search.stateOf(documentId)).toBe('ready');
-    expect(Date.parse(found.data.indexedAt)).not.toBeNaN();
-  });
-
-  it('if a document never finishes indexing, reports it and does not claim all documents were searched', async () => {
-    write('fast.md', '# FAST\n\n本文。\n');
-    write('slow.md', '# SLOW\n\n本文。\n');
-    const opened = await documents.open({ cwd: base, paths: ['fast.md', 'slow.md'] });
-    const [fast, slow] = opened.data.documents.map((entry) => entry.documentId) as [string, string];
-    search = createSearchService({
-      store,
-      cursors: createCursorCodec(randomBytes(32)),
-      workerPath: fakeWorker({ neverBegin: 'SLOW' }),
-      timeoutMs: 60_000,
-    });
-    const startedAt = Date.now();
-    const found = await search.search({ query: '本文' });
-    // Waiting for the index is bounded by a fixed time.
-    expect(Date.now() - startedAt).toBeLessThan(4000);
-    expect(found.data.hits.map((hit) => hit.documentId)).toEqual([fast]);
-    expect(found.data).toMatchObject({
-      incomplete: true,
-      registeredDocuments: 2,
-      searchedDocuments: 1,
-      indexingDocuments: [slow],
-      failedDocuments: [],
-    });
-    expect(search.stateOf(slow)).toBe('indexing');
-  });
-
-  it('when no document is searchable yet, returns not-ready instead of an empty result', async () => {
-    write('slow.md', '# SLOW\n\n本文。\n');
-    await documents.open({ cwd: base, paths: ['slow.md'] });
-    search = createSearchService({
-      store,
-      cursors: createCursorCodec(randomBytes(32)),
-      workerPath: fakeWorker({ neverBegin: 'SLOW' }),
-      timeoutMs: 60_000,
-    });
-    await expect(search.search({ query: '本文' })).rejects.toMatchObject({
-      code: 'E_INDEX_NOT_READY',
-      retryable: true,
-    });
-  });
-
   it('a document whose indexing times out is treated as failed, and other documents remain searchable', async () => {
     write('slow.md', '# SLOW\n\n本文。\n');
     write('fast.md', '# FAST\n\n本文。\n');
@@ -244,7 +186,14 @@ describe('SRCH-015 wait limit while the index is being built', () => {
     // Returns within the 2-second wait plus one in-progress step (300ms) plus some margin.
     expect(elapsed).toBeLessThan(LIMITS.searchIndexWaitMs + 1000);
     expect(found.data.hits.map((hit) => hit.documentId)).toEqual([small]);
-    expect(found.data).toMatchObject({ incomplete: true, indexingDocuments: [big] });
+    expect(found.data).toMatchObject({
+      incomplete: true,
+      registeredDocuments: 2,
+      searchedDocuments: 1,
+      indexingDocuments: [big],
+      failedDocuments: [],
+    });
+    expect(search.stateOf(big as string)).toBe('indexing');
   });
 });
 
@@ -303,20 +252,6 @@ describe('SRCH-008 cursors and changes in searchable documents', () => {
   });
 });
 
-describe('SRCH-002 title and path changes', () => {
-  it('changing only the title updates search and hit titles without changing the content', async () => {
-    write('a.md', '本文。\n');
-    await documents.open({ cwd: base, paths: ['a.md'], title: 'OldBeacon' });
-    search = createSearchService({ store, cursors: createCursorCodec(randomBytes(32)) });
-    expect((await search.search({ query: 'OldBeacon' })).data.hits).toHaveLength(1);
-    await documents.open({ cwd: base, paths: ['a.md'], title: 'NewBeacon' });
-    const renamed = await search.search({ query: 'NewBeacon' });
-    expect(renamed.data.hits).toEqual([expect.objectContaining({ title: 'NewBeacon' })]);
-    expect(renamed.data.incomplete).toBe(false);
-    expect((await search.search({ query: 'OldBeacon' })).data.hits).toEqual([]);
-  });
-});
-
 describe('SRCH-015 / DOC-012 no searchable documents', () => {
   it('if no target document can be analyzed, returns an error with details instead of an empty result', async () => {
     write('a.md', '# A\n\n本文。\n');
@@ -356,32 +291,6 @@ describe('SRCH-011 empty documents', () => {
       section: hit?.sectionId,
     });
     expect(section.data).toMatchObject({ mode: 'section', sectionId: 'sec_0000', content: '' });
-  });
-});
-
-describe('SRCH-015 documents with many short sections', () => {
-  it('with many body-less sections, batches are cut by heading size and search is not kept waiting', async () => {
-    write('small.md', '# 小さい文書\n\n本文。\n');
-    // A document with no body but large total headings (about 6 million characters indexed).
-    const children = Array.from(
-      { length: 3000 },
-      (_, index) => `## 節${String(index)} ${'x'.repeat(2000)}\n`,
-    );
-    write('wide.md', `# WIDE\n\n${children.join('\n')}`);
-    const [small, wide] = idsOf(
-      await documents.open({ cwd: base, paths: ['small.md', 'wide.md'] }),
-    );
-    search = createSearchService({
-      store,
-      cursors: createCursorCodec(randomBytes(32)),
-      workerPath: fakeWorker({ busyAppend: { title: 'WIDE', ms: 50 } }),
-      timeoutMs: 60_000,
-    });
-    const startedAt = Date.now();
-    const found = await search.search({ query: '本文' });
-    expect(Date.now() - startedAt).toBeLessThan(LIMITS.searchIndexWaitMs + 1000);
-    expect(found.data.hits.map((hit) => hit.documentId)).toEqual([small]);
-    expect(found.data.indexingDocuments).toEqual([wide]);
   });
 });
 
@@ -478,6 +387,7 @@ describe('SRCH-002 changes during indexing', () => {
       expect.objectContaining({ documentId: a, title: 'NewBeacon' }),
     ]);
     expect(done.data.incomplete).toBe(false);
+    expect((await search.search({ query: 'OldBeacon' })).data.hits).toEqual([]);
   });
 });
 

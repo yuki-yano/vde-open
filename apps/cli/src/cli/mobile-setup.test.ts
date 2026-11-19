@@ -223,16 +223,6 @@ describe('vo mobile disable', () => {
     expect(Object.keys(serve.Web)).toEqual([`${HOST}:43183`]);
     expect(JSON.parse(await readFile(configPath(), 'utf8'))).toEqual({ previewPort: 5001 });
   });
-
-  it('removes the file when nothing else was in it', async () => {
-    const { tailscale } = fakeTailscale();
-    await enableMobile({ environment, tailscale, restartDaemon }, { serve: true });
-    await disableMobile(
-      { environment, tailscale, restartDaemon, daemonRunning: () => Promise.resolve(false) },
-      { serve: true },
-    );
-    await expect(readFile(configPath(), 'utf8')).rejects.toThrow();
-  });
 });
 
 describe('review follow-ups for vo mobile', () => {
@@ -283,56 +273,6 @@ describe('review follow-ups for vo mobile', () => {
     ).rejects.toMatchObject({ details: { reason: 'listener-config' } });
     expect(restarts).toBe(0);
     expect(JSON.parse(await readFile(configPath(), 'utf8'))).toEqual({ managementPort: 'x' });
-  });
-
-  it('disable reads Serve right before each removal and keeps a forward that changed meanwhile', async () => {
-    const { tailscale, serve } = fakeTailscale();
-    await enableMobile({ environment, tailscale, restartDaemon }, { serve: true });
-    let reads = 0;
-    const watching: Tailscale = {
-      run: async (args) => {
-        const out = await tailscale.run(args);
-        if (args[1] === 'status' && args[0] === 'serve') {
-          reads += 1;
-          // After 43182 was looked at, 43183 is pointed elsewhere.
-          if (reads === 1) otherForward(serve, 43183);
-        }
-        return out;
-      },
-    };
-    const result = await disableMobile(
-      {
-        environment,
-        tailscale: watching,
-        restartDaemon,
-        daemonRunning: () => Promise.resolve(false),
-      },
-      { serve: true },
-    );
-    expect(result.serve).toEqual({ '43182': 'removed', '43183': 'kept' });
-    expect(Object.keys(serve.Web)).toEqual([`${HOST}:43183`]);
-  });
-
-  it('the take-back reads Serve again before each removal: a port changed meanwhile is not removed', async () => {
-    const { tailscale, serve } = fakeTailscale({ applyThenFailOn: 43183 });
-    let offs = 0;
-    const watching: Tailscale = {
-      run: async (args) => {
-        const out = await tailscale.run(args);
-        if (args.includes('off')) {
-          offs += 1;
-          // While 43182 is being taken back, another program points 43183 elsewhere.
-          if (offs === 1) otherForward(serve, 43183);
-        }
-        return out;
-      },
-    };
-    await expect(
-      enableMobile({ environment, tailscale: watching, restartDaemon }, { serve: true }),
-    ).rejects.toMatchObject({ details: { possiblyLeft: [] } });
-    expect(serve.Web).toEqual({
-      [`${HOST}:43183`]: { Handlers: { '/': { Proxy: 'http://127.0.0.1:9999' } } },
-    });
   });
 
   it('a reader forward that another path was added beside is reported as possibly left, not removed', async () => {

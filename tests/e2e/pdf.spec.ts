@@ -69,7 +69,7 @@ test('Export PDF saves the shown Markdown as a PDF without a print dialog', asyn
   await expect(page.getByRole('button', { name: 'Export PDF' })).toBeEnabled();
 });
 
-test('Export PDF prints static HTML with its CSS, images, registered font and page rules', async ({
+test('Export PDF prints HTML, even an interactive document, as static HTML with its CSS, images, registered font and page rules', async ({
   page,
 }) => {
   test.setTimeout(60_000);
@@ -95,9 +95,12 @@ test('Export PDF prints static HTML with its CSS, images, registered font and pa
     'docs/page.html',
     '<!doctype html><html lang="ja"><title>HTML資料</title><link rel="stylesheet" href="css/main.css"><h1>HTML文書</h1><p class="screen-only">SCREENONLY</p><p class="print-only">PRINTONLY</p><img src="images/chart.png"><p class="second">2ページ目の本文</p><script>document.body.innerHTML="SCRIPTCONTENT";</script></html>',
   );
-  await t.json(['open', 'docs/page.html']);
+  await t.json(['open', 'docs/page.html', '--html-mode', 'interactive']);
   await page.goto(await t.uiUrl());
-  await expect(page.getByTestId('html-mode')).toBeVisible();
+  // The view runs the script. The export prints the saved source without it.
+  await expect(page.frameLocator('[data-testid="document-frame"]').locator('body')).toContainText(
+    'SCRIPTCONTENT',
+  );
   const downloading = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export PDF' }).click();
   const download = await downloading;
@@ -116,23 +119,4 @@ test('Export PDF prints static HTML with its CSS, images, registered font and pa
   expect(pages[1]?.replace(/\s/g, '')).toContain('2ページ目の本文');
   expect(pages.join('')).not.toMatch(/SCREENONLY|SCRIPTCONTENT/);
   await expect(page.getByRole('button', { name: 'Export PDF' })).toBeEnabled();
-});
-
-test('an interactive HTML document exports its saved source as static HTML', async ({ page }) => {
-  test.setTimeout(60_000);
-  t.write(
-    'interactive.html',
-    '<title>Interactive</title><h1>STATICCONTENT</h1><script>document.querySelector("h1").textContent="DYNAMICCONTENT";</script>',
-  );
-  await t.json(['open', 'interactive.html', '--html-mode', 'interactive']);
-  await page.goto(await t.uiUrl());
-  await expect(page.frameLocator('[data-testid="document-frame"]').locator('h1')).toHaveText(
-    'DYNAMICCONTENT',
-  );
-  const downloading = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export PDF' }).click();
-  const download = await downloading;
-  const text = pdfPageTexts(readFileSync(await download.path())).join('');
-  expect(text).toContain('STATICCONTENT');
-  expect(text).not.toContain('DYNAMICCONTENT');
 });

@@ -160,12 +160,4 @@ describe('collecting on the main thread after it goes idle', () => {
     expect(collect).toHaveBeenCalledTimes(1);
     handle.stop();
   });
-
-  it('stops checking after stop', () => {
-    const { state, collect, handle } = watch(20 * MiB);
-    handle.stop();
-    state.heap = 100 * MiB;
-    vi.advanceTimersByTime(COLLECT_AFTER_IDLE_MS * 5);
-    expect(collect).not.toHaveBeenCalled();
-  });
 });

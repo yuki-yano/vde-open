@@ -1,5 +1,5 @@
 import type { Stats } from 'node:fs';
-import { lstat, mkdtemp, rm, stat, symlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -31,6 +31,15 @@ describe.skipIf(process.platform === 'win32')('SYS-008 owner-only directory chec
     await expect(
       ensurePrivateDirectory(target, { uid, platform: process.platform }),
     ).rejects.toMatchObject({ code: 'E_INSECURE_PATH', details: { reason: 'symlink' } });
+  });
+
+  it('rejects an existing directory whose permissions are open to others', async () => {
+    const target = join(base, 'open');
+    await mkdir(target);
+    await chmod(target, 0o755);
+    await expect(
+      ensurePrivateDirectory(target, { uid, platform: process.platform }),
+    ).rejects.toMatchObject({ code: 'E_INSECURE_PATH', details: { reason: 'permissions' } });
   });
 
   it('rejects a directory owned by another user', async () => {

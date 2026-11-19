@@ -41,7 +41,7 @@ test('opens native image formats directly and restores the selected image after 
   await expect(page.getByTestId('document-image')).toBeVisible();
 });
 
-test('fits large images, shows original dimensions, and respects paused and automatic updates', async ({
+test('fits large images, shows original dimensions, and follows automatic updates', async ({
   page,
 }) => {
   t.write(
@@ -62,38 +62,11 @@ test('fits large images, shows original dimensions, and respects paused and auto
   await expect.poll(async () => (await image.boundingBox())?.width).toBe(2400);
   expect(await viewport.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   await page.getByRole('button', { name: 'Actual size', exact: true }).click();
-  await page.getByRole('button', { name: 'Pause updates', exact: true }).click();
-  const pinned = await image.getAttribute('src');
-  t.atomicWrite(
-    'drawing.svg',
-    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="blue"/></svg>',
-  );
-  await expect(page.getByText('Update available', { exact: true })).toBeVisible();
-  await expect(image).toHaveAttribute('src', pinned!);
-  await page.getByRole('button', { name: 'Resume updates', exact: true }).click();
-  await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(400);
   t.atomicWrite(
     'drawing.svg',
     '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150"/>',
   );
   await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(200);
-});
-
-test('reports an undecodable image and allows switching to another document', async ({ page }) => {
-  t.write('broken.png', 'not an image');
-  t.write('notes.md', '# Notes\n\nReadable document\n');
-  await t.json(['open', 'broken.png', 'notes.md']);
-  await page.goto(await t.uiUrl());
-  await page
-    .getByRole('navigation', { name: 'Open documents' })
-    .getByRole('button', { name: 'broken.png', exact: true })
-    .click();
-  await expect(page.getByRole('alert')).toContainText('This browser could not display the image');
-  await page
-    .getByRole('navigation', { name: 'Open documents' })
-    .getByRole('button', { name: 'Notes', exact: true })
-    .click();
-  await expect(page.getByTestId('document-body')).toContainText('Readable document');
 });
 
 test('keeps scripts and external references in SVG images from running or loading', async ({

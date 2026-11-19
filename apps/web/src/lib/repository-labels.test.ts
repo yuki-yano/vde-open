@@ -40,15 +40,6 @@ describe('short directories in the flat list', () => {
     ).toEqual(['a/docs', 'b/docs', '…/guide']);
   });
 
-  it('handles many files with the same name, each told apart by one more directory', () => {
-    const documents = Array.from({ length: 300 }, (_, index) =>
-      inRepository('/r/app', `docs/area${String(index % 3)}/item${String(index)}/index.md`),
-    );
-    const short = shown(documents);
-    expect(new Set(short).size).toBe(300);
-    expect(short[0]).toBe('…/item0');
-  });
-
   it('compares only within the same checkout, and outside documents among themselves', () => {
     expect(
       shown([

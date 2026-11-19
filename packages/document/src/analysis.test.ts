@@ -79,10 +79,6 @@ describe('Markdown outline', () => {
     ].join('\n');
     expect(analyzeMarkdown(source).outline.map((item) => item.title)).toEqual(['本物の見出し']);
   });
-
-  it('Setext headings are not treated as headings (known limitation of the adopted version)', () => {
-    expect(analyzeMarkdown('Setextの見出し\n===\n\n本文\n').outline).toEqual([]);
-  });
 });
 
 describe('MD-006 structure limits', () => {

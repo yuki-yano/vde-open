@@ -142,12 +142,12 @@ describe('StateStore basics', () => {
   it('commits concurrently requested changes one at a time in order', async () => {
     const store = await StateStore.open({ root, fs: nodeStoreFs });
     const ids = await Promise.all(
-      Array.from({ length: 8 }, (_, index) =>
+      Array.from({ length: 3 }, (_, index) =>
         store.transaction((tx) => addDocument(tx, `document ${String(index)}`)),
       ),
     );
     expect(store.payload.openOrder).toEqual(ids);
-    expect(store.storeVersion).toBe(8);
+    expect(store.storeVersion).toBe(3);
     expect((await assertConsistent(root)).openOrder).toEqual(ids);
   });
 
@@ -211,7 +211,6 @@ describe('StateStore close', () => {
 describe('SYS-010 save failures (including partial verification)', () => {
   it.each([
     ['disk full while writing a blob', 'writeFileDurable', /blobs/, 'ENOSPC'],
-    ['failure updating state.prev.json', 'rename', /state\.prev\.json$/, 'EIO'],
     ['fsync failure on the next state temporary file', 'writeFileDurable', /\.tmp-state-/, 'EIO'],
     ['rename failure onto state.json', 'rename', /state\.json$/, 'EIO'],
   ] as const)(

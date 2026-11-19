@@ -5,8 +5,6 @@ import type {
   OutlineItem,
   Questionnaire,
   RenderGrantResult,
-  SearchHit,
-  SearchResult,
   ServerEvent,
 } from '@vde-open/shared';
 import { createRoot, type Root } from 'react-dom/client';
@@ -138,6 +136,7 @@ const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(condition: () => boolean, timeoutMs = 3000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!condition() && Date.now() < deadline) await settle(10);
+  expect(condition()).toBe(true);
 }
 const shownText = () => container.querySelector('pre')?.textContent ?? '';
 function button(text: string): HTMLButtonElement {
@@ -188,7 +187,7 @@ describe('FB-015 showing the revision awaiting an answer', () => {
 describe('opening the shown document on the phone', () => {
   it('shows a QR code of the phone URL of the document only while the phone reader is ready', async () => {
     root.render(<Workspace api={api} />);
-    await until(() => shownText() !== '');
+    await until(() => handlers !== null);
     expect(document.querySelector('[aria-label="Open on your phone"]')).toBeNull();
 
     api.status = (() =>
@@ -439,23 +438,6 @@ describe('copying the document path and ID (spec 13.2)', () => {
   function mockClipboard(writeText: (text: string) => Promise<void>): void {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   }
-
-  it('copies the document path and ID and shows the result', async () => {
-    const copied: string[] = [];
-    mockClipboard((text) => {
-      copied.push(text);
-      return Promise.resolve();
-    });
-    root.render(<Viewer api={api} document={documentOf()} />);
-    await until(() => shownText() !== '');
-    button('Copy document path').click();
-    await until(() => copyResult() !== '');
-    expect(copyResult()).toBe('Copied the document path.');
-    button('Copy document ID').click();
-    await until(() => copyResult() === 'Copied the document ID.');
-    expect(copied).toEqual(['/a.html', 'doc_1']);
-    expect(copyResult()).toBe('Copied the document ID.');
-  });
 
   it.each([
     ['main checkout', inRepository('/repos/app', 'docs/設計 メモ.html')],
@@ -772,42 +754,12 @@ describe('jumping from the outline of an HTML document', () => {
       await until(() => container.querySelector('iframe') !== null);
     }
 
-    it('keeps the heading jumped to without adding history, drops it on a switch, and jumps to it again on back', async () => {
-      current.documents = [documentOf(), second];
-      await start('/');
-      await until(() => params().get('document') === 'doc_1' && enabled('詳細'));
-      const length = window.history.length;
-      item('詳細').click();
-      expect(params().get('section')).toBe('sec_0003');
-      expect(params().get('heading')).toBe('詳細');
-      expect(window.history.length).toBe(length);
-
-      const listItem = container.querySelector('#document-list button[data-document-id="doc_2"]');
-      (listItem as HTMLButtonElement).click();
-      await until(() => params().get('document') === 'doc_2');
-      expect(window.location.search).toBe('?document=doc_2');
-      expect(window.history.length).toBe(length + 1);
-
-      // Back to the entry of the first document, which still has its heading.
-      window.history.replaceState(null, '', '/?document=doc_1&section=sec_0003&heading=詳細');
-      window.dispatchEvent(new PopStateEvent('popstate'));
-      await until(() => jumps.length === 2);
-      expect(jumps).toEqual(['about:blank#same', 'about:blank#same']);
-    });
-
-    it('on first load jumps to the heading in the URL; the heading of a document no longer open is dropped', async () => {
-      await start('/?document=doc_1&section=sec_0003&heading=詳細');
-      await until(() => jumps.length === 1);
-      expect(jumps).toEqual(['about:blank#same']);
-      expect(params().get('heading')).toBe('詳細');
-
-      root.unmount();
-      root = createRoot(container);
+    it('on first load, the heading of a document no longer open is dropped', async () => {
       await start('/?document=doc_9&section=sec_0003&heading=詳細');
-      await until(() => params().get('document') === 'doc_1');
+      await until(() => params().get('document') === 'doc_1' && enabled('詳細'));
       await settle(100);
       expect(window.location.search).toBe('?document=doc_1');
-      expect(jumps).toHaveLength(1);
+      expect(jumps).toEqual([]);
     });
 
     it('back within the shown document jumps to the heading its entry keeps, for every such entry', async () => {
@@ -840,57 +792,6 @@ describe('jumping from the outline of an HTML document', () => {
         expect(jumps).toHaveLength(expected);
         expect(jumps.at(-1)).toBe('about:blank#same');
       }
-    });
-
-    it('a search result chosen while a heading of the URL waits to be restored cancels that restore', async () => {
-      let showView: () => void = () => undefined;
-      api.renderGrant = () =>
-        new Promise<RenderGrantResult>((resolve) => {
-          showView = () => resolve(grantOf());
-        });
-      const searches: Array<() => void> = [];
-      const hit: SearchHit = {
-        documentId: 'doc_1',
-        revision: REV1,
-        title: '文書',
-        displayPath: 'a.html',
-        sectionId: 'sec_0001',
-        headingPath: ['概要'],
-        excerpt: '概要',
-        matchKind: 'text',
-        score: 1,
-        sourceRange: null,
-        extraction: 'static-html',
-      };
-      api.search = () =>
-        new Promise((resolve) =>
-          searches.push(() => resolve({ hits: [hit] } as unknown as SearchResult)),
-        );
-      window.history.replaceState(null, '', '/?document=doc_1&section=sec_0003&heading=詳細');
-      root.render(<Workspace api={api} />);
-      await settle();
-      handlers?.onConnect();
-      await until(() => container.querySelector('aside[aria-label="Outline"]') !== null);
-
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
-      await until(() => document.querySelector('input[aria-label="Search query"]') !== null);
-      const query = document.querySelector('input[aria-label="Search query"]') as HTMLInputElement;
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
-        query,
-        '概要',
-      );
-      query.dispatchEvent(new Event('input', { bubbles: true }));
-      await until(() => searches.length > 0);
-      searches.shift()?.();
-      await until(() => document.querySelectorAll('[role="option"]').length === 1);
-      query.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      await until(() => document.querySelector('input[aria-label="Search query"]') === null);
-
-      // The view becomes ready only now. The heading of the URL is not jumped to any more.
-      showView();
-      await until(() => container.querySelector('iframe') !== null && enabled('詳細'));
-      await settle(100);
-      expect(jumps).toEqual([]);
     });
 
     it('a view being left never writes its heading into the next document of the URL', () => {

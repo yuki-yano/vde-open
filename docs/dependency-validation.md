@@ -21,16 +21,16 @@
 | oxfmt | 0.71.0 | root | 同上 | `oxfmt --check`が成功 |
 | tsdown | 0.23.7 | apps/cli | typescript ^7、Node ^24.11 | `dist/cli.js`をESMで生成し実行。`dts: false` |
 | commander | 15.1.0 | apps/cli | Node >=22.12 | CLIのunit testとpack検証 |
-| zod | 4.6.7 | packages/shared、apps/cli | - | envelopeのunit test |
-| hono | 4.13.19 | apps/cli | Node >=16.9 | 契約テスト（SSE helper） |
+| zod | 4.6.7 | packages/shared、apps/cli | - | `apps/cli/src/server/ipc.test.ts`（envelopeの検証） |
+| hono | 4.13.19 | apps/cli | Node >=16.9 | `apps/cli/src/server/http/management.test.ts`（SSE） |
 | @hono/node-server | 2.1.9 | apps/cli | hono ^4、Node >=20 | 契約テスト（127.0.0.1、port 0でlisten） |
-| minisearch | 7.2.0 | apps/cli | - | 契約テスト（tokenizer差し替え、boost、discard） |
+| minisearch | 7.2.0 | apps/cli | - | `apps/cli/src/search/search-index.test.ts`（検索の結果と、入れ直しと削除の後の項目の数） |
 | chokidar | 5.0.0 | apps/cli | Node >=20.19 | 契約テスト（add／changeの検知） |
 | tinyglobby | 0.2.17 | apps/cli | - | 契約テスト（`**`、ignore、dotfile除外） |
-| @tanstack/markdown | 1.2.0 | packages/document、apps/web | react >=18とoctaneが任意peer | 契約テスト（AST、`allowHtml: false`、危険なURL） |
-| @tanstack/highlight | 1.2.12 | packages/document、apps/web | Node >=18 | 契約テスト（言語の明示登録、Markdown用adapter） |
-| parse5 | 8.1.1 | packages/document | - | 契約テスト（解析と直列化） |
-| css-tree | 3.2.1 | packages/document | - | 契約テスト（`url()`と`@import`の抽出） |
+| @tanstack/markdown | 1.2.0 | packages/document、apps/web | react >=18とoctaneが任意peer | `packages/document`の描画と解析のテスト（`tests/react.test.tsx`、`src/print.test.tsx`、`src/analysis.test.ts`） |
+| @tanstack/highlight | 1.2.12 | packages/document、apps/web | Node >=18 | `packages/document/tests/react.test.tsx`（MD-004。bashをshellとして色付け） |
+| parse5 | 8.1.1 | packages/document | - | `packages/document/src/html-static.test.ts` |
+| css-tree | 3.2.1 | packages/document | - | `packages/document/src/css-transform.test.ts` |
 | @types/css-tree | 3.2.0 | packages/document | - | 型検査 |
 | react / react-dom | 19.3.1 | apps/web | react-domはreact ^19.3 | `vite build`が成功 |
 | @types/react / @types/react-dom | 19.3.0 | apps/web | - | 型検査 |
@@ -75,9 +75,12 @@ shadcnのCLIが`package.json`へ書くrange指定（`^`）は、導入後に完�
 - happy-dom 21は、既定でiframeのpageを読み込まない。20では`127.0.0.1:1`への接続を試みて失敗のlogを出していたが、21では読み込まない旨のerrorをiframeごとにlogへ出す。テストの結果は変わらない。
 - 残る指摘: shadcn → ts-morph → minimatch 10.2.6（moderate）。修正版の11.0.1はts-morphのrangeの外で、開発用のCLIだけが使うので、overrideは足していない。
 - 上げなかった依存: chokidar 6（major）、@types/node 26（Node 24と合わない）、cn 0.5（0.xのminorは破壊的変更を含みうる）、oxlint 1.94・oxfmt 0.79（lintとformatの差分がrepository全体に出る）、@playwright/test 1.65（browserを入れ直し、READMEの検証範囲を更新する必要がある）。
-- 検証: Nixの環境の `pnpm check`（unit／integration 1011件）、`pnpm build`、`pnpm test:pack`、`pnpm test:e2e`（Chromium 117件）、`pnpm test:e2e:cross`（Firefox・WebKitで140件成功、6件はChromiumだけの試験でskip）が成功。
+- 検証: 依存を更新した時点で、Nixの環境の `pnpm check`（unit／integration 1011件）、`pnpm build`、`pnpm test:pack`、`pnpm test:e2e`（Chromium 117件）、`pnpm test:e2e:cross`（Firefox・WebKitで140件成功、6件はChromiumだけの試験でskip）が成功。
+- 同じ日に、`tests/integration/` を削除し、残りのテストからも過剰なものを削った（`pnpm test` のCPU時間の91%をintegrationが使っていたため）。依存の版の確認に使っていた契約テストの一部も削除した（次の節）。
 
 ## 契約テストで確かめたこと
+
+2026-11-19に、`packages/document/tests/dependency-contract.test.ts` と、`apps/cli/tests/dependency-contract.test.ts` のminisearchとIntl.Segmenterの契約テストを削除した。製品のテストと重なっていたため。以下は導入の時点で確かめた依存の性質で、今は上の表の「実施した検証」の列のテストが確かめる。
 
 - `@tanstack/markdown`のASTはserializableで、nodeに原文位置を持たない。原文行の取得はsourceから直接切り出す（仕様8.3）。
 - `allowHtml: false`では生HTMLがescapeされた文字として出力される。`javascript:`のURLはリンクにならない。

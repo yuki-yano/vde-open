@@ -103,6 +103,10 @@ describe('MD-004 code block highlighting', () => {
     expect(output.match(/<code\b/g)).toHaveLength(1);
   });
 
+  it('colors bash, a baseline language of spec 8.2 resolved as shell', () => {
+    expect(render('```bash\nif true; then echo 1; fi\n```\n')).toMatch(/class="[^"]*keyword/);
+  });
+
   it('unknown languages and oversized blocks are shown without coloring', () => {
     const unknown = render('```brainfuck\n+++.<script>\n```\n');
     expect(unknown.match(/<pre\b/g)).toHaveLength(1);

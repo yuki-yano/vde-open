@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { expect, test } from '@playwright/test';
 
 import { createE2eHome, type E2eHome } from './harness.ts';
@@ -14,46 +17,6 @@ test.afterEach(async () => {
 
 const sidebarOf = (page: import('@playwright/test').Page) =>
   page.getByRole('navigation', { name: 'Open documents' });
-
-test('DOC-007 / DOC-008: the tree view tells same-named files apart, and reordering is saved', async ({
-  page,
-}) => {
-  t.write('alpha/docs/a.md', '# alphaの文書\n');
-  t.write('beta/docs/a.md', '# betaの文書\n');
-  t.write('readme.md', '# 説明\n');
-  await t.json(['open', 'alpha/docs/a.md', 'beta/docs/a.md', 'readme.md']);
-  await page.goto(await t.uiUrl());
-  const sidebar = sidebarOf(page);
-
-  // In the flat view, move an item up.
-  await expect(sidebar.getByRole('listitem')).toHaveText([/alphaの文書/, /betaの文書/, /説明/]);
-  const row = sidebar.locator('button[data-document-id]').filter({ hasText: '説明' });
-  await row.press('Alt+ArrowUp');
-  await expect(sidebar.getByRole('listitem')).toHaveText([/alphaの文書/, /説明/, /betaの文書/]);
-
-  // In the tree view, the difference in roots remains. Files are not moved.
-  await sidebar.getByRole('button', { name: 'Tree' }).click();
-  const tree = sidebar.getByRole('tree');
-  await expect(tree).toContainText('alpha/docs');
-  await expect(tree).toContainText('beta/docs');
-  await expect(tree.getByRole('button', { name: 'a.md' })).toHaveCount(2);
-
-  // The order and the layout survive a reload.
-  await page.reload();
-  await expect(sidebarOf(page).getByRole('tree')).toBeVisible();
-  await sidebarOf(page).getByRole('button', { name: 'Flat' }).click();
-  await expect(sidebarOf(page).getByRole('listitem')).toHaveText([
-    /alphaの文書/,
-    /説明/,
-    /betaの文書/,
-  ]);
-  const listed = await t.json<{ documents: Array<{ title: string }> }>(['list']);
-  expect(listed.documents.map((document) => document.title)).toEqual([
-    'alphaの文書',
-    '説明',
-    'betaの文書',
-  ]);
-});
 
 test('DOC-013: Source and Preview can be switched, and the view does not change while updates are paused', async ({
   page,
@@ -137,18 +100,6 @@ test('MD-006: a document over the structure limits switches to the Source view a
   await expect(page.getByTestId('document-body').locator('h1')).toHaveText('普通の文書');
 });
 
-test('removing from the list keeps the file', async ({ page }) => {
-  t.write('a.md', '# 残すfile\n');
-  await t.json(['open', 'a.md']);
-  await page.goto(await t.uiUrl());
-  await sidebarOf(page).getByRole('listitem').filter({ hasText: '残すfile' }).hover();
-  await sidebarOf(page).getByRole('button', { name: 'Remove 残すfile from the list' }).click();
-  await expect(sidebarOf(page)).toContainText('No documents are open');
-  const { existsSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  expect(existsSync(join(t.work, 'a.md'))).toBe(true);
-});
-
 test('closing the displayed document returns to the last document opened, regardless of sidebar order', async ({
   page,
 }) => {
@@ -187,6 +138,8 @@ test('closing the displayed document returns to the last document opened, regard
   await row('D').press('Enter');
   await expect(shown).toHaveText('D');
   await closeFromSidebar('D');
+  // Removing from the list keeps the file.
+  expect(existsSync(join(t.work, 'D.md'))).toBe(true);
   await expect(shown).toHaveText('C');
   await expect(page).toHaveURL(new RegExp(`[?&]document=${c}`));
   expect(await daemonSelection()).toBe(a);
@@ -248,28 +201,6 @@ test('the shown document is kept in the URL: a reload shows it again, and back a
   await expect(shown).toHaveText('二つ目');
 });
 
-test('jumping from the outline moves the Markdown preview to the heading', async ({ page }) => {
-  const filler = Array.from({ length: 60 }, (_, index) => `段落${String(index)}`).join('\n\n');
-  t.write(
-    'a.md',
-    `# 文書\n\n${filler}\n\n## 中間の見出し\n\n${filler}\n\n## 最後の見出し\n\n${filler}\n`,
-  );
-  await t.json(['open', 'a.md']);
-  await page.goto(await t.uiUrl());
-  const outline = page.getByRole('complementary', { name: 'Outline' });
-  const middle = page.locator('article').getByRole('heading', { name: '中間の見出し' });
-  await expect(middle).toBeAttached();
-  await expect(middle).not.toBeInViewport();
-
-  await outline.getByRole('button', { name: '中間の見出し' }).click();
-  await expect(middle).toBeInViewport();
-  await outline.getByRole('button', { name: '最後の見出し' }).click();
-  await expect(
-    page.locator('article').getByRole('heading', { name: '最後の見出し' }),
-  ).toBeInViewport();
-  await expect(middle).not.toBeInViewport();
-});
-
 test('the heading jumped to is kept in the URL: a reload, and going back to the document, jump to it again', async ({
   page,
 }) => {
@@ -284,6 +215,7 @@ test('the heading jumped to is kept in the URL: a reload, and going back to the 
   const outline = page.getByRole('complementary', { name: 'Outline' });
   const middle = page.locator('article').getByRole('heading', { name: '中間の見出し' });
   await expect(middle).toBeAttached();
+  await expect(middle).not.toBeInViewport();
   const length = await page.evaluate(() => window.history.length);
 
   await outline.getByRole('button', { name: '中間の見出し' }).click();

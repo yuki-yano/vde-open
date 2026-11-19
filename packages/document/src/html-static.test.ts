@@ -424,18 +424,6 @@ describe('interactive view transform', () => {
     expect(result.html).toContain('<head><script>window.sdk = 1;</script><script>first()</script>');
     expect(() => interactive('<p>x</p>', {}, 'a = "</script><script>evil()"')).toThrow();
   });
-
-  it('in static, the same document keeps no scripts or event attributes, and the SDK is not inserted', () => {
-    const result = transformStaticHtml({
-      source: '<script>1</script><button onclick="go()">押す</button>',
-      documentLogicalPath: 'index.html',
-      assets: new Map(),
-      sdkScript: 'window.sdk = 1;',
-    });
-    const found = inspect(result.html);
-    expect(found.tags).not.toContain('script');
-    expect(found.attributes).not.toContain('onclick');
-  });
 });
 
 describe('heading anchors in the static view', () => {

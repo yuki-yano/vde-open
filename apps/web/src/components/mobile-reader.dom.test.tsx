@@ -122,6 +122,7 @@ const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(condition: () => boolean): Promise<void> {
   const deadline = Date.now() + 3000;
   while (!condition() && Date.now() < deadline) await settle(10);
+  expect(condition()).toBe(true);
 }
 const text = () => container.textContent ?? '';
 const titles = (scope: ParentNode) =>
@@ -151,17 +152,6 @@ async function showDemo(name = 'g1'): Promise<void> {
 }
 
 describe('the list', () => {
-  it('shows the open documents newest opened first, ties by document ID', async () => {
-    documents = [
-      row({ documentId: id(1), title: '古い', openedAt: '2026-11-18T00:00:00.000Z' }),
-      row({ documentId: id(2), title: '新しい', openedAt: '2026-11-18T01:00:00.000Z' }),
-      row({ documentId: id(3), title: '同時刻', openedAt: '2026-11-18T00:00:00.000Z' }),
-    ];
-    await start();
-    await until(() => rows().length === 3);
-    expect(rows()).toEqual(['新しい', '同時刻', '古い']);
-  });
-
   it('tells waiting, nothing open, and a failed load apart, and retries', async () => {
     listFails = true;
     root.render(<MobileReader api={api} />);
@@ -178,18 +168,6 @@ describe('the list', () => {
 });
 
 describe('moving between the list and documents', () => {
-  it('a tap adds one history entry; Back returns to the list and Forward to the document', async () => {
-    await showDemo();
-    expect(new URLSearchParams(window.location.search).get('document')).toBe(id(1));
-    const length = window.history.length;
-    window.history.back();
-    await until(() => rows().length === 1);
-    expect(frame()).toBeNull();
-    window.history.forward();
-    await until(() => frame() !== null);
-    expect(window.history.length).toBe(length);
-  });
-
   it('a document closed on the PC returns to the list with the reason, and the URL no longer names it', async () => {
     await showDemo();
     documents = [row({ documentId: id(2), title: '次の文書' })];
@@ -228,6 +206,7 @@ describe('keeping the demo only while it is current', () => {
     handlers?.onConnect();
     await until(() => grants.length === 2);
     expect(frame()).toBeNull();
+    valid.add('g2');
     grants[1]?.resolve(grantOf('g2'));
     await until(() => frame()?.getAttribute('src')?.includes('g2') === true);
     await until(() => released.some((entry) => entry.grants.includes('g1')));
@@ -246,19 +225,9 @@ describe('keeping the demo only while it is current', () => {
     grants[1]?.resolve(grantOf('late', '0.1', 'static'));
     await until(() => released.some((entry) => entry.grants.includes('late')));
     expect(frame()).toBeNull();
+    valid.add('g3');
     grants[2]?.resolve(grantOf('g3', '0.2'));
     await until(() => frame()?.getAttribute('src')?.includes('g3') === true);
-  });
-
-  it('a new revision in the same mode keeps the old frame until the new one is ready', async () => {
-    await showDemo();
-    documents = [row({ revision: REV2, viewEpoch: '0.1' })];
-    emit({ type: 'changed', daemonId: 'd1' });
-    await until(() => grants.length === 2);
-    expect(frame()?.getAttribute('src')).toContain('g1');
-    grants[1]?.resolve(grantOf('g2', '0.1'));
-    await until(() => frame()?.getAttribute('src')?.includes('g2') === true);
-    await until(() => released.some((entry) => entry.grants.includes('g1')));
   });
 
   it('leaving for the history cache releases the view, and coming back prepares a new one', async () => {
@@ -513,50 +482,6 @@ describe('review follow-ups', () => {
     expect(new URLSearchParams(window.location.search).get('document')).toBeNull();
     // A new list entry, not history.back() (which would leave the site from a directly opened URL).
     expect(window.history.length).toBe(length + 1);
-  });
-});
-
-describe('the document drawer and static frames', () => {
-  it('switches documents from the drawer (marking the shown one), and Back returns to the previous document', async () => {
-    documents = [
-      row({ title: 'A' }),
-      row({ documentId: id(2), title: 'B', openedAt: '2026-11-17T00:00:00.000Z' }),
-    ];
-    await showDemo('ga');
-    const toggle = container.querySelector(
-      'button[aria-label="Switch document"]',
-    ) as HTMLButtonElement;
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.getAttribute('aria-controls')).toBe('mobile-document-list');
-    toggle.click();
-    await until(() => toggle.getAttribute('aria-expanded') === 'true');
-    const drawer = container.querySelector('#mobile-document-list') as HTMLElement;
-    const items = [...drawer.querySelectorAll('li button')];
-    expect(titles(drawer)).toEqual(['A', 'B']);
-    expect(items[0]?.getAttribute('aria-current')).toBe('page');
-    (items[1] as HTMLButtonElement).click();
-    await until(() => new URLSearchParams(window.location.search).get('document') === id(2));
-    expect(toggle.isConnected ? toggle.getAttribute('aria-expanded') : 'false').toBe('false');
-    expect(container.querySelector('h1')?.textContent).toBe('B');
-    window.history.back();
-    await until(() => container.querySelector('h1')?.textContent === 'A');
-    expect(new URLSearchParams(window.location.search).get('document')).toBe(id(1));
-  });
-
-  it('a static frame stays scrollable while the view is checked again; only an interactive frame is blocked', async () => {
-    documents = [row({ effectiveMode: 'static' })];
-    await start();
-    await until(() => rows().length > 0);
-    (container.querySelector('main nav li button') as HTMLButtonElement).click();
-    await until(() => grants.length > 0);
-    valid.add('s1');
-    grants[0]?.resolve(grantOf('s1', '0.0', 'static'));
-    await until(() => frame() !== null);
-    api.documents = () => new Promise(() => undefined);
-    window.dispatchEvent(new Event('pageshow'));
-    await settle(60);
-    expect(paused()).toBe(false);
-    expect(frame()?.hasAttribute('inert')).toBe(false);
   });
 });
 

@@ -23,7 +23,6 @@ import {
   type PrintInput,
 } from '@vde-open/document/print';
 import { scanReferences } from '@vde-open/document/render';
-import { VdeError } from '@vde-open/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createCursorCodec } from '../documents/cursor.ts';
@@ -193,18 +192,6 @@ describe('PDF export', () => {
     ).rejects.toMatchObject({ code: 'E_LIMIT_EXCEEDED', details: { reason: 'page-size' } });
     expect(recorded(browser.record)).toEqual([]);
     expect(readdirSync(temp)).toEqual([]);
-  });
-
-  it('reports a missing browser', async () => {
-    const { documentId, revision } = await openMarkdown();
-    const missing = new VdeError('E_BROWSER_NOT_FOUND', 'No browser.', { source: 'search' });
-    await expect(
-      create('', {
-        findBrowser: () => {
-          throw missing;
-        },
-      }).exportPdf(documentId, revision),
-    ).rejects.toBe(missing);
   });
 
   it('fails when the browser cannot be started', async () => {

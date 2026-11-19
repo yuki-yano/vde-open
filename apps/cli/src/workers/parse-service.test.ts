@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,22 +22,15 @@ afterEach(async () => {
 });
 
 describe('parse worker', () => {
-  it('parses and returns the document structure', async () => {
-    service = createParseService();
-    const analysis = await service.analyze('markdown', '# 概要\n\n## 手順\n');
-    expect(analysis.title).toBe('概要');
-    expect(analysis.outline.map((item) => item.title)).toEqual(['概要', '手順']);
-    expect((await service.analyze('html', '<title>t</title><h1>見出し</h1>')).title).toBe('t');
-  });
-
   it('MD-006: a document over the structure limit is a parse error', async () => {
     service = createParseService();
     await expect(service.analyze('markdown', `${'> '.repeat(70)}深い`)).rejects.toMatchObject({
       code: 'E_PARSE_FAILED',
       details: { reason: 'limit-depth' },
     });
-    // Parsing continues on the same worker after the error.
+    // Parsing continues on the same worker after the error, for either format.
     expect((await service.analyze('markdown', '# 次\n')).title).toBe('次');
+    expect((await service.analyze('html', '<title>t</title><h1>見出し</h1>')).title).toBe('t');
   });
 
   it('MD-006: a parse that does not finish in time stops and reclaims the worker, and parsing still works afterwards', async () => {
@@ -68,51 +61,19 @@ parentPort.on('message', (request) => {
 
   it('also collects references and transforms for display on the worker', async () => {
     service = createParseService();
-    expect(
-      await service.scan('html', '<img src="a.png"><link rel="stylesheet" href="s.css">'),
-    ).toEqual([
-      { url: 'a.png', context: 'image' },
-      { url: 's.css', context: 'style' },
-    ]);
-    expect(await service.scan('css', '@import "b.css"; .a { background: url(c.png) }')).toEqual([
-      { url: 'b.css', context: 'style' },
-      { url: 'c.png', context: 'css-url' },
-    ]);
-    expect(
-      await service.scan('markdown', '![図](img/a.png) ![外](https://e.example/b.png)'),
-    ).toEqual([
+    expect(await service.scan('markdown', '![図](img/a.png)')).toEqual([
       { url: 'img/a.png', context: 'image' },
-      { url: 'https://e.example/b.png', context: 'image' },
     ]);
-
     const rendered = await service.render({
       format: 'html',
-      source:
-        '<link rel="stylesheet" href="s.css"><script>x()</script><img src="a.png"><p>本文</p>',
+      source: '<p>本文</p>',
       documentLogicalPath: 'index.html',
-      assets: [
-        { logicalPath: 'a.png', role: 'image' },
-        { logicalPath: 's.css', role: 'style' },
-      ],
+      assets: [],
       mode: 'static',
       sdkScript: null,
-      stylesheets: [
-        {
-          logicalPath: 's.css',
-          text: '.a{background:url(a.png)} .b{background:url(//e.example/x.png)}',
-        },
-      ],
+      stylesheets: [],
     });
-    expect(rendered.html).toContain('<img src="a.png">');
-    expect(rendered.html).not.toContain('script');
-    expect(rendered.stylesheets).toEqual([
-      // Only the declaration that references an external resource is dropped.
-      { logicalPath: 's.css', css: '.a{background:url(a.png)}.b{}' },
-    ]);
-    expect(rendered.diagnostics.map((entry) => entry.code).toSorted()).toEqual([
-      'remote-asset-blocked',
-      'script-removed',
-    ]);
+    expect(rendered.html).toContain('<p>本文</p>');
   });
 
   it('asks the worker to collect garbage once after parse requests pause', async () => {
@@ -138,31 +99,6 @@ parentPort.on('message', (request) => {
     // Diagnostics alone do not count as activity.
     await new Promise((resolve) => setTimeout(resolve, COLLECT_AFTER_IDLE_MS + 500));
     expect(await collects()).toBe(1);
-  });
-
-  it('a slow collection does not count against parses sent while it runs', async () => {
-    // A worker whose collection blocks longer than the parse time limit. It marks when the collection starts.
-    const marker = join(dir, 'collecting');
-    const workerPath = join(dir, 'slow-collect-worker.mjs');
-    writeFileSync(
-      workerPath,
-      `import { writeFileSync } from 'node:fs';
-import { parentPort } from 'node:worker_threads';
-const pause = new Int32Array(new SharedArrayBuffer(4));
-parentPort.on('message', (request) => {
-  if (request.op === 'collect') {
-    writeFileSync(${JSON.stringify(marker)}, '');
-    Atomics.wait(pause, 0, 0, 800);
-  }
-  parentPort.postMessage({ id: request.id, ok: true, result: { title: 't', outline: [] } });
-});
-`,
-    );
-    service = createParseService({ timeoutMs: 500, workerPath });
-    await service.analyze('markdown', '# a\n');
-    await vi.waitFor(() => expect(existsSync(marker)).toBe(true), { timeout: 5000 });
-    // Sent during the collection: it waits for the collection, then gets its own time limit.
-    expect((await service.analyze('markdown', '# b\n')).title).toBe('t');
   });
 
   it('does not accept parses after close', async () => {

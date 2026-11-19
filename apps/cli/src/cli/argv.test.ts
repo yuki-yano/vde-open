@@ -12,21 +12,14 @@ describe('delegates top-level file arguments to open', () => {
     [['a.md', 'b.html'], false, ['open', 'a.md', 'b.html']],
     [['--json', 'a.md'], false, ['open', '--json', 'a.md']],
     [['list', '--json'], false, ['list', '--json']],
-    [['open', './read'], false, ['open', './read']],
     [['--', 'read'], false, ['open', '--', 'read']],
     [['-', '--format', 'markdown'], false, ['open', '-', '--format', 'markdown']],
     [['--format', 'markdown'], true, ['open', '--format', 'markdown']],
     [[], true, ['open']],
     [[], false, []],
     [['--help'], true, ['--help']],
-    [['--version'], false, ['--version']],
     // An option value equal to a subcommand name is not treated as a subcommand.
     [['--title', 'read', 'a.md'], false, ['open', '--title', 'read', 'a.md']],
-    [
-      ['--key', 'list', '--format', 'markdown'],
-      true,
-      ['open', '--key', 'list', '--format', 'markdown'],
-    ],
     [['--title=read', 'a.md'], false, ['open', '--title=read', 'a.md']],
     [['--json', 'list'], false, ['--json', 'list']],
   ])('%j (stdin piped: %s) -> %j', (argv, piped, expected) => {

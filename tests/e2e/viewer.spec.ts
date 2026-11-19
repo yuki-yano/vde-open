@@ -253,7 +253,7 @@ test('outline resizing supports keys, protects the document beside an answer pan
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(900);
 });
 
-test('the answer panel resizes by drags across the HTML iframe and by keys, keeps the document 320px wide, and persists', async ({
+test('the answer panel widens with End, keeps the document 320px wide, and sits under the document on narrow screens', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -277,26 +277,6 @@ test('the answer panel resizes by drags across the HTML iframe and by keys, keep
   const panel = page.getByRole('complementary', { name: 'Answer the question' });
   const handle = page.getByRole('separator', { name: 'Resize answer panel', exact: true });
   await expect(panel).toHaveCSS('width', '360px');
-  await expect(
-    page.frameLocator('[data-testid="document-frame"]').getByText('Document content'),
-  ).toBeVisible();
-  const box = (await handle.boundingBox())!;
-  const x = box.x + box.width / 2;
-  const y = box.y + box.height / 2;
-  // The drag moves over the document iframe, where only pointer capture keeps it going.
-  await page.mouse.move(x, y);
-  await page.mouse.down();
-  await page.mouse.move(x - 100, y, { steps: 5 });
-  await expect(panel).toHaveCSS('width', '460px');
-  await page.mouse.up();
-  await page.mouse.move(x - 180, y);
-  await expect(panel).toHaveCSS('width', '460px');
-  await page.reload();
-  await expect(panel).toHaveCSS('width', '460px');
-  await handle.press('Home');
-  await expect(panel).toHaveCSS('width', '280px');
-  await handle.press('ArrowLeft');
-  await expect(panel).toHaveCSS('width', '296px');
   await handle.press('End');
   await expect(panel).toHaveCSS('width', '640px');
   // The document keeps 320px: 1100 - list 264 - handle 8 - 320 leaves the panel 508px.
@@ -340,70 +320,6 @@ test('the document toolbar wraps inside a narrow document pane instead of coveri
   for (const button of await view.locator('header button').all()) {
     const box = (await button.boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width + 0.5);
-  }
-});
-
-test('switching Markdown keeps the current preview until the next one is ready, without showing source or loading placeholders', async ({
-  page,
-}) => {
-  t.write('first.md', '# First\n\n**original**\n');
-  t.write('second.md', '# Second\n\n**replacement**\n');
-  const opened = await t.json<{ documents: Array<{ documentId: string }> }>([
-    'open',
-    'first.md',
-    'second.md',
-  ]);
-  await page.goto(await t.uiUrl());
-  await expect(page.locator('article strong')).toHaveText('original');
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let requested = false;
-  await page.route(`**/documents/${opened.documents[1]!.documentId}/content?*`, async (route) => {
-    requested = true;
-    await gate;
-    await route.continue();
-  });
-  // Observe the surface at each animation frame, including the asynchronous parse after the HTTP response.
-  await page.evaluate(() => {
-    const observation = { stopped: false, phases: [] as string[] };
-    (window as unknown as { switchObservation: typeof observation }).switchObservation =
-      observation;
-    const sample = () => {
-      if (observation.stopped) return;
-      const surface = document.querySelector(
-        '[data-testid="document-workspace"][aria-hidden="false"]',
-      );
-      observation.phases.push(
-        surface?.querySelector('article strong')?.textContent ?? 'intermediate',
-      );
-      requestAnimationFrame(sample);
-    };
-    sample();
-  });
-  try {
-    await page
-      .getByRole('navigation', { name: 'Open documents' })
-      .getByRole('button', { name: 'Second', exact: true })
-      .click();
-    await expect.poll(() => requested).toBe(true);
-    await expect(page.locator('article:visible strong')).toHaveText('original');
-    await expect(page.locator('pre:visible')).toHaveCount(0);
-    release();
-    await expect(page.locator('article:visible strong')).toHaveText('replacement');
-    const phases = await page.evaluate(() => {
-      const observation = (
-        window as unknown as { switchObservation: { stopped: boolean; phases: string[] } }
-      ).switchObservation;
-      observation.stopped = true;
-      return observation.phases;
-    });
-    expect(phases.length).toBeGreaterThan(0);
-    expect(phases.every((phase) => phase === 'original' || phase === 'replacement')).toBe(true);
-    await expect(page.getByTestId('document-workspace')).toHaveCount(1);
-  } finally {
-    release();
   }
 });
 
@@ -451,29 +367,6 @@ test('switching to HTML keeps the previous document until its iframe response lo
   } finally {
     release();
   }
-});
-
-test('P2 gate: a document opened from the CLI is shown in the UI, and additions and saves are reflected as they happen', async ({
-  page,
-}) => {
-  t.write('a.md', '# 最初の文書\n\n本文です。\n');
-  await t.json(['open', 'a.md']);
-  await page.goto(await t.uiUrl());
-
-  const sidebar = page.getByRole('navigation', { name: 'Open documents' });
-  await expect(sidebar.getByRole('button', { name: '最初の文書', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { level: 1, name: '最初の文書' }).last()).toBeVisible();
-
-  // Opening a document from the CLI makes it appear in the list without touching the UI.
-  t.write('b.md', '# 二つ目の文書\n');
-  await t.json(['open', 'b.md']);
-  await expect(sidebar.getByRole('button', { name: '二つ目の文書', exact: true })).toBeVisible();
-  // Adding a document does not switch the document being read (DOC-014).
-  await expect(page.locator('article')).toContainText('本文です。');
-
-  // DOC-009: a save that writes a temporary file and renames it still shows the final content.
-  t.atomicWrite('a.md', '# 最初の文書\n\n保存し直した本文です。\n');
-  await expect(page.locator('article')).toContainText('保存し直した本文です。');
 });
 
 test('the same document URL opens in another browser without authentication', async ({

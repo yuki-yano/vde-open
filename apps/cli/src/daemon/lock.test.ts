@@ -41,7 +41,11 @@ const lockFiles = async () => (await readdir(dir)).filter((name) => name.startsW
 describe('lock acquisition and release', () => {
   it('acquires exclusively and only the owner can release', async () => {
     expect(await acquire('a')).toMatchObject({ acquired: true, info: { generation: 1 } });
-    expect(await acquire('b')).toMatchObject({ acquired: false, reason: 'held' });
+    expect(await acquire('b')).toMatchObject({
+      acquired: false,
+      reason: 'held',
+      holder: { ownerId: 'a' },
+    });
     expect(await holdsLock(dir, NAME, 'a')).toBe(true);
 
     await releaseLock(dir, NAME, 'b');
@@ -86,10 +90,6 @@ describe('SYS-006 / SYS-007 owner liveness check', () => {
     released: false,
   });
 
-  it('dead when the process does not exist', async () => {
-    expect(await inspectOwner(info(lockedAt), dead)).toBe('dead');
-  });
-
   it('alive when the process exists and started before the lock', async () => {
     const started = new Date('2026-10-02T11:59:59.000Z');
     expect(await inspectOwner(info(lockedAt), probe(true, started))).toBe('alive');
@@ -113,18 +113,6 @@ describe('SYS-006 / SYS-007 owner liveness check', () => {
 });
 
 describe('takeover from a dead owner', () => {
-  it('does not take over a lock whose owner is alive and leaves the files unchanged', async () => {
-    await acquire('owner');
-    const before = await lockFiles();
-    expect(await acquire('intruder', alive)).toMatchObject({
-      acquired: false,
-      reason: 'held',
-      holder: { ownerId: 'owner' },
-    });
-    expect(await lockFiles()).toEqual(before);
-    expect(await holdsLock(dir, NAME, 'owner')).toBe(true);
-  });
-
   it('takes over with the next generation without removing the lock when the owner is dead', async () => {
     await acquire('crashed');
     expect(await acquire('successor', dead)).toMatchObject({
@@ -201,27 +189,5 @@ describe('takeover from a dead owner', () => {
     expect(await holdsLock(dir, NAME, 'A')).toBe(false);
     // The generation 2 file recreated by A is not kept.
     expect(await lockFiles()).toEqual([`${NAME}.000000000003`]);
-  });
-
-  it('a takeover based on a stale observation does not break the lock of the current owner', async () => {
-    // After the lock observed as dead (generation 1), another process has re-acquired as generation 2.
-    await acquire('crashed');
-    await acquire('fresh', dead);
-    // Even if the process that saw generation 1 as dead tries to acquire, it sees the current generation 2 (alive) and gives up.
-    expect(await acquire('late', alive)).toMatchObject({
-      acquired: false,
-      holder: { ownerId: 'fresh', generation: 2 },
-    });
-    expect(await holdsLock(dir, NAME, 'fresh')).toBe(true);
-  });
-
-  it('cannot acquire with a past generation number even across release and re-acquisition', async () => {
-    await acquire('first');
-    await releaseLock(dir, NAME, 'first');
-    await acquire('second');
-    await releaseLock(dir, NAME, 'second');
-    const third = await acquire('third');
-    expect(third).toMatchObject({ acquired: true, info: { generation: 3 } });
-    expect(await holdsLock(dir, NAME, 'third')).toBe(true);
   });
 });

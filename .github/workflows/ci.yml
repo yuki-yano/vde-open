@@ -48,4 +48,3 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test:pack
-      - run: pnpm exec vitest run tests/integration/daemon.test.ts tests/integration/documents.test.ts

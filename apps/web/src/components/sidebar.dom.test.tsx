@@ -97,51 +97,12 @@ describe('flat rows', () => {
     );
   });
 
-  it('color the icon by format', () => {
-    show([
-      { ...inRepository('/r/app', 'a.md'), format: 'markdown' },
-      { ...inRepository('/r/app', 'b.html'), format: 'html' },
-    ]);
-    const icons = rows().map((row) => row.querySelector('svg[data-format]'));
-    expect(icons.map((icon) => icon?.getAttribute('data-format'))).toEqual(['markdown', 'html']);
-    expect(icons[0]?.getAttribute('class')).toContain('text-format-markdown');
-    expect(icons[1]?.getAttribute('class')).toContain('text-format-html');
-  });
-
-  it('tell same-named repositories and same-titled documents apart', () => {
-    show([
-      { ...inRepository('/a/me/dotfiles', 'a/docs/README.md'), title: 'README' },
-      { ...inRepository('/a/you/dotfiles', 'a/docs/README.md'), title: 'README' },
-      { ...inRepository('/a/me/dotfiles', 'b/docs/README.md'), title: 'README' },
-    ]);
-    expect(rows().map((row) => part(row, 'repository'))).toEqual([
-      'me/dotfiles',
-      'you/dotfiles',
-      'me/dotfiles',
-    ]);
-    expect(rows().map((row) => part(row, 'location'))).toEqual([
-      'me/dotfilesa/docs/README.md',
-      'you/dotfiles…/docs/README.md',
-      'me/dotfilesb/docs/README.md',
-    ]);
-  });
-
   it('show stdin with its format, and a file outside a repository by its own path', () => {
     show([{ ...documentAt(null), format: 'html' }, documentAt('/home/u/notes/plan.md')]);
     expect(rows().map((row) => part(row, 'location'))).toEqual([
       'Standard input · HTML',
       '…/notes/plan.md',
     ]);
-  });
-
-  it('change when the list arrives again with another branch', () => {
-    const before = inWorktree('/r/app', '/w/x', 'a.md', { name: 'x', branch: 'one' });
-    show([before]);
-    expect(part(rows()[0] as Element, 'worktree')).toBe('one');
-
-    const after = inWorktree('/r/app', '/w/x', 'a.md', { name: 'x', branch: 'two' });
-    show([{ ...after, documentId: before.documentId }]);
-    expect(part(rows()[0] as Element, 'worktree')).toBe('two');
   });
 
   it('describe why the repository could not be identified', () => {

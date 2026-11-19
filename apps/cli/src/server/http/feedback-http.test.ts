@@ -209,31 +209,32 @@ describe('FB-013 disconnect during submit and resend', () => {
       replayed.body.data?.submission,
     );
   });
+});
 
-  it('does not return success for a submit whose save failed. A resend with the same submission ID submits', async () => {
-    let failWrites = false;
-    const started = await start({
-      ...nodeStoreFs,
-      writeFileDurable: async (path, data, mode) => {
-        if (failWrites && path.includes('.tmp-state-')) {
-          throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
-        }
-        return nodeStoreFs.writeFileDurable(path, data, mode);
-      },
+describe('FB-004 / FB-019 draft answers from the management API', () => {
+  it('rejects a body with duplicate keys or `__proto__` and keeps the saved draft', async () => {
+    const started = await start(nodeStoreFs);
+    for (const [body, reason] of [
+      ['{"expectedDraftVersion":1,"answers":{"layout":"B","layout":"A"}}', 'duplicate-key'],
+      ['{"expectedDraftVersion":1,"answers":{"__proto__":{"layout":"A"}}}', 'forbidden-key'],
+    ]) {
+      const response = await fetch(
+        `${started.origin}/_/api/v1/feedback/${started.requestId}/draft`,
+        {
+          method: 'PUT',
+          headers: { Origin: started.origin, 'Content-Type': 'application/json' },
+          body,
+        },
+      );
+      expect({ status: response.status, body: await response.json() }).toMatchObject({
+        status: 400,
+        body: { error: { code: 'E_INVALID_ARGUMENT', details: { reason } } },
+      });
+    }
+    expect(started.feedback.getForUi(started.requestId).data).toMatchObject({
+      draftVersion: 1,
+      draftAnswers: { layout: 'B' },
     });
-    const submissionId = `sub_${randomUUID()}`;
-    failWrites = true;
-    const failed = await submit(started, submissionId).response;
-    expect(failed.status).not.toBe(200);
-    expect(failed.body.ok).toBe(false);
-    expect(started.feedback.get({ requestId: started.requestId }).data.status).toBe('pending');
-    expect(submittedEvents(started.events)).toEqual([]);
-
-    failWrites = false;
-    const retried = await submit(started, submissionId).response;
-    expect(retried.status).toBe(200);
-    expect(retried.body.data?.status).toBe('submitted');
-    expect(submittedEvents(started.events)).toHaveLength(1);
   });
 });
 

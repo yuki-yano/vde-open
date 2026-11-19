@@ -22,7 +22,7 @@ const NOTICE_FILE = /^(licen[cs]e|copying|notice)(\.|-|$)/i;
 // Find the directory of the package that contains a module from its module ID.
 // Depending on the bundler, the ID separator is `/` (Vite normalizes to `/` even on Windows) or the OS separator.
 // Normalize both to `/` (Node file operations accept `/`-separated paths on Windows too).
-export function packageDirOfModule(id: string): string | null {
+function packageDirOfModule(id: string): string | null {
   const normalized = id.replaceAll('\\', '/');
   const marker = '/node_modules/';
   const index = normalized.lastIndexOf(marker);

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,7 +25,6 @@ let render: RenderService;
 // Hold the render until signalled.
 let holdRender: Promise<void> | null;
 let renderStarted: () => void;
-let renders: number;
 
 beforeEach(async () => {
   base = realpathSync(mkdtempSync(join(tmpdir(), 'vde-open-render-')));
@@ -33,13 +32,11 @@ beforeEach(async () => {
   documents = new DocumentService({ store, cursors: createCursorCodec(randomBytes(32)) });
   holdRender = null;
   renderStarted = () => undefined;
-  renders = 0;
   const parse: ParseService = {
     diagnostics: () => Promise.resolve(null),
     analyze: (format, text) => Promise.resolve(analyzeDocument(text, format)),
     scan: (kind, text) => Promise.resolve(scanReferences(kind, text)),
     render: async (input) => {
-      renders += 1;
       renderStarted();
       if (holdRender) await holdRender;
       return renderDocument(input);
@@ -147,9 +144,6 @@ describe('SEC-015 ordering of render grants and closing a document', () => {
     expect([grantA.documentLogicalPath, grantB.documentLogicalPath]).toEqual(['a.html', 'b.html']);
     expect(await render.resolve(grantB.grant, 'a.html')).toBeNull();
     expect(await render.resolve(grantB.grant, 'b.html')).not.toBeNull();
-    // A second grant for the same document and revision does not render again.
-    await render.createGrant({ documentId: a }, GRANT_CONTEXT);
-    expect(renders).toBe(2);
   });
 });
 
@@ -256,14 +250,18 @@ describe('interactive view and communication with the HTML', () => {
     expect(await body(revoked.grant, revoked.documentLogicalPath)).toContain('Version 1');
   });
 
-  it('re-granting after revocation does not revive interactive views issued under the previous permission', async () => {
+  it('revoking the script permission ends issued interactive views, and re-granting does not revive them', async () => {
     const documentId = await openInteractive();
-    const grant = await render.createGrant({ documentId, mode: 'interactive' }, GRANT_CONTEXT);
-    expect(await body(grant.grant, grant.documentLogicalPath)).not.toBeNull();
-    // Revoke, then re-grant without touching the previous view.
+    // A failed lookup drops the grant, so each moment needs its own grant.
+    const revoked = await render.createGrant({ documentId, mode: 'interactive' }, GRANT_CONTEXT);
+    const regranted = await render.createGrant({ documentId, mode: 'interactive' }, GRANT_CONTEXT);
+    expect(await body(revoked.grant, revoked.documentLogicalPath)).not.toBeNull();
+    expect(await body(regranted.grant, regranted.documentLogicalPath)).not.toBeNull();
     await documents.setHtmlMode({ documentId, mode: 'static' });
+    expect(await render.resolve(revoked.grant, revoked.documentLogicalPath)).toBeNull();
+    // Re-grant without touching the previous view.
     await documents.setHtmlMode({ documentId, mode: 'interactive', confirmed: true });
-    expect(await render.resolve(grant.grant, grant.documentLogicalPath)).toBeNull();
+    expect(await render.resolve(regranted.grant, regranted.documentLogicalPath)).toBeNull();
     // Reopening with the same option while allowed keeps issued views usable.
     const current = await render.createGrant({ documentId, mode: 'interactive' }, GRANT_CONTEXT);
     await documents.open({ cwd: base, paths: ['site/app.html'], htmlMode: 'interactive' });
@@ -313,7 +311,7 @@ describe('interactive view and communication with the HTML', () => {
     ).rejects.toMatchObject({ code: 'E_REQUEST_NOT_PENDING' });
   });
 
-  it.each(['cancel', 'submit', 'forget'] as const)(
+  it.each(['cancel', 'forget'] as const)(
     'does not issue an SDK-enabled view if the question ends (%s) while rendering',
     async (ending) => {
       const documentId = await openInteractive();
@@ -323,18 +321,9 @@ describe('interactive view and communication with the HTML', () => {
       const paused = pauseRender();
       const issuing = render.createGrantForRequest(request.requestId, GRANT_CONTEXT);
       await paused.started;
-      if (ending === 'submit') {
-        await feedback.submit(request.requestId, {
-          submissionId: `sub_${randomUUID()}`,
-          expectedDraftVersion: 0,
-          revision: request.revision,
-          currentRevision: request.revision,
-        });
-      } else {
-        await feedback.cancel({ requestId: request.requestId }, 'agent');
-        if (ending === 'forget') {
-          await feedback.forget({ requestId: request.requestId, confirmed: true });
-        }
+      await feedback.cancel({ requestId: request.requestId }, 'agent');
+      if (ending === 'forget') {
+        await feedback.forget({ requestId: request.requestId, confirmed: true });
       }
       paused.resume();
       await expect(issuing).rejects.toMatchObject({
@@ -343,14 +332,6 @@ describe('interactive view and communication with the HTML', () => {
       expect(render.grantCount).toBe(0);
     },
   );
-
-  it('issued interactive views become unusable once the script permission is revoked', async () => {
-    const documentId = await openInteractive();
-    const grant = await render.createGrant({ documentId, mode: 'interactive' }, GRANT_CONTEXT);
-    expect(await body(grant.grant, grant.documentLogicalPath)).not.toBeNull();
-    await documents.setHtmlMode({ documentId, mode: 'static' });
-    expect(await render.resolve(grant.grant, grant.documentLogicalPath)).toBeNull();
-  });
 
   it('records and reports loads of unregistered files per view', async () => {
     const notified: string[] = [];
@@ -406,31 +387,6 @@ describe('headings the HTML view can be moved to', () => {
     close: () => Promise.resolve(),
   };
   const HTML = '<h1>A</h1><object><h2>B</h2></object><h2>C</h2>';
-
-  it('the static HTML view returns them by sectionId; Markdown and interactive views return none', async () => {
-    write('site/a.html', HTML);
-    write('site/b.md', '# B\n');
-    write('site/c.html', HTML);
-    const opened = await documents.open({ cwd: base, paths: ['site/a.html', 'site/b.md'] });
-    const [html, markdown] = opened.data.documents.map((document) => document.documentId) as [
-      string,
-      string,
-    ];
-    const interactive = (
-      await documents.open({ cwd: base, paths: ['site/c.html'], htmlMode: 'interactive' })
-    ).data.documents[0]?.documentId as string;
-    expect((await render.createGrant({ documentId: html }, GRANT_CONTEXT)).headingTargets).toEqual([
-      { sectionId: 'sec_0001', anchor: 'h1' },
-      { sectionId: 'sec_0003', anchor: 'h3' },
-    ]);
-    expect(
-      (await render.createGrant({ documentId: markdown }, GRANT_CONTEXT)).headingTargets,
-    ).toEqual([]);
-    expect(
-      (await render.createGrant({ documentId: interactive, mode: 'interactive' }, GRANT_CONTEXT))
-        .headingTargets,
-    ).toEqual([]);
-  });
 
   it('after a restart, file documents analyzed with an older profile get a current revision, and older revisions stay readable', async () => {
     write('site/a.html', HTML);

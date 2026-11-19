@@ -30,7 +30,7 @@ const cmdMetaChars = /([()\][%!^"`<>&|;, *?])/g;
 
 // Quote one argument passed to cmd.exe. Same rules as cross-spawn.
 // A .cmd shim goes through cmd.exe once more internally, so escape meta characters twice.
-export function quoteForCmd(argument: string, forCmdShim: boolean): string {
+function quoteForCmd(argument: string, forCmdShim: boolean): string {
   let quoted = argument.replace(/(\\*)"/g, '$1$1\\"');
   quoted = quoted.replace(/(\\*)$/, '$1$1');
   quoted = `"${quoted}"`;
@@ -182,10 +182,6 @@ export function runPnpm(args: string[], options: RunOptions): void {
 
 export function runNpm(args: string[], options: RunOptions): void {
   runInvocation(npmInvocation(args), options);
-}
-
-export function captureNpm(args: string[], options: RunOptions): CaptureResult {
-  return captureInvocation(npmInvocation(args), options);
 }
 
 export function captureCommand(

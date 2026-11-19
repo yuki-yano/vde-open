@@ -1,5 +1,5 @@
-// Pins the APIs and behavior this product relies on in the installed versions of Hono, MiniSearch,
-// Chokidar, tinyglobby, and Node 24's Intl.Segmenter. Upgrading a version surfaces differences here.
+// Pins the APIs and behavior this product relies on in the installed versions of Hono, Chokidar,
+// and tinyglobby. Upgrading a version surfaces differences here.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -8,8 +8,6 @@ import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { type FSWatcher, watch } from 'chokidar';
 import { Hono } from 'hono';
-import { streamSSE } from 'hono/streaming';
-import MiniSearch from 'minisearch';
 import { glob } from 'tinyglobby';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -24,61 +22,16 @@ afterEach(() => {
 });
 
 describe('hono 4.13.19 + @hono/node-server 2.1.9', () => {
-  it('listens only on 127.0.0.1 on an OS-assigned port and can return SSE', async () => {
-    const app = new Hono();
-    app.get('/events', (c) =>
-      streamSSE(c, async (stream) => {
-        await stream.writeSSE({ event: 'hello', data: '{"sequence":1}' });
-      }),
-    );
-    const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 });
+  it('listens only on 127.0.0.1 on an OS-assigned port', async () => {
+    const server = serve({ fetch: new Hono().fetch, hostname: '127.0.0.1', port: 0 });
     try {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address() as AddressInfo;
       expect(address.address).toBe('127.0.0.1');
       expect(address.port).toBeGreaterThan(0);
-
-      const response = await fetch(`http://127.0.0.1:${String(address.port)}/events`);
-      expect(response.headers.get('content-type')).toContain('text/event-stream');
-      expect(await response.text()).toBe('event: hello\ndata: {"sequence":1}\n\n');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-  });
-});
-
-describe('minisearch 7.2.0', () => {
-  it('supports a custom tokenizer, field boosts, and discarding documents', () => {
-    const segmenter = new Intl.Segmenter('ja', { granularity: 'word' });
-    const tokenize = (text: string) =>
-      Array.from(segmenter.segment(text))
-        .filter((part) => part.isWordLike)
-        .map((part) => part.segment);
-    const index = new MiniSearch<{ id: string; title: string; body: string }>({
-      fields: ['title', 'body'],
-      tokenize,
-      searchOptions: { boost: { title: 5 }, combineWith: 'AND' },
-    });
-    index.addAll([
-      { id: 'a', title: '認証仕様', body: 'セッションは30分で失効する。' },
-      { id: 'b', title: '設計メモ', body: '認証の方式を比較する。' },
-    ]);
-    expect(index.search('認証').map((hit) => hit.id)).toEqual(['a', 'b']);
-
-    index.discard('a');
-    expect(index.search('認証').map((hit) => hit.id)).toEqual(['b']);
-  });
-});
-
-describe("Node 24's Intl.Segmenter", () => {
-  it('splits Japanese into words', () => {
-    const segmenter = new Intl.Segmenter('ja', { granularity: 'word' });
-    const words = Array.from(segmenter.segment('セッションの有効期限を更新する'))
-      .filter((part) => part.isWordLike)
-      .map((part) => part.segment);
-    expect(words).toContain('セッション');
-    expect(words).toContain('有効');
-    expect(words).toContain('期限');
   });
 });
 

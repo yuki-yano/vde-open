@@ -32,12 +32,17 @@ describe('labels', () => {
       inWorktree('/r/app', '/w/two', 'b.md', { name: 'two', branch: 'main' }),
       inWorktree('/r/app', '/w/x', 'c.md', { name: 'x', branch: 'feature/x' }),
       inWorktree('/r/app', '/w/d', 'd.md', { name: 'd', branch: null }),
+      // A detached worktree named like another's branch.
+      inWorktree('/r/app', '/w/dev', 'e.md', { name: 'dev', branch: null }),
+      inWorktree('/r/app', '/w/three', 'f.md', { name: 'three', branch: 'dev' }),
     ]);
     expect(Object.fromEntries(labels.worktree)).toEqual({
       '/w/one': 'main (one)',
       '/w/two': 'main (two)',
       '/w/x': 'feature/x',
       '/w/d': 'd',
+      '/w/dev': 'dev',
+      '/w/three': 'dev (three)',
     });
   });
 

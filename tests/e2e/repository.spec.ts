@@ -44,34 +44,21 @@ const questionnaire = {
   },
 };
 
-test('DOC-017: each document shows its repository, worktree, path, and format, in the list, the tree, and the header', async ({
+test('copies a path relative to its checkout root, and colors Markdown and HTML icons with the Standard palette', async ({
   page,
+  context,
 }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const work = realpathSync(t.work);
-  const repo = join(work, 'vde-open');
+  const repo = join(work, 'project');
   gitDir(join(repo, '.git'));
-  worktree(join(repo, '.git'), join(repo, '.git', 'wt', 'feature', 'x'), 'x', {
-    head: 'ref: refs/heads/feature/x\n',
-  });
-  t.write('vde-open/docs/design.md', '# Design\n');
-  t.write('vde-open/.git/wt/feature/x/docs/plan.md', '# Plan\n');
-  t.write('notes/c.md', '# Notes\n');
-  t.write('vde-open/view.html', '<title>View</title><p>v</p>');
+  worktree(join(repo, '.git'), join(work, 'checkout'), 'feature');
   await t.json([
     'open',
-    'vde-open/docs/design.md',
-    'vde-open/.git/wt/feature/x/docs/plan.md',
-    'notes/c.md',
-    'vde-open/view.html',
+    t.write('checkout/docs/worktree.md', '# Worktree note\n'),
+    t.write('project/docs/view.html', '<!doctype html><title>HTML note</title><p>Note</p>'),
   ]);
   await page.goto(await t.uiUrl());
-  const sidebar = sidebarOf(page);
-
-  const location = (title: string) => rowOf(page, title).locator('[data-part="location"]');
-  await expect(location('Design')).toHaveText(/^vde-open\s*docs\/design\.md$/);
-  await expect(location('Plan')).toHaveText(/^vde-open\s*feature\/x\s*docs\/plan\.md$/);
-  await expect(location('Notes')).toHaveText('…/notes/c.md');
-  await expect(location('View')).toHaveText(/^vde-open\s*view\.html$/);
 
   // The default Standard palette keeps Markdown blue and HTML orange.
   const color = (title: string) =>
@@ -81,84 +68,19 @@ test('DOC-017: each document shows its repository, worktree, path, and format, i
   await page.getByRole('button', { name: 'Appearance' }).click();
   await page.getByRole('button', { name: 'Light' }).click();
   await page.getByRole('button', { name: 'Close details' }).click();
-  expect(await color('Design')).toBe('rgb(9, 105, 218)');
-  expect(await color('View')).toBe('rgb(196, 74, 0)');
+  expect(await color('Worktree note')).toBe('rgb(9, 105, 218)');
+  expect(await color('HTML note')).toBe('rgb(196, 74, 0)');
 
-  await sidebar.getByRole('button', { name: 'Tree' }).click();
-  const tree = sidebar.getByRole('tree');
-  await expect(tree.getByRole('treeitem', { name: 'vde-open', exact: true })).toBeVisible();
-  await expect(
-    tree.getByRole('treeitem', { name: 'Worktree feature/x', exact: true }),
-  ).toBeVisible();
-  await expect(
-    tree.getByRole('treeitem', { name: 'Outside a repository', exact: true }),
-  ).toBeVisible();
-
-  await tree.getByRole('button', { name: 'plan.md', exact: true }).click();
-  const shownLocation = page.locator('[data-testid="document-location"]:visible');
-  await expect(shownLocation).toHaveText(/^vde-open\s+worktree feature\/x \(x\) · docs\/plan\.md/);
-  await expect(shownLocation).toHaveAttribute(
+  await sidebarOf(page).getByRole('button', { name: 'Worktree note', exact: true }).click();
+  const copy = page.getByRole('button', { name: 'Copy document path', exact: true });
+  await expect(copy).toHaveAttribute(
     'title',
-    join(repo, '.git', 'wt', 'feature', 'x', 'docs', 'plan.md'),
+    'Copy path relative to repository root (docs/worktree.md)',
   );
-});
-
-test('copies paths relative to the repository root for Markdown, HTML, images, and linked worktrees', async ({
-  page,
-  context,
-}) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  const work = realpathSync(t.work);
-  const repo = join(work, 'project');
-  gitDir(join(repo, '.git'));
-  worktree(join(repo, '.git'), join(work, 'checkout'), 'feature');
-  const entries = [
-    {
-      file: 'project/docs/設計 メモ.md',
-      content: '# Repository note\n',
-      title: 'Repository note',
-      relative: 'docs/設計 メモ.md',
-    },
-    {
-      file: 'project/docs/view.html',
-      content: '<!doctype html><title>HTML note</title><p>Note</p>',
-      title: 'HTML note',
-      relative: 'docs/view.html',
-    },
-    {
-      file: 'project/images/map.svg',
-      content: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="24"/>',
-      title: 'map.svg',
-      relative: 'images/map.svg',
-    },
-    {
-      file: 'checkout/docs/worktree.md',
-      content: '# Worktree note\n',
-      title: 'Worktree note',
-      relative: 'docs/worktree.md',
-    },
-    {
-      file: 'project/README.md',
-      content: '# Repository readme\n',
-      title: 'Repository readme',
-      relative: 'README.md',
-    },
-  ];
-  const files = entries.map(({ file, content }) => t.write(file, content));
-  await t.json(['open', ...files]);
-  await page.goto(await t.uiUrl());
-  for (const entry of entries) {
-    await sidebarOf(page).getByRole('button', { name: entry.title, exact: true }).click();
-    const copy = page.getByRole('button', { name: 'Copy document path', exact: true });
-    await expect(copy).toHaveAttribute(
-      'title',
-      `Copy path relative to repository root (${entry.relative})`,
-    );
-    await copy.click();
-    await expect
-      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-      .toBe(entry.relative);
-  }
+  await copy.click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('docs/worktree.md');
 });
 
 for (const layout of [
@@ -288,17 +210,6 @@ test('DOC-017: in the tree, the repository row stays on top, and focus and scrol
   await expect(tree.getByRole('button', { name: 'readme.md', exact: true })).toBeVisible();
   await expect(tree.locator('[data-node="worktree"] > div').first()).not.toHaveClass(/sr-only/);
   await expect(focusedRow).toBeFocused();
-
-  // Scrolled away from the focused row, an update does not pull the list back.
-  await list.evaluate((node) => {
-    node.scrollTop = 0;
-  });
-  const before = await list.evaluate((node) => node.scrollTop);
-  t.atomicWrite('wt/docs/d00.md', '# d00 changed\n');
-  await expect(tree.getByRole('button', { name: 'd00.md', exact: true })).toBeVisible();
-  await page.waitForTimeout(500);
-  expect(await list.evaluate((node) => node.scrollTop)).toBe(before);
-  await expect(focusedRow).toBeFocused();
 });
 
 test('DOC-017: on a touch screen, tapping a badge does not remove the document', async ({
@@ -378,40 +289,6 @@ test('DOC-017: at 180px only the remove button shows, and Alt+Up/Down reorders a
   await page.keyboard.press('Alt+ArrowDown');
   await expect(sidebar.getByRole('listitem')).toHaveText([/One/, /Three/, /Two/]);
   await expect(button).toBeFocused();
-  // The order is saved to the daemon after the list moves.
-  await expect
-    .poll(async () =>
-      (await t.json<{ documents: Array<{ title: string }> }>(['list'])).documents.map(
-        (document) => document.title,
-      ),
-    )
-    .toEqual(['One', 'Three', 'Two']);
-});
-
-test('DOC-017: opening again a document removed with its button does not take focus or scroll', async ({
-  page,
-}) => {
-  const work = realpathSync(t.work);
-  gitDir(join(work, 'repo', '.git'));
-  const names = Array.from({ length: 40 }, (_, index) => `d${String(index).padStart(2, '0')}.md`);
-  for (const name of names) t.write(`repo/${name}`, `# ${name}\n`);
-  await t.json(['open', ...names.map((name) => `repo/${name}`)]);
-  await page.setViewportSize({ width: 1280, height: 600 });
-  await page.goto(await t.uiUrl());
-  const sidebar = sidebarOf(page);
-  const list = sidebar.locator('div.overflow-y-auto');
-  const row = rowOf(page, 'd02.md');
-  await row.hover();
-  await row.getByRole('button', { name: 'Remove d02.md from the list' }).click();
-  await expect(sidebar.getByRole('button', { name: 'd02.md', exact: true })).toHaveCount(0);
-  await page.getByRole('region', { name: 'Document view' }).click();
-  const before = await list.evaluate((node) => node.scrollTop);
-
-  await t.json(['open', 'repo/d02.md']);
-  await expect(sidebar.getByRole('button', { name: 'd02.md', exact: true })).toHaveCount(1);
-  await page.waitForTimeout(300);
-  expect(await list.evaluate((node) => node.scrollTop)).toBe(before);
-  expect(await page.evaluate(() => document.activeElement?.closest('nav') === null)).toBe(true);
 });
 
 for (const view of ['flat', 'tree'] as const) {

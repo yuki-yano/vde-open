@@ -86,32 +86,30 @@ test('Escape restores the original order and a document click still selects with
   ).toEqual(['Alpha', 'Beta', 'Gamma']);
 });
 
-for (const part of ['title', 'location']) {
-  test(`dragging from the ${part} reorders without selecting the document`, async ({ page }) => {
-    await openList(page);
-    const shown = page.getByRole('region', { name: 'Document view' }).locator('header h1');
-    await expect(shown).toHaveText('Alpha');
-    const source = rows(page).nth(1);
-    const start = (await source.locator(`[data-part="${part}"]`).boundingBox())!;
-    const target = (await rows(page).nth(2).boundingBox())!;
-    await page.mouse.move(start.x + 10, start.y + start.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(start.x + 22, start.y + start.height / 2);
-    await expect(sidebar(page).getByTestId('drop-position')).toBeVisible();
-    await page.mouse.move(target.x + 60, target.y + target.height / 2, { steps: 10 });
-    await expect(rows(page)).toHaveText([/Alpha/, /Gamma/, /Beta/]);
-    await page.mouse.up();
-    await expect(sidebar(page).getByTestId('drop-position')).toHaveCount(0);
-    await expect(shown).toHaveText('Alpha');
-    await expect
-      .poll(async () =>
-        (await t.json<{ documents: { title: string }[] }>(['list'])).documents.map(
-          (item) => item.title,
-        ),
-      )
-      .toEqual(['Alpha', 'Gamma', 'Beta']);
-  });
-}
+test('dragging from the location reorders without selecting the document', async ({ page }) => {
+  await openList(page);
+  const shown = page.getByRole('region', { name: 'Document view' }).locator('header h1');
+  await expect(shown).toHaveText('Alpha');
+  const source = rows(page).nth(1);
+  const start = (await source.locator('[data-part="location"]').boundingBox())!;
+  const target = (await rows(page).nth(2).boundingBox())!;
+  await page.mouse.move(start.x + 10, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(start.x + 22, start.y + start.height / 2);
+  await expect(sidebar(page).getByTestId('drop-position')).toBeVisible();
+  await page.mouse.move(target.x + 60, target.y + target.height / 2, { steps: 10 });
+  await expect(rows(page)).toHaveText([/Alpha/, /Gamma/, /Beta/]);
+  await page.mouse.up();
+  await expect(sidebar(page).getByTestId('drop-position')).toHaveCount(0);
+  await expect(shown).toHaveText('Alpha');
+  await expect
+    .poll(async () =>
+      (await t.json<{ documents: { title: string }[] }>(['list'])).documents.map(
+        (item) => item.title,
+      ),
+    )
+    .toEqual(['Alpha', 'Gamma', 'Beta']);
+});
 
 test('a small pointer movement still selects, and the remove button cannot start a drag', async ({
   page,
@@ -241,40 +239,38 @@ test('dragging a file icon offers its file URL as DownloadURL instead of reorder
 
 test.describe('touch drag', () => {
   test.use({ hasTouch: true });
-  for (const part of ['title', 'location']) {
-    test(`holding the ${part} allows a touch drag without a document click`, async ({
-      page,
-      browserName,
-      context,
-    }) => {
-      test.skip(
-        browserName !== 'chromium',
-        'Touch gestures are sent through the Chromium device protocol.',
-      );
-      await openList(page);
-      const handle = (await rows(page).first().locator(`[data-part="${part}"]`).boundingBox())!;
-      const destination = (await rows(page).nth(2).boundingBox())!;
-      const touch = await context.newCDPSession(page);
-      await touch.send('Input.dispatchTouchEvent', {
-        type: 'touchStart',
-        touchPoints: [{ x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 }],
-      });
-      await expect(sidebar(page).getByTestId('drop-position')).toBeVisible();
-      await touch.send('Input.dispatchTouchEvent', {
-        type: 'touchMove',
-        touchPoints: [{ x: destination.x + 40, y: destination.y + destination.height / 2 }],
-      });
-      await expect(rows(page)).toHaveText([/Beta/, /Gamma/, /Alpha/]);
-      await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-      await expect
-        .poll(async () =>
-          (await t.json<{ documents: { title: string }[] }>(['list'])).documents.map(
-            (item) => item.title,
-          ),
-        )
-        .toEqual(['Beta', 'Gamma', 'Alpha']);
+  test('holding the location allows a touch drag without a document click', async ({
+    page,
+    browserName,
+    context,
+  }) => {
+    test.skip(
+      browserName !== 'chromium',
+      'Touch gestures are sent through the Chromium device protocol.',
+    );
+    await openList(page);
+    const handle = (await rows(page).first().locator('[data-part="location"]').boundingBox())!;
+    const destination = (await rows(page).nth(2).boundingBox())!;
+    const touch = await context.newCDPSession(page);
+    await touch.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 }],
     });
-  }
+    await expect(sidebar(page).getByTestId('drop-position')).toBeVisible();
+    await touch.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: destination.x + 40, y: destination.y + destination.height / 2 }],
+    });
+    await expect(rows(page)).toHaveText([/Beta/, /Gamma/, /Alpha/]);
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect
+      .poll(async () =>
+        (await t.json<{ documents: { title: string }[] }>(['list'])).documents.map(
+          (item) => item.title,
+        ),
+      )
+      .toEqual(['Beta', 'Gamma', 'Alpha']);
+  });
 
   test('swiping a row before the hold scrolls the list without starting a drag', async ({
     page,

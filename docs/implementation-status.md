@@ -543,13 +543,13 @@ HTMLの実browserでの印刷はmacOSのみ確認した。Linux・Windowsでの�
 
 - [x] P0〜P7のすべてが17.2を満たす（各フェーズの記録）。
 - [x] tarballから導入した`vde-open`と`vo`が、同じstateとdaemonを操作する（CLI-001〜004がPASS）。
-- [x] 0.1の対象外機能と、削除済みoptionが露出していない（CLI-010、UX-007がPASS）。
+- [x] 0.1の対象外機能と、削除済みoptionが露出していない（CLI-010、UX-007がPASS）。2026-11-19から、READMEとAgent向けの資料に名残がないことはtestで確かめていない（UX-007の備考）。
 
 テスト完了条件:
 
 - [x] 固定したNode 24で、7つのcommandがすべてexit 0（上のP7の記録）。
-- [x] 受け入れテスト125 IDのすべてに、testとPASS／FAIL／NOT RUNが対応づいている。FAILは0件（下の表。125件すべてPASS）。
-- [x] NOT RUNのIDはない。Linux・WindowsのCIは、IDとは別に未実行として記録している（各IDの検証はmacOSとChromiumで行い、security・bridgeの試験はFirefox・WebKitでも行った）。
+- [x] P7の完了時に、受け入れテスト125 IDのすべてにtestとPASS／FAIL／NOT RUNが対応づき、125件すべてPASSだった（FAILは0件）。今の表は追加の2件を含む127件で、PASS 113件、廃止2件（SEC-001、SEC-003）、テストなし12件（2026-11-19のtestの整理で、確かめるtestがなくなったID）。
+- [x] NOT RUNのIDはない。Linux・WindowsのCIは、IDとは別に未実行として記録している（各IDの検証はmacOSとChromiumで行い、security・bridgeの試験はFirefox・WebKitでも行った）。2026-11-19から、`tests/e2e/html.spec.ts`と`interactive.spec.ts`のうちブラウザに依存しない手順の試験（`test.skip(browserName !== 'chromium', ...)`を付けたもの）と、`tests/e2e/release.spec.ts`は、Chromiumだけで流す。
 - [x] PERF-001〜005の実測値と測定環境が記録されている（`docs/performance.md`）。
 
 運用反映条件:
@@ -557,152 +557,155 @@ HTMLの実browserでの印刷はmacOSのみ確認した。Linux・Windowsでの�
 - [x] `pnpm pack`で作ったtarball（`artifacts/vde-open-0.1.0.tgz`）で、`pnpm test:pack`がPASS。
 - [x] 仕様16.3の文書（README、agent-usage、architecture、security-model、dependency-validation、implementation-status、ADR）とCI定義がある。
 - [x] Node 24（`flake.nix`と`package.json`の`engines.node`）と直接依存が完全版番号で固定され、lockfileがある。
-- [x] 導入で、利用者のshellの設定を変えず、既存の`vo`を上書きしない（CLI-014）。P7の完了までnpm publishとpushをしていない（公開はその後。「0.1.0の公開とその後の変更」）。
+- [x] 導入で、利用者のshellの設定を変えず、既存の`vo`を上書きしない（CLI-014。P7の時点でpack smokeで確かめた。2026-11-19にpack smokeからこの確認を削除し、今はテストなし）。P7の完了までnpm publishとpushをしていない（公開はその後。「0.1.0の公開とその後の変更」）。
 
 ## 受け入れテストの対応
 
-状態は「未着手／PASS／FAIL／NOT RUN」。担当は、そのIDが最後に必要とする機能がそろうフェーズ。IDをPASSにするのは担当フェーズで全条件を検証したときだけで、先行フェーズで一部だけ検証したものは備考に部分検証として書く。担当の「追加」は、受け入れテストの一式の後に足したID。
+状態は「未着手／PASS／FAIL／NOT RUN／廃止／テストなし」。担当は、そのIDが最後に必要とする機能がそろうフェーズ。IDをPASSにするのは担当フェーズで全条件を検証したときだけで、先行フェーズで一部だけ検証したものは備考に部分検証として書く。担当の「追加」は、受け入れテストの一式の後に足したID。
+
+2026-11-19にtestを整理した。`tests/integration/`をすべて削除し、残りのtestからも過剰なものを削った。integration testの保証のうち、ほかのtestで確かめていないセキュリティとデータ消失のものは、各moduleのunit testへ移した。testの列は、整理の後に残っているtestを指す。整理の後に確かめるtestがなくなった観点は、備考に「テストなし:」として書く。testの列のtestが一部の観点を確かめていれば状態はPASSのままにし、testが1つも残らないIDの状態は「テストなし」にする。
 
 | ID | 担当 | 状態 | test | 備考（部分検証を含む） |
 |---|---|---|---|---|
 | CLI-001 | P7 | PASS | `scripts/pack-smoke.ts`（手順1〜2） | tarballにcli・daemon・解析と検索のworker・同梱UI・agent-usage・READMEがある。空のdirectoryへ`--offline --ignore-scripts`で導入し、repoのnode_modulesなしで動く |
-| CLI-002 | P0 | PASS | `apps/cli/src/cli/run.test.ts`、`scripts/pack-smoke.ts`（手順3） |  |
-| CLI-003 | P1 | PASS | `tests/integration/documents.test.ts`、`scripts/pack-smoke.ts`（手順4） |  |
-| CLI-004 | P1 | PASS | `tests/integration/documents.test.ts`、`scripts/pack-smoke.ts`（手順5） |  |
-| CLI-005 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| CLI-006 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| CLI-007 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| CLI-008 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| CLI-009 | P2 | PASS | `tests/integration/browser.test.ts` |  |
-| CLI-010 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| CLI-011 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| CLI-012 | P1 | PASS | `tests/integration/documents.test.ts` |  |
+| CLI-002 | P0 | PASS | `apps/cli/src/cli/run.test.ts`（CLI-002 help/version under both names (CLI itself)） | テストなし: 導入した`vde-open`と`vo`の、versionとhelpの出力が一致すること |
+| CLI-003 | P1 | PASS | `scripts/pack-smoke.ts`（手順4）、`apps/cli/src/cli/argv.test.ts`（delegates top-level file arguments to open） |  |
+| CLI-004 | P1 | PASS | `scripts/pack-smoke.ts`（手順5） |  |
+| CLI-005 | P1 | PASS | `apps/cli/src/cli/argv.test.ts`（delegates top-level file arguments to open）、`scripts/pack-smoke.ts`（空白と日本語を含むdirectoryへの導入、日本語の引数） | テストなし: 先頭がhyphenのfile名を`--`の後で開くこと、引数をshellの文字列として解釈しないこと |
+| CLI-006 | P1 | PASS | `scripts/pack-smoke.ts`（手順4の続き。Windows以外） | `--format`を明示したstdinを、遅れて書くpipeからEOFまで読み、同じkeyなら同じ文書を更新する。テストなし: Windowsでのstdinからの登録 |
+| CLI-007 | P1 | テストなし | なし | テストなし: stdinで`--format`がないとき、pathとstdinを同時に渡したときに、exit 2で何も登録しないこと |
+| CLI-008 | P1 | テストなし | なし | テストなし: 未知の拡張子を`auto`では拒否し、`--format`を明示したときだけ登録すること（重複として除いた引数を含む） |
+| CLI-009 | P2 | テストなし | なし | テストなし: `--open`・`--no-open`・`--json`・`ui`・`--focus`でのbrowserの起動と、表示する文書の切り替え。browserを開けなくても登録が成功し、警告を別に示すこと |
+| CLI-010 | P1 | PASS | `apps/cli/src/cli/run.test.ts`（an unknown option exits with 2 and writes nothing to stdout。`--target`） | テストなし: `--tag`と`--workspace`を個別に拒否すること（`--target`と同じ、未知のoptionの経路を通る） |
+| CLI-011 | P1 | PASS | `apps/cli/src/documents/service-concurrency.test.ts`（an open that fails for one document registers none） |  |
+| CLI-012 | P1 | PASS | `apps/cli/src/documents/service-concurrency.test.ts`（an open that fails for one document registers none） |  |
 | CLI-013 | P7 | PASS | `scripts/pack-smoke.ts`（手順6） | repoの外のcwdから同梱UIを配信する。cwdのfileと`.env`（`../`・encodeした`..`を含む）を配信しない |
-| CLI-014 | P7 | PASS | `scripts/pack-smoke.ts`、`README.md`（`vde-open`と`vo`）、`tests/docs/readme.test.ts` | 試験用のHOMEで導入し、shellの設定fileが増えない。既にある別の`vo`を変えない。READMEに名前の競合時の対処 |
+| CLI-014 | P7 | テストなし | なし | テストなし: 試験用のHOMEで導入したとき、shellの設定fileが変わらないこと、既にある別の`vo`を変えないこと。READMEに名前の競合時の対処があること |
 | CLI-015 | P7 | PASS | `scripts/pack-smoke.ts`（手順1） | packed package.jsonにinstall系のscriptと実行時の依存がない。導入先でbuildを求めない |
-| CLI-016 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| SYS-001 | P1 | PASS | `tests/integration/daemon.test.ts` |  |
-| SYS-002 | P2 | PASS | `tests/integration/browser.test.ts` | 既定のbrowser起動は、stdoutが端末である条件をCLIへ直接渡して検証（子processでは端末を再現できないため） |
-| SYS-003 | P5 | PASS | `tests/integration/feedback.test.ts`（再起動後も質問と回答が残る）、`tests/integration/daemon.test.ts` | 再起動後も管理APIを認証なしで利用できる |
+| CLI-016 | P1 | PASS | `apps/cli/src/cli/output.test.ts`（CLI-016 control characters in titles and paths） |  |
+| SYS-001 | P1 | PASS | `scripts/pack-smoke.ts`（手順7。停止の後の`daemon status`が`stopped`を返す） |  |
+| SYS-002 | P2 | テストなし | なし | テストなし: 端末から実行して新しくdaemonを起動したときだけ、flagなしでbrowserを開くこと、`--json`では開かないこと。browserを閉じてもdaemonが止まらないこと |
+| SYS-003 | P5 | PASS | `apps/cli/src/persistence/state-store.test.ts`（restores committed content after a restart）、`apps/cli/src/feedback/service.test.ts`（DOC-016 / SYS-014 close --all）、`tests/e2e/restart.spec.ts` | 再起動後も文書・質問・回答が残る。再起動後も管理APIを認証なしで利用できる（開いていたtabが同じURLで表示し直す） |
 | SYS-004 | P1 | PASS | `apps/cli/src/server/ipc.test.ts` |  |
 | SYS-005 | P1 | PASS | `apps/cli/src/server/ipc.test.ts` |  |
-| SYS-006 | P1 | PASS | `tests/integration/daemon.test.ts`、`apps/cli/src/daemon/lock.test.ts` |  |
-| SYS-007 | P1 | PASS | `tests/integration/daemon.test.ts`、`apps/cli/src/daemon/lock.test.ts` |  |
-| SYS-008 | P1 | PASS | `tests/integration/daemon.test.ts`、`apps/cli/src/daemon/secure-dir.test.ts` | Unixで検証。WindowsはDACLを検証しておらず、種別の確認だけ（実機では未検証） |
-| SYS-009 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`（commitの途中でのprocessの停止）、`apps/cli/src/persistence/state-store.test.ts` | 子processで、送信と、質問だけの質問の作成を行い、commitのfile操作ごとに、その直前で後始末をせずにkillする。送信はmetadataのrenameとdirectoryのsyncの前後、作成はblobの作成の直後（blobのrenameの後、directoryのsyncの前）も含む。復元後は旧か新の整合したstateで、半分だけ確定した回答や、blobのない質問はない |
+| SYS-006 | P1 | PASS | `apps/cli/src/daemon/lock.test.ts`、`apps/cli/src/doctor/doctor.test.ts`（SYS-006 a lock whose owner is alive (a running daemon)） |  |
+| SYS-007 | P1 | PASS | `apps/cli/src/daemon/lock.test.ts`（SYS-006 / SYS-007 owner liveness check、takeover from a dead owner） | テストなし: 止まった持ち主が残したsocketのfileと古いruntimeのpointerを片付けて起動すること、runtimeのdirectoryがなくても古いIPCの鍵を直すこと |
+| SYS-008 | P1 | PASS | `apps/cli/src/daemon/secure-dir.test.ts`、`apps/cli/src/daemon/main.test.ts`（SYS-008 insecure state root and runtime）、`apps/cli/src/doctor/doctor.test.ts`（SYS-008 a state root that is a symlink） | Unixで検証。WindowsはDACLを検証しておらず、種別の確認だけ（実機では未検証） |
+| SYS-009 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`（SYS-009 process killed during a commit、file operation failures during the submit commit）、`apps/cli/src/persistence/state-store.test.ts` | 子processで質問の作成を行い、commitのfile操作ごとに、その直前で後始末をせずにkillする（blobの作成の直後、blobのrenameの後、directoryのsyncの前も含む）。送信は、commitのfile操作ごとに失敗を注入し、開き直して確かめる。復元後は旧か新の整合したstateで、半分だけ確定した回答や、blobのない質問はない |
 | SYS-010 | P1 | PASS | `apps/cli/src/persistence/state-store.test.ts`、`apps/cli/src/daemon/main.test.ts` |  |
-| SYS-011 | P1 | PASS | `tests/integration/daemon.test.ts`、`apps/cli/src/persistence/state-store.test.ts` |  |
-| SYS-012 | P1 | PASS | `tests/integration/daemon.test.ts` |  |
-| SYS-013 | P5 | PASS | `tests/integration/feedback.test.ts`（daemonの停止・再起動と待機）、`apps/cli/src/cli/wait-for-answer.test.ts`、`tests/integration/http.test.ts`（SSE）、`apps/web/src/components/workspace.dom.test.tsx` | 待機は最初の期限の範囲で接続し直す。接続にかかる時間も期限に含め、期限は延ばさない。期限の後に起動の待ちが残らず、CLIのprocessが期限の直後に終わる（起動lockを別のprocessが持つ状態で計測）。管理UIは再接続・連番の欠けで一覧と質問を取り直す |
-| SYS-014 | P5 | PASS | `tests/integration/feedback.test.ts`（同時の操作） | 回答案の保存・2つの送信・並べ替え・closeを同時に実行し、送信は1回だけ、再起動後も整合。質問の文書のcloseと送信を、順番を入れ替えて同時に実行し、確定か中止（`document_closed`）のどちらか一方だけになる |
+| SYS-011 | P1 | PASS | `apps/cli/src/persistence/state-store.test.ts`、`apps/cli/src/doctor/doctor.test.ts`（SYS-011 / SYS-012 doctor and repair of the state） |  |
+| SYS-012 | P1 | PASS | `apps/cli/src/doctor/doctor.test.ts`（SYS-011 / SYS-012 doctor and repair of the state、SYS-006 a lock whose owner is alive (a running daemon)）、`apps/cli/src/cli/run.test.ts`（SYS-012 doctor --repair） |  |
+| SYS-013 | P5 | PASS | `apps/cli/src/cli/wait-for-answer.test.ts`、`apps/cli/src/server/http/management.test.ts`（PERF-004 connections that do not read notifications。認証なしの接続がhelloと変更の通知を受け取る）、`apps/web/src/components/workspace.dom.test.tsx` | 待機は最初の期限の範囲で接続し直す。接続にかかる時間も期限に含め、期限は延ばさない。管理UIは再接続・連番の欠けで一覧と質問を取り直す。テストなし: daemonの起動を待っている間に期限が来ても、CLIのprocessが期限の直後に終わること。daemonの停止で接続中の通知のstreamが終わること |
+| SYS-014 | P5 | PASS | `apps/cli/src/persistence/state-store.test.ts`（commits concurrently requested changes one at a time in order）、`apps/cli/src/feedback/service.test.ts`（FB-012 / FB-013 / FB-014 submit、DOC-016 / SYS-014 close --all）、`apps/cli/src/server/http/feedback-http.test.ts`（FB-013 disconnect during submit and resend） | 変更は1つずつ順にcommitし、確定後の送信と、確認の後に回答案が変わった送信を拒否する。同じ送信IDの再送でも確定は1回。closeの後の送信は`E_REQUEST_NOT_PENDING`で、送信済みの回答はcloseと再起動の後も残る。テストなし: 回答案の保存・送信・並べ替え・closeを実際に同時に実行し、再起動の後も整合すること |
 | SYS-015 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`（保存容量の上限と固定した版） | 上限は試験用に小さくした（`StateStore`の`blobStoreBytes`） |
-| SYS-016 | P1 | PASS | `tests/integration/daemon.test.ts` |  |
-| DOC-001 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| DOC-002 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| DOC-003 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| DOC-004 | P2 | PASS | `tests/integration/watch.test.ts` |  |
-| DOC-005 | P2 | PASS | `tests/integration/watch.test.ts` |  |
-| DOC-006 | P2 | PASS | `tests/integration/watch.test.ts` |  |
-| DOC-007 | P2 | PASS | `apps/web/src/lib/tree.test.ts`、`tests/e2e/workspace.spec.ts`、`tests/e2e/repository.spec.ts` | 2026-10-05: Treeの最上位をrepoにした（同じ名前の`docs/a.md`はrepoかpathで分かれる） |
-| DOC-008 | P2 | PASS | `tests/integration/http.test.ts`、`tests/e2e/workspace.spec.ts` |  |
-| DOC-009 | P2 | PASS | `tests/integration/watch.test.ts`、`tests/e2e/viewer.spec.ts` |  |
+| SYS-016 | P1 | テストなし | なし | テストなし: 別のhomeが別のdaemonとstateを使い、互いに影響しないこと |
+| DOC-001 | P1 | PASS | `apps/cli/src/documents/service-repository.test.ts`（does not change the catalog version when nothing about repositories changes。同じfileを2回開く）、`scripts/pack-smoke.ts`（手順5） | テストなし: symlinkを通して開いた同じfileを1件にまとめること |
+| DOC-002 | P1 | テストなし | なし | テストなし: 明示したsymlinkの向き先を変えても、新しい向き先を自動では読まず、開き直したときに登録すること |
+| DOC-003 | P1 | テストなし | なし | テストなし: directoryは直下だけ、`-R`で再帰し、隠しfile・除外するdirectory・symlinkを飛ばすこと。quoteしたglobが再帰の指定になること。一致がないときに何も登録しないこと |
+| DOC-004 | P2 | PASS | `apps/cli/src/watch/watch-service.test.ts`（comparing file state with the saved content）、`apps/cli/src/documents/service-concurrency.test.ts`（registration of new documents by watch rules） | テストなし: 実際のfile監視の通知から、`--watch`を付けたdirectoryやglobに現れた文書を登録すること（登録の処理は直接呼んで確かめる） |
+| DOC-005 | P2 | テストなし | なし | テストなし: 閉じた文書が再走査と再起動で戻らず、明示して開けば戻ること。ruleを外すと監視だけが止まり、文書は残ること |
+| DOC-006 | P2 | テストなし | なし | テストなし: 閉じた文書が再走査と再起動で戻らず、明示して開けば戻ること。ruleを外すと監視だけが止まり、文書は残ること |
+| DOC-007 | P2 | PASS | `apps/web/src/lib/tree.test.ts`、`tests/e2e/repository.spec.ts` | 2026-10-05: Treeの最上位をrepoにした（同じ名前の`docs/a.md`はrepoかpathで分かれる） |
+| DOC-008 | P2 | PASS | `tests/e2e/sidebar-drag.spec.ts`（drag previews the exact insertion position, saves on drop, and has no move buttons、dragging from the location reorders without selecting the document）、`tests/e2e/workspace.spec.ts`（closing the displayed document returns to the last document opened, regardless of sidebar order） |  |
+| DOC-009 | P2 | PASS | `tests/e2e/images.spec.ts`（fits large images, shows original dimensions, and follows automatic updates）、`apps/cli/src/documents/service-concurrency.test.ts`（ordering of "read then publish" for the same file） | renameで保存した変更を自動で反映し、後から読んだ内容を最後に反映する。テストなし: 削除の直後の作り直しと、続けての追記の後に、最後の内容を反映すること。fileが消えた間の状態の表示と、戻ったときの回復 |
 | DOC-010 | P2 | PASS | `apps/cli/src/documents/service-analysis.test.ts` |  |
-| DOC-011 | P3 | PASS | `tests/integration/preview.test.ts` |  |
-| DOC-012 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
+| DOC-011 | P3 | PASS | `apps/cli/src/documents/revision.test.ts` | テストなし: 前の版を指定したとき、その版のassetで表示すること |
+| DOC-012 | P4 | PASS | `apps/cli/src/search/search-service.test.ts`（SRCH-015 / DOC-012 no searchable documents、SRCH-015 search while the index has not caught up） | テストなし: 読めなくなった文書の古い内容を、今の検索結果として返さないこと |
 | DOC-013 | P2 | PASS | `tests/e2e/workspace.spec.ts` |  |
-| DOC-014 | P2 | PASS | `tests/e2e/workspace.spec.ts`、`tests/e2e/viewer.spec.ts` |  |
-| DOC-015 | P1 | PASS | `tests/integration/documents.test.ts` |  |
-| DOC-016 | P5 | PASS | `tests/integration/feedback.test.ts`（close --all）、`tests/integration/watch.test.ts` | 回答の履歴と原本は残り、回答待ちは中止になる |
-| DOC-017 | 追加 | PASS | `apps/cli/src/documents/repository.test.ts`、`apps/cli/src/documents/service-repository.test.ts`、`tests/integration/documents.test.ts`（DOC-017）、`apps/web/src/lib/tree.test.ts`、`apps/web/src/lib/repository-labels.test.ts`、`packages/shared/src/repository-labels.test.ts`、`apps/web/src/components/sidebar.dom.test.tsx`、`tests/e2e/repository.spec.ts` | 各文書の`repository`（通常のrepo、vwのworktree、相対path、bare、submodule、`.git`の中、repoの外、reftable）。同じcheckoutはbranchを共有し、変わるとcatalogVersionが上がる。古い判定で巻き戻らない。再起動直後の一覧に入る。Flatの2行目、Treeのrepoとworktree、180px・260px・drawerでrepo名と拡張子が切れない、focusと位置の保持、viewerのheader、形式の色 |
-| SRCH-001 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-index.test.ts` |  |
-| SRCH-002 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-index.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
-| SRCH-003 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`、`apps/cli/src/search/tokenize.test.ts`、`tests/integration/search.test.ts` |  |
-| SRCH-004 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`、`tests/integration/search.test.ts` |  |
+| DOC-014 | P2 | PASS | `tests/e2e/workspace.spec.ts` |  |
+| DOC-015 | P1 | テストなし | なし | テストなし: FIFOとdeviceを待たずに拒否すること。binary・NUL・不正なUTF-8を拒否し、元のfileを変えないこと |
+| DOC-016 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`（DOC-016 / SYS-014 close --all） | 回答の履歴と原本は残り、回答待ちは中止になる。テストなし: close --allで監視ruleも消えること |
+| DOC-017 | 追加 | PASS | `apps/cli/src/documents/repository.test.ts`、`apps/cli/src/documents/service-repository.test.ts`、`apps/web/src/lib/tree.test.ts`、`apps/web/src/lib/repository-labels.test.ts`、`packages/shared/src/repository-labels.test.ts`、`apps/web/src/components/sidebar.dom.test.tsx`、`tests/e2e/repository.spec.ts` | 各文書の`repository`（通常のrepo、vwのworktree、相対path、bare、submodule、`.git`の中、repoの外、reftable）。同じcheckoutはbranchを共有し、変わるとcatalogVersionが上がる。古い判定で巻き戻らない。再起動直後の一覧に入る。Flatの2行目、Treeのrepoとworktree、180px・260px・drawerでrepo名と拡張子が切れない、focusと位置の保持、viewerのheader、形式の色 |
+| SRCH-001 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`、`apps/cli/src/search/search-service.test.ts`（SRCH-001 documents closed during indexing） |  |
+| SRCH-002 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
+| SRCH-003 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`、`apps/cli/src/search/tokenize.test.ts` |  |
+| SRCH-004 | P4 | PASS | `apps/cli/src/search/search-index.test.ts` |  |
 | SRCH-005 | P4 | PASS | `apps/cli/src/search/search-index.test.ts` |  |
 | SRCH-006 | P4 | PASS | `apps/cli/src/search/search-index.test.ts` |  |
-| SRCH-007 | P4 | PASS | `tests/integration/search.test.ts` |  |
-| SRCH-008 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
-| SRCH-009 | P4 | PASS | `tests/integration/search.test.ts`、`apps/cli/src/documents/cursor.test.ts` |  |
-| SRCH-010 | P4 | PASS | `tests/integration/search.test.ts` |  |
-| SRCH-011 | P4 | PASS | `tests/integration/search.test.ts`、`packages/document/src/source-lines.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
-| SRCH-012 | P4 | PASS | `tests/integration/search.test.ts` |  |
-| SRCH-013 | P4 | PASS | `tests/integration/search.test.ts`、`packages/document/src/analysis.test.ts` |  |
-| SRCH-014 | P4 | PASS | `packages/document/src/analysis.test.ts`、`tests/integration/search.test.ts` |  |
-| SRCH-015 | P4 | PASS | `apps/cli/src/search/search-service.test.ts`、`tests/integration/search.test.ts` |  |
-| SRCH-016 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`、`tests/integration/search.test.ts` |  |
+| SRCH-007 | P4 | PASS | `apps/cli/src/documents/service-analysis.test.ts`（DOC-010 late analysis result of an old revision。更新の後も前の版を指定して読める）、`apps/cli/src/search/search-index.test.ts`（SRCH-001 / SRCH-002 target documents） | テストなし: 検索結果のsectionを、hitの版を指定して読むこと |
+| SRCH-008 | P4 | PASS | `apps/cli/src/search/search-service.test.ts`（SRCH-008 cursors and changes in searchable documents）、`apps/cli/src/documents/cursor.test.ts` |  |
+| SRCH-009 | P4 | PASS | `apps/cli/src/documents/cursor.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
+| SRCH-010 | P4 | PASS | `packages/document/src/source-lines.test.ts`（truncation at code point boundaries） | 長い1行を文字の途中で切らずに分け、続きからつなぐと原文に戻ることを、関数で確かめる。テストなし: `read`の`--max-bytes`とcursorでつないだ結果が原文と一致すること。outlineと検索結果を、要素の途中で分けずに続けること |
+| SRCH-011 | P4 | PASS | `packages/document/src/source-lines.test.ts`、`apps/cli/src/search/search-service.test.ts` |  |
+| SRCH-012 | P4 | PASS | `apps/cli/src/search/search-index.test.ts`（SRCH-016 excerpts。hitの`sourceRange`がnull） |  |
+| SRCH-013 | P4 | PASS | `packages/document/src/analysis.test.ts` |  |
+| SRCH-014 | P4 | PASS | `packages/document/src/analysis.test.ts` |  |
+| SRCH-015 | P4 | PASS | `apps/cli/src/search/search-service.test.ts` | テストなし: 読めなくなった文書の古い内容を、今の検索結果として返さないこと |
+| SRCH-016 | P4 | PASS | `apps/cli/src/search/search-index.test.ts` |  |
 | MD-001 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
 | MD-002 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
 | MD-003 | P2 | PASS | `packages/document/tests/react.test.tsx`、`tests/e2e/viewer.spec.ts` |  |
 | MD-004 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
 | MD-005 | P2 | PASS | `packages/document/tests/react.test.tsx` |  |
 | MD-006 | P2 | PASS | `packages/document/src/analysis.test.ts`、`apps/cli/src/workers/parse-service.test.ts`、`tests/e2e/workspace.spec.ts` |  |
-| SEC-001 | P2 | 廃止 | `tests/integration/http.test.ts`、`tests/e2e/viewer.spec.ts` | ADR-0014で認証を撤去。直接URLを開けることを検証する |
-| SEC-002 | P2 | PASS | `tests/integration/http.test.ts` |  |
-| SEC-003 | P2 | 廃止 | `tests/integration/http.test.ts`、`tests/e2e/viewer.spec.ts` | 一回限りのticketを撤去。繰り返し利用できるURLを検証する |
-| SEC-004 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/e2e/html.spec.ts`、`tests/integration/preview.test.ts` | scriptを動かす表示のiframeから、管理画面のDOM・sessionStorage・localStorage・cookie・管理APIに触れられない。`allow-same-origin`なし。staticでの検証はP3 |
+| SEC-001 | P2 | 廃止 | `tests/e2e/viewer.spec.ts`、`tests/e2e/restart.spec.ts` | ADR-0014で認証を撤去。直接URLを開けることを検証する |
+| SEC-002 | P2 | PASS | `apps/cli/src/server/http/management.test.ts`（SEC-002 Origin and Host checks）、`tests/e2e/release.spec.ts` | テストなし: 未知のAPIにUIのHTMLを返さないこと |
+| SEC-003 | P2 | 廃止 | `tests/e2e/viewer.spec.ts` | 一回限りのticketを撤去。繰り返し利用できるURLを検証する |
+| SEC-004 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/e2e/html.spec.ts` | scriptを動かす表示のiframeから、管理画面のDOM・sessionStorage・localStorage・cookie・管理APIに触れられない。`allow-same-origin`なし。staticでの検証はP3 |
 | SEC-005 | P3 | PASS | `packages/document/src/html-static.test.ts`、`tests/e2e/html.spec.ts` |  |
 | SEC-006 | P3 | PASS | `packages/document/src/html-static.test.ts`、`tests/e2e/html.spec.ts` | 外部への要求は、browserのrequestと、記録用のserverの両方で0件を確認 |
-| SEC-007 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/integration/preview.test.ts` | `--asset`で登録したJSON（inline scriptの`fetch('./data.json')`）とmodule（inline moduleの相対import）を読める。未登録の相対pathは404。管理APIと外部へのfetchはCSPの`connect-src`で拒否 |
+| SEC-007 | P6 | PASS | `tests/e2e/interactive.spec.ts` | `--asset`で登録したJSON（inline scriptの`fetch('./data.json')`）とmodule（inline moduleの相対import）を読める。未登録の相対pathは404。管理APIと外部へのfetchはCSPの`connect-src`で拒否 |
 | SEC-008 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`packages/document/src/html-static.test.ts` | popup・上位の画面の移動・formの送信・download・worker（data:・blob:）が起きない。iframe自身の遷移までは止めない（仕様10.1） |
-| SEC-009 | P3 | PASS | `packages/document/src/references.test.ts`、`tests/integration/preview.test.ts` |  |
-| SEC-010 | P3 | PASS | `tests/integration/preview.test.ts` |  |
-| SEC-011 | P3 | PASS | `tests/integration/preview.test.ts` | 別のprocessが同時にpathを差し替える攻撃までは防いでいない |
-| SEC-012 | P3 | PASS | `packages/document/src/css-transform.test.ts`、`tests/integration/preview.test.ts` | 外部への通信は、応答のpolicy（CSP）でも止める。変換は、それに頼らずに取り除く |
-| SEC-013 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/integration/preview.test.ts`、`apps/cli/src/render/render-service.test.ts` | 未登録のmoduleのimportは404で、rootを公開しない。読み込もうとしたfileを表示ごとに記録し、管理UIで`--asset`での登録を案内する |
-| SEC-014 | P3 | PASS | `tests/integration/preview.test.ts` |  |
-| SEC-015 | P3 | PASS | `tests/integration/preview.test.ts`、`apps/cli/src/render/render-service.test.ts`、`apps/web/src/lib/use-render-grant.dom.test.tsx`、`tests/e2e/html.spec.ts` | UIが権限を返す順序についての最後の修正は、commit後の再レビューで指摘なし |
-| SEC-016 | P3 | PASS | `tests/integration/preview.test.ts` |  |
-| SEC-017 | P3 | PASS | `tests/integration/preview.test.ts` |  |
-| SEC-018 | P5 | PASS | `tests/integration/feedback.test.ts`（log）、`tests/integration/daemon.test.ts`、`tests/integration/preview.test.ts`、`tests/integration/http.test.ts` | 回答・回答案・質問のtitle・表示の権限がlogにない |
-| SEC-019 | P3 | PASS | `tests/integration/preview.test.ts`、`tests/e2e/html.spec.ts` |  |
-| SEC-020 | P3 | PASS | `tests/e2e/release.spec.ts` | 配布物（`apps/cli/dist`）を対象に確認 |
-| SEC-021 | 追加 | PASS | `apps/cli/src/documents/repository.test.ts` | Gitのmetadataを信頼できない入力として読む: FIFOの`HEAD`で止まらない、4KiBを超えると読まない、読むfileは`.git`・`commondir`・`HEAD`・`gitdir`だけ、他のworktreeの管理directoryを指す`.git`ファイルと`cp -r`で複製したworktreeは`unresolved`、他のrepoの`.git`へのsymlinkと他のworktreeの`.git`ファイルへのsymlinkはそのrepoに入らない、WindowsのUNC・device pathにfilesystemの処理をしない |
+| SEC-009 | P3 | PASS | `packages/document/src/references.test.ts`、`apps/cli/src/render/render-service.test.ts`（records and reports loads of unregistered files per view） | テストなし: 存在しない・対応外の`--asset`を拒否し、何も登録しないこと |
+| SEC-010 | P3 | PASS | `apps/cli/src/render/render-service.test.ts`、`tests/e2e/interactive.spec.ts`（SEC-007 / SEC-013）、`packages/document/src/references.test.ts` |  |
+| SEC-011 | P3 | PASS | `apps/cli/src/assets/asset-reader.test.ts`（SEC-011 reaching outside the root via symlinks） | 別のprocessが同時にpathを差し替える攻撃までは防いでいない。テストなし: 登録の後にdirectoryをrootの外へ差し替えても、外のfileを読まないこと |
+| SEC-012 | P3 | PASS | `packages/document/src/css-transform.test.ts`、`packages/document/src/html-static.test.ts`（keeps only registered assets） | 外部への通信は、応答のpolicy（CSP）でも止める。変換は、それに頼らずに取り除く。テストなし: 互いにimportするCSSでも登録が終わること、CSSのimportの深さの上限 |
+| SEC-013 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/cli/src/render/render-service.test.ts` | 未登録のmoduleのimportは404で、rootを公開しない。読み込もうとしたfileを表示ごとに記録し、管理UIで`--asset`での登録を案内する |
+| SEC-014 | P3 | PASS | `apps/cli/src/server/http/preview.test.ts`（SEC-014 / SEC-016 / SEC-017 the preview listener）、`packages/document/src/html-static.test.ts`（SEC-005 removal of executed content） |  |
+| SEC-015 | P3 | PASS | `apps/cli/src/render/render-service.test.ts`、`apps/web/src/lib/use-render-grant.dom.test.tsx`、`tests/e2e/html.spec.ts` | UIが権限を返す順序についての最後の修正は、commit後の再レビューで指摘なし。テストなし: 表示の権限が、発行したときの版だけを配信すること |
+| SEC-016 | P3 | PASS | `apps/cli/src/server/http/preview.test.ts`（SEC-014 / SEC-016 / SEC-017 the preview listener）、`tests/e2e/html.spec.ts`（SEC-004 (partial): the Static render response allows only the app relay script） | テストなし: fontなどのassetだけに読み込みの許可を付け、文書には付けないこと |
+| SEC-017 | P3 | PASS | `apps/cli/src/server/http/preview.test.ts`（SEC-014 / SEC-016 / SEC-017 the preview listener）、`tests/e2e/html.spec.ts`（SEC-004 (partial): the Static render response allows only the app relay script） | テストなし: fontなどのassetだけに読み込みの許可を付け、文書には付けないこと |
+| SEC-018 | P5 | PASS | `apps/cli/src/daemon/main.test.ts`（SEC-018 daemon log）、`apps/cli/src/server/http/preview.test.ts`（SEC-014 / SEC-016 / SEC-017 the preview listener） | daemonのlogに本文・title・path・文書のkey・IPCの鍵がなく、表示用のlistenerのlogに表示の権限とpathがない。テストなし: 回答と回答案を扱う操作の後のlogに、回答・回答案・質問のtitleがないこと |
+| SEC-019 | P3 | PASS | `apps/cli/src/documents/service-links.test.ts`（SEC-019 opening documents from links in a document）、`tests/e2e/html.spec.ts` | テストなし: 確認の後にassets-rootが変わって行き先が変わったら、確認し直すこと |
+| SEC-020 | P3 | PASS | `tests/e2e/release.spec.ts` | 配布物（`apps/cli/dist`）を対象に確認。2026-11-19からChromiumだけで流す |
+| SEC-021 | 追加 | PASS | `apps/cli/src/documents/repository.test.ts` | Gitのmetadataを信頼できない入力として読む: FIFOの`HEAD`で止まらない、4KiBを超えると読まない、読むfileは`.git`・`commondir`・`HEAD`・`gitdir`だけ、他のworktreeの管理directoryを指す`.git`ファイル（`cp -r`で複製したworktreeもこの形になる）は`unresolved`、他のrepoの`.git`へのsymlinkと他のworktreeの`.git`ファイルへのsymlinkはそのrepoに入らない、WindowsのUNC・device pathにfilesystemの処理をしない |
 | FB-001 | P5 | PASS | `tests/e2e/feedback.spec.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx` | 回答案の保存の応答と再取得の順番、空の回答の明示 |
-| FB-002 | P5 | PASS | `packages/shared/src/feedback.test.ts`、`apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` | Zodのrecordが`__proto__`を黙って捨てるので、JSONの読み込みで拒否する（ADR-0011） |
-| FB-003 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`packages/shared/src/feedback.test.ts`、`apps/web/src/lib/bridge-host.test.ts` | 質問定義と回答案がともに最大に近い大きさ（日本語で各60KiB程度）でも、SDKのready（2回）とupdateDraftが成立する。64KiBを超える回答案、Date・undefined・非有限の数などの値は、変換せずに拒否 |
-| FB-004 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
-| FB-005 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
-| FB-006 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
+| FB-002 | P5 | PASS | `packages/shared/src/feedback.test.ts`、`apps/cli/src/feedback/service.test.ts`、`apps/cli/src/server/http/feedback-http.test.ts`（FB-004 / FB-019 draft answers from the management API） | Zodのrecordが`__proto__`を黙って捨てるので、JSONの読み込みで拒否する（ADR-0011） |
+| FB-003 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`packages/shared/src/feedback.test.ts`、`apps/web/src/lib/bridge-host.test.ts` | 質問定義と回答案がともに最大に近い大きさ（日本語で各60KiB程度）でも、SDKのready（2回）とupdateDraftが成立する。64KiBを超える回答案、Date・undefinedなどの値は、変換せずに拒否。テストなし: 非有限の数（NaN・Infinity）を管理UIの側で拒否すること |
+| FB-004 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`apps/cli/src/server/http/feedback-http.test.ts`（FB-004 / FB-019 draft answers from the management API） |  |
+| FB-005 | P5 | PASS | `apps/cli/src/feedback/service.test.ts` |  |
+| FB-006 | P5 | PASS | `apps/cli/src/feedback/service.test.ts` |  |
 | FB-007 | P6 | PASS | `tests/e2e/interactive.spec.ts` | HTMLのupdateDraft→回答panelでの送信→CLIのwaitで、回答・質問・版・submissionが一致する |
-| FB-008 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/web/src/lib/bridge-host.test.ts` | HTMLが横取りしたportから送ったsubmit・ack・cancel・search・read・open・confirmOlderRevisionは`E_METHOD_NOT_ALLOWED`。質問は回答待ちのまま |
-| FB-009 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/web/src/lib/bridge-host.test.ts`、`tests/integration/preview.test.ts`、`apps/cli/src/render/render-service.test.ts` | portは表示したiframe（`event.source`で確認）へ1回だけ渡す。管理UIのwindowからの要求、読み直した後の要求には渡さない。古いinstanceのframeは通信を終える。原文の表示へ切り替えたら通信を終え、プレビューへ戻ったら新しい表示として始める。表示の権限の返却・失効の後は、daemonがHTMLからの操作を拒否し、通信を終える |
-| FB-010 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/web/src/lib/bridge-host.test.ts` | 形の違うframe、128KiBを超えるframe、1秒に20件を超えるframeで通信を終え、管理UIからの回答とdaemonは動き続ける |
+| FB-008 | P6 | PASS | `apps/web/src/lib/bridge-host.test.ts`（FB-008 operations allowed from the HTML） | HTMLから送ったsubmit・ack・cancel・search・read・open・confirmOlderRevisionは`E_METHOD_NOT_ALLOWED`で、hostは何も呼ばない。テストなし: 実際のbrowserで、HTMLが横取りしたportからこれらを送り、質問が回答待ちのまま残ること |
+| FB-009 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/web/src/lib/bridge-host.test.ts`、`apps/cli/src/render/render-service.test.ts`、`apps/cli/src/server/http/feedback-http.test.ts`（11.7 saving a draft answer from the HTML, and grant expiry while waiting） | portは表示したiframe（`event.source`で確認）へ1回だけ渡す。管理UIのwindowからの要求、読み直した後の要求には渡さない。古いinstanceのframeは通信を終える。原文の表示へ切り替えたら通信を終え、プレビューへ戻ったら新しい表示として始める。表示の権限の返却・失効の後は、daemonがHTMLからの操作を拒否し、通信を終える |
+| FB-010 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/web/src/lib/bridge-host.test.ts` | 形の違うframeで通信を終え、管理UIからの回答とdaemonは動き続ける（e2e）。128KiBを超えるframeと、1秒に20件を超えるframeで通信を終えることは`apps/web/src/lib/bridge-host.test.ts`で確かめる |
 | FB-011 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/web/src/lib/bridge-host.test.ts`、`apps/cli/src/feedback/service.test.ts` | 別の画面の更新をHTMLが`onDraftChanged`で受け取った後でも、古い`baseDraftVersion`でのupdateDraftは`E_DRAFT_CONFLICT`で、上書きしない。SDKは版を読み替えない |
 | FB-012 | P5 | PASS | `apps/cli/src/feedback/service.test.ts` |  |
 | FB-013 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`apps/cli/src/server/http/feedback-http.test.ts` | commitの途中で管理APIの接続を切り、同じ送信IDで再送しても1回だけ確定する。保存できなかった送信には成功を返さず、回答待ちのまま |
 | FB-014 | P5 | PASS | `apps/cli/src/feedback/service.test.ts` |  |
-| FB-015 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/e2e/feedback.spec.ts`、`apps/web/src/components/workspace.dom.test.tsx`、`apps/cli/src/render/render-service.test.ts`、`tests/integration/preview.test.ts` | 質問の間にHTMLとCSSが更新されても、質問の版（scriptとCSSを含む）を表示し続け、新しい版の警告を出す。SDKに旧版の確認はない。質問の表示方法は質問に固定し、staticで作った質問は、後から許可してもscriptを動かさない |
-| FB-016 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/cli/src/feedback/service.test.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx` | 旧版の確認は回答panelだけで行い、確認した版を送る。確認後に版が変われば確認し直し |
-| FB-017 | P5 | PASS | `tests/integration/feedback.test.ts`、`apps/cli/src/feedback/service.test.ts` | CLI待機の中断・時間切れで質問がpendingのまま残ることを確認 |
-| FB-018 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts`、`tests/e2e/feedback.spec.ts` |  |
-| FB-019 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts`、`tests/e2e/feedback.spec.ts` |  |
-| FB-020 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
-| FB-021 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/integration/feedback.test.ts` |  |
-| FB-022 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/integration/preview.test.ts`、`apps/cli/src/documents/service-html-mode.test.ts`、`apps/cli/src/render/render-service.test.ts` | 再起動の後、確定・回答待ちの内容は残る。前の画面のportからは回答案を変えられない。scriptの実行は、管理UIで許可し直すまで静的表示。許可し直しても、前の許可で発行した表示は戻らない |
+| FB-015 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`tests/e2e/feedback.spec.ts`、`apps/web/src/components/workspace.dom.test.tsx`、`apps/cli/src/render/render-service.test.ts` | 質問の間にHTMLとCSSが更新されても、質問の版（scriptとCSSを含む）を表示し続け、新しい版の警告を出す。SDKに旧版の確認はない。質問の表示方法は質問に固定し、staticで作った質問は、後から許可してもscriptを動かさない |
+| FB-016 | P6 | PASS | `tests/e2e/feedback.spec.ts`、`apps/cli/src/feedback/service.test.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx`、`tests/e2e/interactive.spec.ts`（SDKに旧版の確認がないこと） | 旧版の確認は回答panelだけで行い、確認した版を送る。確認後に版が変われば確認し直し |
+| FB-017 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`apps/cli/src/cli/wait-for-answer.test.ts` | CLI待機の中断・時間切れで質問がpendingのまま残ることを確認 |
+| FB-018 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`tests/e2e/feedback.spec.ts` |  |
+| FB-019 | P5 | PASS | `apps/cli/src/feedback/service.test.ts`、`apps/cli/src/server/http/feedback-http.test.ts`（FB-004 / FB-019 draft answers from the management API）、`tests/e2e/feedback.spec.ts` |  |
+| FB-020 | P5 | PASS | `apps/cli/src/feedback/service.test.ts` |  |
+| FB-021 | P5 | PASS | `apps/cli/src/feedback/service.test.ts` |  |
+| FB-022 | P6 | PASS | `tests/e2e/interactive.spec.ts`、`apps/cli/src/documents/service-html-mode.test.ts`、`apps/cli/src/render/render-service.test.ts` | 再起動の後、確定・回答待ちの内容は残る。前の画面のportからは回答案を変えられない。scriptの実行は、管理UIで許可し直すまで静的表示。許可し直しても、前の許可で発行した表示は戻らない |
 | UX-001 | P7 | PASS | `tests/e2e/ux.spec.ts`（UX-001 / UX-002）、`tests/e2e/feedback.spec.ts` | keyboardだけで検索・文書の移動・選択肢・入力・送信ができる。button・入力欄に名前とlabelがある |
 | UX-002 | P7 | PASS | `tests/e2e/ux.spec.ts`、`apps/web/src/components/search-dialog.dom.test.tsx`、`apps/web/src/components/workspace.dom.test.tsx` | `Cmd/Ctrl+K`で検索を開き、開いている文書だけを探す。Escapeで閉じるとfocusが戻る。入力欄の文字を奪わない（変換中のkeyは入力欄へ渡す。single-keyの操作は設けていない）。結果の版が表示中の版と違うとき、表示する版を読み込めないときは移動せず、理由を示す。コード・文書のpath・文書のIDをcopyできる（仕様13.2） |
 | UX-003 | P7 | PASS | `tests/e2e/ux.spec.ts` | 900px未満では一覧をdrawerにし、表示と回答panelを縦に並べる。375px幅でpageが横にはみ出さず、headerの操作は画面の中にある。全面を覆う要素を持つ巨大なHTMLでも、送信buttonは表示の外にあり押せる |
-| UX-004 | P7 | PASS | `tests/e2e/ux.spec.ts`、`tests/e2e/workspace.spec.ts` | 配色はreloadの後も残り、CLIで閉じた文書は一覧に出ない |
-| UX-005 | P7 | PASS | `tests/e2e/ux.spec.ts`、`tests/e2e/html.spec.ts`、`tests/e2e/interactive.spec.ts`、`apps/web/src/lib/diagnostics.ts` | 外部のURL・script・未登録のfileを、対象・理由・対処とともに示す。許可を広げるbuttonはない |
+| UX-004 | P7 | PASS | `tests/e2e/themes.spec.ts`、`tests/e2e/workspace.spec.ts` | 配色はreloadの後も残り、CLIで閉じた文書は一覧に出ない |
+| UX-005 | P7 | PASS | `tests/e2e/html.spec.ts`（P3 gate / SEC-005の診断のdialog）、`tests/e2e/interactive.spec.ts`、`apps/web/src/lib/diagnostics.ts` | 外部のURL・script・未登録のfileを、対象・理由・対処とともに示す。テストなし: 許可を広げるbuttonがないこと |
 | UX-006 | P7 | PASS | `tests/e2e/feedback.spec.ts`、`apps/web/src/components/feedback-panel.dom.test.tsx`、`apps/cli/src/feedback/service.test.ts`、`apps/cli/src/server/http/feedback-http.test.ts` | 保存中・保存済み・送信済み・取得済みを別に表示する。保存に失敗した送信を成功として表示しない |
-| UX-007 | P7 | PASS | `tests/docs/readme.test.ts`、`apps/cli/src/cli/run.test.ts`（CLI-010） | READMEとAgent向けの資料とhelpに、group・tag・`--target`の名残がない。停止・保存先・検索の範囲・HTMLの制限を説明する |
-| UX-008 | P7 | PASS | `tests/docs/readme.test.ts`、`README.md`（検証した範囲） | 検証したOS（macOS）・browser（Chromiumは全件、Firefox・WebKitはsecurity・bridge）と、未検証（Linux・Windows、Firefox・WebKitのそれ以外の画面操作）を分けて書く |
+| UX-007 | P7 | PASS | `tests/docs/readme.test.ts`（UX-007 agent skill）、`apps/cli/src/cli/run.test.ts`（an unknown option exits with 2 and writes nothing to stdout。`--target`） | Agent向けのskillにnameとdescriptionがある。テストなし: README・Agent向けの資料・helpに、group・tag・`--target`の名残がないこと。READMEが停止・保存先・検索の範囲・HTMLの制限を説明すること |
+| UX-008 | P7 | テストなし | なし | テストなし: READMEの「Verified scope」が、検証したOS・browserと未検証の範囲を分けて書いていること |
 | PERF-001 | P7 | PASS | `scripts/perf.ts`、`docs/performance.md` | 100文書／10MiB: cold open 720.4ms、warm検索 p50 32.0ms／p95 80.7ms、保存から画面の表示まで308.8ms、最大のRSS 754.0MiB、操作の60秒後のRSS 296.0MiB・footprint 204.9MiB（macOS、Apple M5 Max、Node 24.21.0）。memoryの内訳と、操作の後のGC、結果を変えない検索の削減を記録 |
-| PERF-002 | P7 | PASS | `scripts/perf.ts`、`docs/performance.md`、`tests/e2e/ux.spec.ts`（PERF-002）、`tests/integration/documents.test.ts`（件数・大きさの上限） | 1,000文書／50MiB: hangなし、索引 8865.0ms、list 5.0ms、read 1.2ms、管理画面の一覧に全件が出るまで225.1ms、末尾の文書の選択 413.9ms、保存から画面の表示まで342.3ms、全件が検索の対象になる |
-| PERF-003 | P7 | PASS | `tests/integration/resources.test.ts` | 100回の開閉と監視ruleの追加・解除20回の後でも、監視しているdirectoryの数とNodeの有効な資源の数が増えず、外したwatcherはすべて閉じ終えている（作った数－閉じた数＝監視中の数）。開く・読む・検索する・表示する・閉じるの反復で、daemonの本体と検索のindexが保持している項目の数が3区間で同じで、本体・検索のworker・解析のworkerのGCの後のheapの区間ごとの増え方が1MiB未満 |
-| PERF-004 | P7 | PASS | `tests/integration/resources.test.ts`、`apps/cli/src/server/http/management.test.ts`、`apps/cli/src/workers/parse-service.test.ts`（MD-006） | 通知を読まないclientがいても、50回の連続した更新とほかのclientの操作が終わる。書き込みが詰まった接続の待ち行列は上限で止まり、読む接続には届き、詰まった接続は書き込みの停止期限の後にsocketまで閉じる。届く連番は逆戻りしない。大きい・深い文書は解析の時間と構造の上限で止まる |
-| PERF-005 | P7 | PASS | `tests/integration/resources.test.ts`、`apps/web/src/components/workspace.dom.test.tsx` | 3秒の待機のCPU時間が150ms未満。通知の接続・切断30回で購読が残らない。欠けた通知は一覧と質問の取り直しで回復する |
+| PERF-002 | P7 | PASS | `scripts/perf.ts`、`docs/performance.md`、`tests/e2e/ux.spec.ts`（PERF-002）、`apps/cli/src/documents/service-concurrency.test.ts`（registration of new documents by watch rulesの件数と合計の大きさの上限） | 1,000文書／50MiB: hangなし、索引 8865.0ms、list 5.0ms、read 1.2ms、管理画面の一覧に全件が出るまで225.1ms、末尾の文書の選択 413.9ms、保存から画面の表示まで342.3ms、全件が検索の対象になる。e2eは、一覧の1ページを超える501文書で、全件の表示と末尾の文書の選択を確かめる。テストなし: 多くの文書を開いた状態で、保存が画面に反映されること（e2e）。openで件数の上限を超えた文書を、読まずに拒否すること（watch ruleの経路は確かめる） |
+| PERF-003 | P7 | PASS | `apps/cli/src/search/search-index.test.ts`（PERF-003 entries retained by the index） | 検索のindexは、入れ直しと削除を繰り返しても、項目と語の数が残っている文書の分に戻る。テストなし: 開閉と監視ruleの追加・解除を繰り返した後の、watcher・socket・timerなどの資源の数。反復の後の、daemonの本体とworkerのGC後のheapと、本体が保持する項目の数 |
+| PERF-004 | P7 | PASS | `apps/cli/src/server/http/management.test.ts`、`apps/cli/src/server/http/event-queue.test.ts`、`apps/cli/src/workers/parse-service.test.ts`（MD-006） | 通知を読まないclientがいても、読む接続には通知が届き続ける。書き込みが詰まった接続の待ち行列は上限で止まり、詰まった接続は書き込みの停止期限の後にsocketまで閉じる。届く連番は逆戻りしない。大きい・深い文書は解析の時間と構造の上限で止まる |
+| PERF-005 | P7 | PASS | `apps/web/src/components/workspace.dom.test.tsx` | 欠けた通知は一覧と質問の取り直しで回復する。テストなし: 3秒の待機のCPU時間、通知の接続と切断を繰り返した後に購読が残らないこと |
 
 ## 現状と開発の注意点
 
-- P0〜P7は完了（全体のDoDは上の節）。未検証は、Windowsでの一部の試験と、Firefox・WebKitでのsecurity・bridge以外の画面操作（READMEの「Verified scope」）。既知の制約は、検索の索引のmemory（開いている文書の量に比例し、50MiBで検索workerのheap約489MB）と、一致の多い検索の間の一時的なRSSの増加（`docs/performance.md`）。interactiveとSDKはADR-0012、検索UIは`apps/web/src/components/search-dialog.tsx`、性能の実測は`scripts/perf.ts`、資源の検査は`tests/integration/resources.test.ts`。
+- P0〜P7は完了（全体のDoDは上の節）。未検証は、Windowsでの一部の試験と、Firefox・WebKitでのsecurity・bridge以外の画面操作（READMEの「Verified scope」）。bridgeの試験のうちブラウザに依存しない手順のものは、2026-11-19からChromiumだけで流す。既知の制約は、検索の索引のmemory（開いている文書の量に比例し、50MiBで検索workerのheap約489MB）と、一致の多い検索の間の一時的なRSSの増加（`docs/performance.md`）。interactiveとSDKはADR-0012、検索UIは`apps/web/src/components/search-dialog.tsx`、性能の実測は`scripts/perf.ts`。資源の増加とidleのCPUを確かめるtestはない（2026-11-19に`tests/integration/resources.test.ts`を削除した）。
+- 2026-11-19に`tests/integration/`を削除した（受け入れテストの対応の節）。記録の節に出てくる`tests/integration/`、`tests/scripts/`、`tests/build-output.test.ts`、`tests/build-watch.test.ts`、`packages/document/tests/dependency-contract.test.ts`の試験は、その時点のもので、今はない。
 - 管理HTTPは`apps/cli/src/server/http/management.ts`、表示用のlistenerは`apps/cli/src/server/http/preview.ts`、UIは`apps/web/src/`、Markdownの描画は`packages/document/src/react.tsx`、HTMLの静的変換は`packages/document/src/html-static.ts`。
 - 画面部品のhookは、happy-domの上で実際のReact DOMを動かしてテストできる（file先頭に`// @vitest-environment happy-dom`）。
 - 未解決の不具合: 幅180pxで、一覧の見出しの「Tree」の切り替えが一部見切れる（「一覧のrepo表示と形式の色」）。
-- 未実行のtest: Windowsでの、daemonと文書の結合試験以外の単体・結合試験とe2e。Firefox・WebKitでの、security・bridge以外のe2e。
+- 未実行のtest: Windowsでの単体試験とe2e（WindowsのCIは、buildとpack smokeだけを流す）。Firefox・WebKitでの、security・bridge以外のe2eと、Chromiumだけで流すbridgeの試験と`tests/e2e/release.spec.ts`。
 - Firefox・WebKitのe2eは`pnpm test:e2e:cross`（先に`pnpm exec playwright install firefox webkit`が必要）。
 - 配布物はruntime依存を持たない方針（ADR-0001）。外部packageを足したら`apps/cli/tsdown.config.ts`の`deps.onlyBundle`へ追加する。
 - stdinを入力として扱うのは、shellのpipeかredirectのときだけ（ADR-0004）。
 - UIはTailwind CSS、shadcn/ui、Base UIで作る（ADR-0006）。部品は`pnpm dlx shadcn@4.21.1 add <name>`で`apps/web/src/components/ui/`へ追加する。
-- 結合テストは`tests/integration/harness.ts`の`createTestHome()`、e2eは`tests/e2e/harness.ts`の`createE2eHome()`で、試験専用のstate rootとruntimeを使う。browserは`BROWSER`環境変数で差し替えられる。
+- e2eは`tests/e2e/harness.ts`の`createE2eHome()`で、試験専用のstate rootとruntimeを使う。browserは`BROWSER`環境変数で差し替えられる。
 - e2eは配布物（`apps/cli/dist`）を試す。先に`pnpm build`が必要。

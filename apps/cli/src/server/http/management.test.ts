@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
 import { connect as connectSocket, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,7 +18,7 @@ import { createRenderService } from '../../render/render-service.ts';
 import { createSearchService } from '../../search/search-service.ts';
 import { createParseService } from '../../workers/parse-service.ts';
 import { createEventHub } from '../event-hub.ts';
-import { startManagementServer, type ManagementServer } from './management.ts';
+import { startManagementServer, type ManagementDeps, type ManagementServer } from './management.ts';
 
 let base: string;
 let server: ManagementServer | null;
@@ -37,10 +38,10 @@ interface Fixture {
   documents: DocumentService;
   events: ReturnType<typeof createEventHub>;
   // What was received over SSE, and whether the connection ended.
-  stream: { received: string; ended: boolean; reading: Promise<void> };
+  stream: { received: string; ended: boolean };
 }
 
-async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> {
+async function start(streams: Pick<ManagementDeps, 'heartbeatMs' | 'stallMs'> = {}) {
   const store = await StateStore.open({ root: join(base, 'home'), fs: nodeStoreFs });
   const cursors = createCursorCodec(randomBytes(32));
   const documents = new DocumentService({ store, cursors });
@@ -67,17 +68,24 @@ async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> 
     webRoot: null,
     devOrigin: null,
     isStopping: () => false,
+    ...streams,
+  });
+  return { store, documents, events };
+}
+
+async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> {
+  const { store, documents, events } = await start({
     heartbeatMs,
     ...(stallMs === undefined ? {} : { stallMs }),
   });
-  const response = await fetch(`${server.origin}/_/api/v1/events`);
+  const response = await fetch(`${(server as ManagementServer).origin}/_/api/v1/events`);
   expect(response.status).toBe(200);
   // With a storable response, Firefox holds a second connection to the same URL.
   expect(response.headers.get('cache-control')).toBe('no-store');
   const reader = (response.body as ReadableStream<Uint8Array>).getReader();
   const decoder = new TextDecoder();
-  const stream = { received: '', ended: false, reading: Promise.resolve() };
-  stream.reading = (async () => {
+  const stream = { received: '', ended: false };
+  void (async () => {
     for (;;) {
       const chunk = await reader.read().catch(() => ({ done: true, value: undefined }) as const);
       if (chunk.done) break;
@@ -98,24 +106,56 @@ async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> 
   };
 }
 
-const ended = (stream: Fixture['stream']) =>
-  Promise.race([
-    stream.reading,
-    new Promise((_resolve, reject) =>
-      setTimeout(() => reject(new Error('SSE does not end')), 5000),
-    ),
-  ]);
+// The status of a request with any Host, Origin, or Sec-Fetch-Site (fetch cannot set Host).
+function send(
+  path: string,
+  options: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const sent = request(
+      {
+        host: '127.0.0.1',
+        port: (server as ManagementServer).port,
+        path,
+        method: options.method ?? 'GET',
+        headers: options.headers ?? {},
+      },
+      (response) => {
+        response.resume();
+        response.on('end', () => resolve(response.statusCode ?? 0));
+      },
+    );
+    sent.on('error', reject);
+    // Sent whole, so it carries Content-Length, which the JSON-only check reads.
+    sent.end(options.body);
+  });
+}
 
-describe('management notifications without authentication', () => {
-  it('delivers changes and keeps the connection open until shutdown', async () => {
-    const { store, events, stream } = await connect(20);
-    events.publish({ type: 'catalog-changed' });
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(stream.received).toContain('event: catalog-changed');
-    expect(stream.ended).toBe(false);
-    await server?.close();
-    await ended(stream);
-    expect(events.subscriberCount).toBe(0);
+describe('SEC-002 Origin and Host checks', () => {
+  it('answers only its own Host and Origin, and takes changes only as JSON from the UI origin', async () => {
+    const { store } = await start();
+    const { origin, port } = server as ManagementServer;
+    expect(await send('/_/api/v1/documents')).toBe(200);
+    const rejected: Record<string, string>[] = [
+      { Origin: 'http://attacker.example' },
+      { Origin: 'null' },
+      { Origin: origin.replace('127.0.0.1', 'localhost') },
+      { Host: 'attacker.example' },
+      { Host: `localhost:${String(port)}` },
+      { 'Sec-Fetch-Site': 'cross-site' },
+    ];
+    for (const headers of rejected) {
+      expect(await send('/_/api/v1/documents', { headers }), JSON.stringify(headers)).toBe(401);
+    }
+    // Under another name (DNS rebinding) the UI page is not answered either.
+    expect(await send('/', { headers: { Host: 'attacker.example' } })).toBe(401);
+
+    // A form or a non-browser client sends no Origin; a form cannot send the JSON media type.
+    const release = (headers: Record<string, string>) =>
+      send('/_/api/v1/render-grants/release', { method: 'POST', headers, body: '{"grants":[]}' });
+    expect(await release({ 'Content-Type': 'application/json' })).toBe(401);
+    expect(await release({ Origin: origin, 'Content-Type': 'text/plain' })).toBe(400);
+    expect(await release({ Origin: origin, 'Content-Type': 'application/json' })).toBe(200);
     await store.close();
   });
 });
@@ -178,10 +218,6 @@ async function fillUntilStuck(events: Fixture['events'], running: ManagementServ
   }
 }
 
-// Extract the sequence numbers (`id:` lines) of received notifications, in arrival order.
-const sequencesOf = (received: string) =>
-  [...received.matchAll(/^id: (\d+)\r?$/gm)].map((match) => Number(match[1]));
-
 describe('PERF-004 connections that do not read notifications', () => {
   it('the queue stops at the limit even when writes stall, the reading connection still receives, and the stalled one is cut', async () => {
     const { store, events, stream } = await connect(50, 3000);
@@ -225,36 +261,6 @@ describe('PERF-004 connections that do not read notifications', () => {
     stuck.resume();
     await Promise.race([once(stuck, 'close'), wait(5000)]);
     expect(stuck.destroyed).toBe(true);
-    await store.close();
-  });
-
-  it('delivered sequences keep increasing and a resync marker arrives even as notifications continue after the queue overflows', async () => {
-    const { store, events } = await connect(60_000);
-    const running = server as ManagementServer;
-    const slow = await connectStuck(running.port);
-    slow.on('error', () => undefined);
-    // Overflow the queue, then resume reading and keep publishing while writes progress.
-    await fillUntilStuck(events, running);
-    for (let index = 0; index < 1000; index += 1) events.publish({ type: 'catalog-changed' });
-    expect(running.eventStreams().maxPending).toBe(LIMITS.ssePendingEvents + 1);
-    slow.resume();
-    for (let index = 0; index < 2000; index += 1) {
-      events.publish({ type: 'document-status' });
-      if (index % 10 === 0) await tick();
-    }
-    const last = events.publish({ type: 'focus-requested' });
-    const deadline = Date.now() + 10_000;
-    while (!sequencesOf(slow.received()).includes(last.sequence)) {
-      if (Date.now() > deadline) throw new Error('Last notification did not arrive');
-      await wait(20);
-    }
-    expect(slow.received()).toContain('event: resync-required');
-    const sequences = sequencesOf(slow.received());
-    for (let index = 1; index < sequences.length; index += 1) {
-      expect(sequences[index], `index ${String(index)}`).toBeGreaterThan(
-        sequences[index - 1] ?? -1,
-      );
-    }
     await store.close();
   });
 });

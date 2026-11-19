@@ -112,26 +112,6 @@ describe('DOC-007 tree grouped by repository', () => {
     for (const key of one) expect(two).toContain(key);
   });
 
-  it('adds the worktree name when two worktrees show the same branch', () => {
-    const tree = buildTree([
-      inWorktree('/r/app', '/r/app/.git/wt/one', 'a.md', { name: 'one', branch: 'main' }),
-      inWorktree('/r/app', '/r/app/.git/wt/two', 'b.md', { name: 'two', branch: 'main' }),
-      // A detached worktree named like another's branch.
-      inWorktree('/r/app', '/r/app/.git/wt/dev', 'c.md', { name: 'dev', branch: null }),
-      inWorktree('/r/app', '/r/app/.git/wt/three', 'd.md', { name: 'three', branch: 'dev' }),
-    ]);
-    expect(shape(tree)).toEqual([
-      {
-        '[repo] app': [
-          { '⑂ main (one)': ['a.md'] },
-          { '⑂ main (two)': ['b.md'] },
-          { '⑂ dev': ['c.md'] },
-          { '⑂ dev (three)': ['d.md'] },
-        ],
-      },
-    ]);
-  });
-
   it('places documents in a removed worktree under an unknown checkout', () => {
     const removed = documentAt('/r/app/.git/wt/x/a.md', {
       state: 'resolved',

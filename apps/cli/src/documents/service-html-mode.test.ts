@@ -5,7 +5,6 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { FeedbackService } from '../feedback/service.ts';
 import { StateStore } from '../persistence/state-store.ts';
 import { nodeStoreFs } from '../persistence/store-fs.ts';
 import { createCursorCodec } from './cursor.ts';
@@ -136,30 +135,5 @@ describe('interactive permission (spec 10.2)', () => {
         confirmed: true,
       }),
     ).rejects.toMatchObject({ code: 'E_INVALID_ARGUMENT' });
-  });
-
-  it('a question is pinned to the view mode at creation', async () => {
-    const questionnaire = JSON.stringify({
-      schemaVersion: 1,
-      title: 'Confirm',
-      fieldOrder: ['ok'],
-      answerSchema: {
-        type: 'object',
-        properties: { ok: { type: 'boolean', title: 'OK' } },
-        required: [],
-        additionalProperties: false,
-      },
-    });
-    const feedback = new FeedbackService({ store, documents });
-    write('i.html', '<p>i</p>');
-    write('s.html', '<p>s</p>');
-    const interactive = await open('i.html', { htmlMode: 'interactive' });
-    const plain = await open('s.html');
-    const asked = async (documentId: string) =>
-      feedback.getForUi(
-        (await feedback.create({ cwd: base, questionnaire, documentId })).data.request.requestId,
-      ).data.renderMode;
-    expect(await asked(interactive.documentId)).toBe('interactive');
-    expect(await asked(plain.documentId)).toBe('static');
   });
 });

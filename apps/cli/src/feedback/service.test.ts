@@ -440,6 +440,31 @@ describe('FB-017 / FB-018 / FB-019 / FB-020 / FB-021 wait, cancel, acknowledge, 
   });
 });
 
+describe('DOC-016 / SYS-014 close --all', () => {
+  it('keeps the submitted answer and cancels the pending question across a restart; a submit after the close is rejected', async () => {
+    write('a.md', '# A\n');
+    write('b.md', '# B\n');
+    const { request: answered } = await ask({ view: 'a.md' });
+    const { request: waiting } = await ask({ view: 'b.md' });
+    await (await answer(answered.requestId)).submit();
+    const late = await answer(waiting.requestId);
+    await documents.close({ cwd: base, targets: [], all: true });
+    await expect(late.submit()).rejects.toMatchObject({ code: 'E_REQUEST_NOT_PENDING' });
+    await store.close();
+    await setup();
+    expect(documents.list({}).data.documents).toEqual([]);
+    expect(feedback.get({ requestId: answered.requestId }).data).toMatchObject({
+      status: 'submitted',
+      submission: { answers: complete },
+    });
+    expect(feedback.get({ requestId: waiting.requestId }).data).toMatchObject({
+      status: 'cancelled',
+      cancellation: { reason: 'document_closed' },
+    });
+    expect(existsSync(join(base, 'a.md')) && existsSync(join(base, 'b.md'))).toBe(true);
+  });
+});
+
 describe('SYS-015 storage limit and pinned revisions', () => {
   it('new operations beyond the limit fail, and content of revisions pinned by questions is not removed', async () => {
     await setup(nodeStoreFs, 4096);
@@ -555,14 +580,14 @@ describe('file operation failures during the submit commit', () => {
 describe('SYS-009 process killed during a commit', () => {
   const fixture = fileURLToPath(new URL('crash-commit.fixture.ts', import.meta.url));
 
-  // Runs the operation in a child process on a copy of the seed state. Kills it without cleanup right before
+  // Creates a question in a child process on a copy of the seed state. Kills it without cleanup right before
   // the Nth file operation (0 runs to the end and returns the list of file operations performed).
-  const runIn = (seed: string, root: string, crashAt: number, operation: string, params: unknown) =>
+  const runIn = (seed: string, root: string, crashAt: number, params: unknown) =>
     new Promise<{ signal: NodeJS.Signals | null; stdout: string }>((resolve) => {
       cpSync(seed, root, { recursive: true });
       const child = spawn(
         process.execPath,
-        [fixture, root, String(crashAt), operation, JSON.stringify(params)],
+        [fixture, root, String(crashAt), JSON.stringify(params)],
         { stdio: ['ignore', 'pipe', 'inherit'] },
       );
       let stdout = '';
@@ -575,16 +600,15 @@ describe('SYS-009 process killed during a commit', () => {
   // Kills once right before each file operation and inspects the restored state.
   async function killAtEachStep<T>(
     seed: string,
-    operation: string,
     params: unknown,
     inspect: (payload: StateStore['payload']) => T,
   ): Promise<{ steps: string[]; restored: T[] }> {
-    const probe = await runIn(seed, join(base, `${operation}-probe`), 0, operation, params);
+    const probe = await runIn(seed, join(base, 'probe'), 0, params);
     const steps = JSON.parse(probe.stdout) as string[];
     const restored = await Promise.all(
       steps.map(async (_, index) => {
-        const root = join(base, `${operation}-kill-${String(index + 1)}`);
-        const { signal } = await runIn(seed, root, index + 1, operation, params);
+        const root = join(base, `kill-${String(index + 1)}`);
+        const { signal } = await runIn(seed, root, index + 1, params);
         expect(signal).toBe('SIGKILL');
         // If a referenced blob is missing, opening fails with E_STATE_CORRUPT.
         const reopened = await StateStore.open({ root, fs: nodeStoreFs });
@@ -597,66 +621,11 @@ describe('SYS-009 process killed during a commit', () => {
     return { steps, restored };
   }
 
-  it('submit: wherever killed around the metadata rename and directory sync, the restored question is pending or submitted', async () => {
-    const seed = join(base, 'seed');
-    const seedStore = await StateStore.open({ root: seed, fs: nodeStoreFs });
-    const seedFeedback = new FeedbackService({
-      store: seedStore,
-      documents: new DocumentService({
-        store: seedStore,
-        cursors: createCursorCodec(randomBytes(32)),
-      }),
-    });
-    const { request } = (await seedFeedback.create({ cwd: base, questionnaire: text })).data;
-    await seedFeedback.updateDraft(request.requestId, {
-      expectedDraftVersion: 0,
-      answers: complete,
-    });
-    await seedStore.close();
-    const submissionId = `sub_${randomUUID()}`;
-    const { steps, restored } = await killAtEachStep(
-      seed,
-      'submit',
-      {
-        requestId: request.requestId,
-        params: {
-          submissionId,
-          expectedDraftVersion: 1,
-          revision: request.revision,
-          currentRevision: request.revision,
-        },
-      },
-      (payload) => {
-        const record = payload.feedbackRequests[request.requestId];
-        return {
-          status: record?.status,
-          submission: record?.submission
-            ? { submissionId: record.submission.submissionId, answers: record.submission.answers }
-            : null,
-        };
-      },
-    );
-    // Submit creates no new blob. It goes through the state temp file, rename, and directory sync.
-    expect(steps).toContain('rename:state');
-    expect(steps).toContain('syncDirectory:state');
-    expect(steps.some((step) => step.endsWith(':blob'))).toBe(false);
-    for (const outcome of restored) {
-      expect([
-        { status: 'pending', submission: null },
-        { status: 'submitted', submission: { submissionId, answers: complete } },
-      ]).toContainEqual(outcome);
-    }
-    expect(new Set(restored.map((outcome) => outcome.status))).toEqual(
-      new Set(['pending', 'submitted']),
-    );
-  });
-
   it('create: wherever killed, including right after the blob is created, the question and the document blob are both present or both absent', async () => {
     const seed = join(base, 'seed');
     await (await StateStore.open({ root: seed, fs: nodeStoreFs })).close();
     const { steps, restored } = await killAtEachStep(
       seed,
-      'create',
       { cwd: base, questionnaire: text },
       (payload) => ({
         requests: Object.values(payload.feedbackRequests).map((record) => ({

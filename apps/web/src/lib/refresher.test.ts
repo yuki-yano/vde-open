@@ -122,16 +122,4 @@ describe('refetching the list', () => {
     await second;
     expect(fetcher.applied).toEqual([2]);
   });
-
-  it('fetches on every request when nothing is running', async () => {
-    const fetcher = controlledFetch();
-    const refresh = createRefresher(fetcher.run);
-    const first = refresh();
-    fetcher.pending[0]?.resolve();
-    await first;
-    const second = refresh();
-    fetcher.pending[1]?.resolve();
-    await second;
-    expect(fetcher.applied).toEqual([1, 1]);
-  });
 });

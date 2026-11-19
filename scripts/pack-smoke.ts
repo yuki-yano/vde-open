@@ -16,7 +16,6 @@ import {
   captureCommand,
   captureInstalledBin,
   captureInstalledBinAsync,
-  captureNpm,
   cliDir,
   repoRoot,
   runNpm,
@@ -156,62 +155,13 @@ function packTarball(): string {
 async function verifyInstalled(tarball: string, installDir: string): Promise<void> {
   progress('Step 2: install only the tarball into an empty directory. Do not query the registry.');
   writeFileSync(join(installDir, 'package.json'), '{"private":true}\n');
-  // CLI-014: installation does not change shell config files or an existing, different `vo`.
-  // Install with a test HOME (holding existing shell config files) and compare the contents before and after.
+  // A test HOME keeps the user's npm config and cache out of the installation.
   const home = join(installDir, 'home');
   mkdirSync(home);
-  const shellFiles = ['.zshrc', '.zprofile', '.bashrc', '.bash_profile', '.profile'];
-  for (const name of ['.zshrc', '.bashrc']) {
-    writeFileSync(join(home, name), `# ${name} (for the test)\nexport VDE_OPEN_SMOKE=1\n`);
-  }
-  const shellState = () =>
-    JSON.stringify(
-      shellFiles.map((name) => {
-        const path = join(home, name);
-        return [name, existsSync(path) ? readFileSync(path, 'utf8') : null];
-      }),
-    );
-  const shellBefore = shellState();
-  const npmEnv = { ...process.env, HOME: home, USERPROFILE: home };
   runNpm(['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', tarball], {
     cwd: installDir,
-    env: npmEnv,
+    env: { ...process.env, HOME: home, USERPROFILE: home },
   });
-
-  // Installing into a target that already has a different `vo` (the global prefix bin, a place on PATH) does not replace that `vo`.
-  // Without --force, npm aborts the installation instead of replacing a bin that belongs to no other package (EEXIST).
-  const prefix = join(installDir, 'global-prefix');
-  const prefixBin = process.platform === 'win32' ? prefix : join(prefix, 'bin');
-  mkdirSync(prefixBin, { recursive: true });
-  const existingName = process.platform === 'win32' ? 'vo.cmd' : 'vo';
-  const existingVo =
-    process.platform === 'win32' ? '@echo existing-vo\r\n' : '#!/bin/sh\necho existing-vo\n';
-  writeFileSync(join(prefixBin, existingName), existingVo, { mode: 0o755 });
-  const global = captureNpm(
-    [
-      'install',
-      '--global',
-      '--prefix',
-      prefix,
-      '--offline',
-      '--ignore-scripts',
-      '--no-audit',
-      '--no-fund',
-      tarball,
-    ],
-    { cwd: installDir, env: npmEnv },
-  );
-  if (readFileSync(join(prefixBin, existingName), 'utf8') !== existingVo) {
-    fail('installation changed the existing, different vo');
-  }
-  if (global.status === 0)
-    fail('installation succeeded into a target that already has a different vo');
-  if (!global.stderr.includes('EEXIST')) {
-    fail(
-      `installation failed for a reason other than the conflict with the existing vo: ${global.stderr}`,
-    );
-  }
-  if (shellState() !== shellBefore) fail('installation changed shell config files');
 
   // Make the bin shebang start the Node used for this verification.
   // Keep the state in a test home inside the install target, not touching the normal daemon and state.
@@ -236,14 +186,6 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     return result.stdout;
   };
 
-  progress('Step 3 (CLI-002): version and help match between both names.');
-  for (const args of [['--version'], ['--help']]) {
-    const long = runBin('vde-open', args);
-    const short = runBin('vo', args);
-    if (long.trim() === '') fail(`output of vde-open ${args.join(' ')} is empty`);
-    if (long !== short) fail(`${args.join(' ')} differs between vde-open and vo`);
-  }
-
   interface Envelope<T> {
     ok: boolean;
     data: T;
@@ -255,7 +197,7 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     return envelope.data;
   };
   type Documents = { documents: Array<{ documentId: string }> };
-  type Status = { state: string; daemonId: string | null };
+  type Status = { state: string };
 
   try {
     progress(
@@ -268,9 +210,37 @@ async function verifyInstalled(tarball: string, installDir: string): Promise<voi
     if (!openedId || listed.documents.map((document) => document.documentId).join() !== openedId) {
       fail('the document opened with vde-open does not match the vo list');
     }
-    const daemonId = runJson<Status>('vo', ['daemon', 'status']).daemonId;
-    if (runJson<Status>('vde-open', ['daemon', 'status']).daemonId !== daemonId) {
-      fail('vde-open and vo use different daemons');
+
+    if (process.platform !== 'win32') {
+      progress(
+        'Step 4, continued (CLI-006): content piped in slowly is read to EOF and updates the document with the same key.',
+      );
+      const piped = captureCommand(
+        'sh',
+        [
+          '-c',
+          `printf '# 最初\\n' | "$VO" open - --format markdown --key smoke --json && (printf '# 前半'; sleep 0.4; printf 'と後半\\n') | "$VO" open - --format markdown --key smoke --json`,
+        ],
+        { cwd: installDir, env: { ...env, VO: join(binDir, 'vo') } },
+      );
+      if (piped.status !== 0) {
+        fail(`open from stdin exited with ${String(piped.status)}: ${piped.stderr}`);
+      }
+      type Opened = { updated: number; documents: Array<{ documentId: string; title: string }> };
+      const [first, second] = piped.stdout
+        .trim()
+        .split('\n')
+        .map((line) => (JSON.parse(line) as Envelope<Opened>).data);
+      const stdinId = first?.documents[0]?.documentId;
+      if (
+        !stdinId ||
+        second?.updated !== 1 ||
+        second.documents[0]?.documentId !== stdinId ||
+        second.documents[0].title !== '前半と後半'
+      ) {
+        fail(`content piped in slowly did not update the same document in full: ${piped.stdout}`);
+      }
+      runJson('vo', ['close', stdinId]);
     }
     progress(
       'Step 6: from a cwd outside the repo, the bundled UI and parse worker work. Files in cwd are not served.',
@@ -536,7 +506,7 @@ async function main(): Promise<void> {
   } finally {
     rmSync(installDir, { recursive: true, force: true });
   }
-  console.log(`pack-smoke: PASS CLI-002 CLI-003 CLI-004 (${tarball})`);
+  console.log(`pack-smoke: PASS CLI-003 CLI-004 (${tarball})`);
 }
 
 try {

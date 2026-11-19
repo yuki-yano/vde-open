@@ -100,6 +100,7 @@ const afterSaveDelay = () => settle(400);
 async function until(condition: () => boolean, timeoutMs = 3000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!condition() && Date.now() < deadline) await settle(10);
+  expect(condition()).toBe(true);
 }
 // Wait until save has been called count times.
 const saved = (count: number) => until(() => saves.length >= count);

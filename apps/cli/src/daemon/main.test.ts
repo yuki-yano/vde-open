@@ -1,18 +1,28 @@
-import { access, mkdir, mkdtemp, symlink, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readdir,
+  symlink,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDaemonControl } from '../cli/daemon-control.ts';
+import { runCli } from '../cli/run.ts';
 import {
   resolveRuntimeLocation,
   resolveStateRoot,
   type PathEnvironment,
 } from '../persistence/paths.ts';
 import { nodeStoreFs, type StoreFs } from '../persistence/store-fs.ts';
-import { createParseService, type ParseService } from '../workers/parse-service.ts';
+import { createParseService } from '../workers/parse-service.ts';
 import { holdsLock, readCurrentLock } from './lock.ts';
 import { startDaemon, type DaemonHandle } from './main.ts';
 
@@ -38,6 +48,12 @@ afterEach(async () => {
   await rm(runtimeDir, { recursive: true, force: true });
   await rm(base, { recursive: true, force: true });
 });
+
+// No daemon holds the state after a failed start.
+const lockFree = async () => {
+  const lock = await readCurrentLock(resolveStateRoot(environment), 'daemon.lock');
+  return lock === null || (lock !== 'invalid' && lock.released);
+};
 
 async function openDocument(path: string) {
   const connection = await createDaemonControl(environment).connectExisting();
@@ -186,37 +202,84 @@ describe('stop overlapping with a commit', () => {
   });
 });
 
-describe('diagnostics overlapping with stop', () => {
-  it('does not delay stopping while diagnostics wait for index sync', async () => {
-    // Slow down parsing so index sync takes a while (8 documents x 500ms).
-    const real = createParseService();
-    const slow: ParseService = {
-      ...real,
-      analyze: async (format, text) => {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        return real.analyze(format, text);
+describe.skipIf(process.platform === 'win32')('SYS-008 insecure state root and runtime', () => {
+  it('the CLI does not connect to a running daemon through a symlinked state root', async () => {
+    daemon = await startDaemon({ environment, version: 'test' });
+    const link = join(base, 'home-link');
+    await symlink(join(base, 'home'), link);
+    let stdout = '';
+    const exitCode = await runCli(['daemon', 'status', '--json'], {
+      stdout: (text) => {
+        stdout += text;
       },
-    };
-    for (let index = 0; index < 8; index += 1) {
-      await writeFile(join(base, `${String(index)}.md`), `# Document ${String(index)}\n\nBody\n`);
-    }
-    daemon = await startDaemon({ environment, version: 'test', parse: slow });
-    for (let index = 0; index < 8; index += 1) await openDocument(`${String(index)}.md`);
+      stderr: () => undefined,
+      cwd: base,
+      environment: { ...environment, env: { ...environment.env, VDE_OPEN_HOME: link } },
+      stdoutIsTty: false,
+      stdin: { isPiped: false, read: () => Promise.resolve(Buffer.alloc(0)) },
+    });
+    expect(exitCode).toBe(5);
+    expect(JSON.parse(stdout)).toMatchObject({
+      error: { code: 'E_INSECURE_PATH', details: { reason: 'symlink' } },
+    });
+  });
+
+  it('does not create the socket in a runtime directory that is a symlink, and leaves the link target alone', async () => {
+    const { runtimeDir, socketPath } = resolveRuntimeLocation(
+      resolveStateRoot(environment),
+      environment,
+    );
+    const elsewhere = join(base, 'elsewhere');
+    await mkdir(elsewhere, { mode: 0o700 });
+    await writeFile(join(elsewhere, basename(socketPath)), 'unrelated');
+    await mkdir(dirname(runtimeDir), { recursive: true, mode: 0o700 });
+    await symlink(elsewhere, runtimeDir);
+
+    await expect(startDaemon({ environment, version: 'test' })).rejects.toMatchObject({
+      code: 'E_INSECURE_PATH',
+    });
+    expect(await readdir(elsewhere)).toEqual([basename(socketPath)]);
+    expect(await readFile(join(elsewhere, basename(socketPath)), 'utf8')).toBe('unrelated');
+    expect(await lockFree()).toBe(true);
+  });
+});
+
+describe('SEC-018 daemon log', () => {
+  it('records IPC requests without the body, title, path, document key, or IPC key', async () => {
+    const work = join(base, 'work');
+    await mkdir(work);
+    await writeFile(join(work, '極秘の計画.md'), '# 極秘の見出し\n\n極秘の本文\n');
+    daemon = await startDaemon({ environment, version: 'test' });
+    const ipcKey = await readFile(
+      resolveRuntimeLocation(resolveStateRoot(environment), environment).keyPath,
+    );
     const connection = await createDaemonControl(environment).connectExisting();
     if (!connection) throw new Error('Cannot connect to the daemon.');
-    const diagnosing = connection
-      .request('daemon.diagnostics', { collectGarbage: true }, { timeoutMs: 30_000 })
-      .then(
-        (envelope) => (envelope.ok ? 'completed' : envelope.error.code),
-        (error: { code: string }) => error.code,
+    try {
+      const opened = await connection.request<{ documents: Array<{ documentId: string }> }>(
+        'documents.open',
+        { cwd: work, paths: ['極秘の計画.md'], key: 'himitsu-key' },
       );
-    // Stop after diagnostics start waiting for index sync.
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    const started = Date.now();
+      const documentId = opened.ok ? opened.data.documents[0]?.documentId : undefined;
+      expect(await connection.request('documents.read', { documentId })).toMatchObject({
+        ok: true,
+      });
+    } finally {
+      connection.close();
+    }
     await daemon.stop('test');
-    expect(Date.now() - started).toBeLessThan(2000);
-    expect(['E_DAEMON_STOPPING', 'E_DAEMON_UNAVAILABLE']).toContain(await diagnosing);
-    connection.close();
+
+    const log = await readFile(join(base, 'home', 'logs', 'daemon.jsonl'), 'utf8');
+    expect(log).toContain('"event":"ipc.request"');
+    for (const secret of [
+      '極秘',
+      'himitsu-key',
+      work,
+      ipcKey.toString('hex'),
+      ipcKey.toString('base64'),
+    ]) {
+      expect(log).not.toContain(secret);
+    }
   });
 });
 
@@ -297,11 +360,6 @@ describe('fixed listener ports (listeners.json)', () => {
     await mkdir(join(base, 'home'), { recursive: true, mode: 0o700 });
     await writeFile(configPath(), text);
   };
-  // No daemon holds the state after a failed start.
-  const lockFree = async () => {
-    const lock = await readCurrentLock(resolveStateRoot(environment), 'daemon.lock');
-    return lock === null || (lock !== 'invalid' && lock.released);
-  };
 
   it('a restart with the saved ports gets the same URLs; start arguments are used once and not saved', async () => {
     // First start on OS-assigned ports, then save the ports it got.
@@ -381,7 +439,6 @@ describe('fixed listener ports (listeners.json)', () => {
 
   it.each([
     ['not JSON', '{', 'json'],
-    ['an invalid PC port', '{"managementPort": 70000}', 'invalid:managementPort'],
     ['an unknown key', '{"port": 1}', 'invalid:root'],
   ])('settings that are %s fail the start with the cause', async (_name, text, issue) => {
     await writeConfig(text);

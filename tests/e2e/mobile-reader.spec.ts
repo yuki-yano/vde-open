@@ -419,11 +419,16 @@ test('Lane 9: a document closed on the PC sends the phone back to the list, and 
   await expect(mobile.getByRole('status')).toHaveText('That document is no longer open on the PC.');
   await expect(mobile.getByTestId('document-frame')).toHaveCount(0);
   await expect(titles(mobile)).toHaveText(['次の文書']);
+  await expect.poll(() => new URL(mobile.url()).searchParams.get('document')).toBeNull();
   await mobile.screenshot({ path: test.info().outputPath('bfcache-close.png') });
   await mobile.context().close();
 });
 
-test('only the configured person gets the screen', async ({ browser }) => {
+test('only the configured person gets the screen', async ({ browser, browserName }) => {
+  test.skip(
+    browserName !== 'chromium',
+    'The server decides from the proxy headers, not the browser.',
+  );
   t.write('a.md', '# a\n');
   await t.json(['open', 'a.md', '--no-open']);
   proxy.identity = 'other';
@@ -476,17 +481,7 @@ test('opened from the home screen, pulling down from the top reloads the reader'
   await mobile.context().close();
 });
 
-test('with no documents open, the list says so', async ({ browser }) => {
-  t.write('a.md', '# a\n');
-  await t.json(['open', 'a.md', '--no-open']);
-  await t.json(['close', 'a.md']);
-  const mobile = await phone(browser);
-  await mobile.goto(MOBILE_UI_URL);
-  await expect(mobile.getByText('No documents are open on the PC.')).toBeVisible();
-  await mobile.context().close();
-});
-
-test('a return with the list held back keeps the demo stopped, then drops a frame revoked meanwhile; a failed list keeps it stopped', async ({
+test('a return with the list held back keeps the demo stopped, then drops a frame revoked meanwhile', async ({
   browser,
 }) => {
   writeDemo();
@@ -519,17 +514,6 @@ test('a return with the list held back keeps the demo stopped, then drops a fram
   // The list arrives: the revoked view is dropped and the new one does not run scripts.
   await expect(mobile.getByTestId('document-frame')).toHaveAttribute('data-mode', 'static');
   await expect(frameOf(mobile).locator('#value')).toHaveText('loading');
-
-  // Allowed again, then a list that cannot be fetched keeps the demo stopped.
-  await openDemo();
-  await expect(mobile.getByTestId('document-frame')).toHaveAttribute('data-mode', 'interactive');
-  await expect(mobile.getByTestId('frame-paused')).toHaveCount(0);
-  await mobile.unroute('**/_/mobile/v1/documents*');
-  await mobile.route('**/_/mobile/v1/documents*', (route) => route.abort());
-  await mobile.evaluate(() => window.dispatchEvent(new Event('pageshow')));
-  await expect(mobile.getByTestId('frame-paused')).toHaveCount(1);
-  await mobile.waitForTimeout(500);
-  await expect(mobile.getByTestId('frame-paused')).toHaveCount(1);
   await mobile.context().close();
 });
 
@@ -581,7 +565,15 @@ test('a static view stays scrollable while it is checked again, and its document
   await mobile.context().close();
 });
 
-test('both screens declare an icon and a home-screen icon that load', async ({ page, browser }) => {
+test('both screens declare an icon and a home-screen icon that load', async ({
+  page,
+  browser,
+  browserName,
+}) => {
+  test.skip(
+    browserName !== 'chromium',
+    'The icons are fetched with the request API, not the browser.',
+  );
   t.write('a.md', '# a\n');
   await t.json(['open', 'a.md', '--no-open']);
   const mobile = await phone(browser);

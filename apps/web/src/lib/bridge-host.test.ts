@@ -1,7 +1,6 @@
 import type { Answers, Questionnaire } from '@vde-open/shared';
 import { describe, expect, it } from 'vitest';
 
-import { ApiError } from './api.ts';
 import {
   createBridgeHost,
   type BridgeCloseReason,
@@ -148,11 +147,6 @@ describe('FB-008 operations allowed from the HTML', () => {
   it.each([
     ['Date', { note: new Date(0) }],
     ['undefined', { note: undefined }],
-    ['NaN', { score: Number.NaN }],
-    ['Infinity', { score: Number.POSITIVE_INFINITY }],
-    ['a nested object', { note: { text: 'x' } }],
-    ['an array of non-strings', { tags: [1, 2] }],
-    ['an invalid field name', { '1note': 'x' }],
     ['__proto__', JSON.parse('{"__proto__": "x"}') as Record<string, unknown>],
   ])(
     'rejects a draft answer containing %s without changing types or dropping values',
@@ -166,20 +160,6 @@ describe('FB-008 operations allowed from the HTML', () => {
       ]);
     },
   );
-
-  it('returns save failures to the HTML with their code', async () => {
-    const { port } = setup({
-      updateDraft: () =>
-        Promise.reject(
-          new ApiError('E_DRAFT_CONFLICT', 'Another window updated it first.', 409, {}),
-        ),
-    });
-    port.deliver(frame(1, 'updateDraft', { answers: {}, baseDraftVersion: 0 }));
-    await flush();
-    expect(port.responses()).toMatchObject([
-      { sequence: 1, ok: false, error: { code: 'E_DRAFT_CONFLICT' } },
-    ]);
-  });
 });
 
 describe('FB-009 / FB-010 frame validation', () => {

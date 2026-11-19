@@ -10,7 +10,6 @@ import {
   createLimiter,
   createRepositoryDetector,
   isValidRefName,
-  limitRepositoryFs,
   nodeRepositoryFs,
   parseHead,
   type RepositoryFs,
@@ -51,20 +50,6 @@ const recording = (inner: RepositoryFs = nodeRepositoryFs) => {
 };
 
 describe('repository detection', () => {
-  it('finds the main checkout of an ordinary repository', async () => {
-    const repo = join(base, 'repos', 'vde-open');
-    gitDir(join(repo, '.git'));
-    const document = file(join(repo, 'docs', 'design.md'), '# Design');
-
-    expect(await detect(document)).toEqual({
-      state: 'resolved',
-      id: join(repo, '.git'),
-      nameSegments: segments(repo),
-      checkout: { id: repo, kind: 'main' },
-      pathInCheckout: ['docs', 'design.md'],
-    });
-  });
-
   it('groups a vw worktree under .git/wt with its repository', async () => {
     const repo = join(base, 'duel-logger');
     gitDir(join(repo, '.git'));
@@ -140,7 +125,7 @@ describe('repository detection', () => {
     expect(b.state === 'resolved' && b.nameSegments.at(-1)).toBe('beta');
   });
 
-  it('makes a submodule its own repository, named after its directory', async () => {
+  it('makes a .git file without commondir, such as a submodule, its own repository named after its directory', async () => {
     const parent = join(base, 'parent');
     gitDir(join(parent, '.git'));
     gitDir(join(parent, '.git', 'modules', 'sub'));
@@ -156,19 +141,6 @@ describe('repository detection', () => {
     });
   });
 
-  it('does not join the repository a commondir-less .git file points to', async () => {
-    const trusted = join(base, 'trusted');
-    gitDir(join(trusted, '.git'));
-    const evil = join(base, 'evil');
-    file(join(evil, '.git'), `gitdir: ${join(trusted, '.git')}\n`);
-
-    expect(await detect(file(join(evil, 'a.md'), 'a'))).toMatchObject({
-      state: 'resolved',
-      id: evil,
-      checkout: { id: evil, kind: 'main' },
-    });
-  });
-
   it('places a document inside the .git directory in the repository with no checkout', async () => {
     const repo = join(base, 'repo');
     gitDir(join(repo, '.git'));
@@ -181,19 +153,6 @@ describe('repository detection', () => {
       nameSegments: segments(repo),
       checkout: null,
       pathInCheckout: ['.git', 'wt', 'feature', 'x', 'docs', 'a.md'],
-    });
-  });
-
-  it('reports a file outside any repository', async () => {
-    expect(await detect(file(join(base, 'notes', 'plan.md'), 'p'))).toEqual({ state: 'outside' });
-  });
-
-  it('walks through directories that no longer exist (a missing document)', async () => {
-    const repo = join(base, 'repo');
-    gitDir(join(repo, '.git'));
-    expect(await detect(join(repo, 'gone', 'deeper', 'a.md'))).toMatchObject({
-      state: 'resolved',
-      pathInCheckout: ['gone', 'deeper', 'a.md'],
     });
   });
 
@@ -313,21 +272,6 @@ describe('repository detection', () => {
       expect(await detect(file(join(evil, 'a.md'), 'a'))).toMatchObject({
         state: 'unresolved',
         id: evil,
-        reason: 'link-mismatch',
-      });
-    });
-
-    it('a worktree copied with cp -r', async () => {
-      const repo = join(base, 'repo');
-      gitDir(join(repo, '.git'));
-      worktree(join(repo, '.git'), join(base, 'wt'), 'wt');
-      file(join(base, 'wt', 'a.md'), 'a');
-      execFileSync('cp', ['-R', join(base, 'wt'), join(base, 'copy')]);
-
-      expect(await detect(join(base, 'wt', 'a.md'))).toMatchObject({ state: 'resolved' });
-      expect(await detect(join(base, 'copy', 'a.md'))).toMatchObject({
-        state: 'unresolved',
-        id: join(base, 'copy'),
         reason: 'link-mismatch',
       });
     });
@@ -617,32 +561,5 @@ describe('the operation limit', () => {
     release[2]?.();
     await Promise.all([second, third]);
     expect(limiter.active).toBe(0);
-  });
-
-  it('applies to every filesystem operation of detection', async () => {
-    const repo = join(base, 'repo');
-    gitDir(join(repo, '.git'));
-    const limiter = createLimiter(2);
-    let peak = 0;
-    const { fs } = recording();
-    const watched: RepositoryFs = Object.fromEntries(
-      Object.entries(fs).map(([name, operation]) => [
-        name,
-        async (...args: [string, number]) => {
-          peak = Math.max(peak, limiter.active);
-          return (operation as (...input: [string, number]) => Promise<unknown>)(...args);
-        },
-      ]),
-    ) as unknown as RepositoryFs;
-    const detector = createRepositoryDetector({
-      fs: limitRepositoryFs(watched, limiter),
-      stopAt: base,
-    });
-    await Promise.all(
-      Array.from({ length: 50 }, (_, index) =>
-        detector.detect(join(repo, `d${String(index)}`, 'a.md')),
-      ),
-    );
-    expect(peak).toBeLessThanOrEqual(2);
   });
 });

@@ -1,8 +1,6 @@
-// Run as a child process by the SYS-009 test. During the commit of the given operation, kills the process
+// Run as a child process by the SYS-009 test. During the commit that creates a question, kills the process
 // without cleanup right before the Nth file operation. With 0, runs to the end and prints the list of file operations performed.
-// Arguments: <state root> <kill at> <submit|create> <operation params as JSON>
-//   submit: {requestId, params} (submits the saved draft answers; creates no new blob)
-//   create: {cwd, questionnaire} (creates a question with no document; the question document's blob is created in the same commit)
+// Arguments: <state root> <kill at> <create params as JSON: {cwd, questionnaire}>
 import { randomBytes } from 'node:crypto';
 import { sep } from 'node:path';
 
@@ -12,7 +10,7 @@ import { StateStore } from '../persistence/state-store.ts';
 import { nodeStoreFs, type StoreFs } from '../persistence/store-fs.ts';
 import { FeedbackService } from './service.ts';
 
-const [root = '', crashAtText = '0', operation = '', paramsText = '{}'] = process.argv.slice(2);
+const [root = '', crashAtText = '0', paramsText = '{}'] = process.argv.slice(2);
 const crashAt = Number(crashAtText);
 
 // Target of a file operation: the blob directory itself (sync), a blob file, or anything else (state).
@@ -43,11 +41,5 @@ const documents = new DocumentService({ store, cursors: createCursorCodec(random
 const feedback = new FeedbackService({ store, documents });
 const params = JSON.parse(paramsText) as Record<string, unknown>;
 armed = true;
-if (operation === 'submit') {
-  await feedback.submit(params['requestId'] as string, params['params']);
-} else if (operation === 'create') {
-  await feedback.create(params);
-} else {
-  throw new Error(`Unknown operation: ${operation}`);
-}
+await feedback.create(params);
 process.stdout.write(JSON.stringify(performed), () => process.exit(0));

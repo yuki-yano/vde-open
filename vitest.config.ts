@@ -1,3 +1,4 @@
+import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { defineConfig } from 'vitest/config';
@@ -11,9 +12,11 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    // Integration tests start real CLI processes and the daemon.
+    // The default (one worker per core but one) briefly takes about half of a large machine's cores.
+    maxWorkers: Math.min(4, Math.max(1, availableParallelism() - 1)),
+    // Some daemon tests wait for its 5-second shutdown limit, past the 5-second default.
     testTimeout: 30_000,
-    // Cleanup stops the daemon, which can take longer than the 10-second default on slow CI runners.
+    // Stopping a daemon in cleanup can take longer than the 10-second default on slow CI runners.
     hookTimeout: 30_000,
     include: [
       'packages/*/src/**/*.test.{ts,tsx}',

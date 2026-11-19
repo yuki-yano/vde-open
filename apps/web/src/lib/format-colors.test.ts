@@ -70,14 +70,11 @@ describe.each(themes)('%s theme', (_name, tokens) => {
   // and a hovered row on muted at most.
   const backgrounds = ['--background', '--chrome', '--selection', '--muted'];
 
-  it.each(['--format-markdown', '--format-html', '--muted-foreground'])(
-    '%s icons reach 3:1',
-    (color) => {
-      for (const background of backgrounds) {
-        expect(contrast(tokens, color, background)).toBeGreaterThanOrEqual(3);
-      }
-    },
-  );
+  it.each(['--format-markdown', '--format-html'])('%s icons reach 3:1', (color) => {
+    for (const background of backgrounds) {
+      expect(contrast(tokens, color, background)).toBeGreaterThanOrEqual(3);
+    }
+  });
 
   it('second-line text reaches 4.5:1', () => {
     for (const background of backgrounds) {

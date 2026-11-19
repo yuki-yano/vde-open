@@ -416,7 +416,8 @@ describe('detection that finishes late', () => {
     };
     const repo = join(base, 'repo');
     gitDir(join(repo, '.git'));
-    const service = serviceWith({ fs });
+    // If the stuck operations did not keep their slots, the third detection would finish well within 300 ms.
+    const service = serviceWith({ fs, waitMs: 300 });
     await open(
       service,
       writeFile(join(base, 'stuck1', 'a.md'), 'a'),
@@ -426,11 +427,11 @@ describe('detection that finishes late', () => {
 
     let started = Date.now();
     const [local] = await open(service, writeFile(join(repo, 'c.md'), 'c'));
-    expect(Date.now() - started).toBeLessThan(3000);
+    expect(Date.now() - started).toBeLessThan(1500);
     expect(local?.repository).toEqual({ state: 'pending' });
     started = Date.now();
     await service.refresh({ documentId: local?.documentId });
-    expect(Date.now() - started).toBeLessThan(3000);
+    expect(Date.now() - started).toBeLessThan(1500);
 
     for (const release of stuck) release();
     await vi.waitFor(() =>

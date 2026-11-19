@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -436,5 +436,50 @@ describe('previous revision of a document reopened with another format', () => {
     expect(current.data.extraction).toBe('static-html');
     expect(current.data.outline?.map((item) => item.title)).toEqual(['HTML heading']);
     expect(analyzedFormats).toEqual(['markdown', 'html']);
+  });
+});
+
+describe('an open that fails for one document registers none', () => {
+  it('CLI-011: when one of several paths is missing or over the size limit', async () => {
+    write('a.md', '# a\n');
+    write('b.md', '# b\n');
+    await expect(
+      service.open({ cwd: base, paths: ['a.md', 'missing.md', 'b.md'] }),
+    ).rejects.toMatchObject({ code: 'E_PATH_NOT_FOUND', details: { path: 'missing.md' } });
+    // Sparse: the size is checked from the file's stat before reading.
+    truncateSync(write('huge.md', ''), LIMITS.documentBytes + 1);
+    await expect(service.open({ cwd: base, paths: ['a.md', 'huge.md'] })).rejects.toMatchObject({
+      code: 'E_LIMIT_EXCEEDED',
+      details: {
+        problems: [{ path: 'huge.md', code: 'E_LIMIT_EXCEEDED', reason: 'documentBytes' }],
+      },
+    });
+    expect(store.payload.openOrder).toEqual([]);
+  });
+
+  it('CLI-012: another file or stdin cannot take a key, and the holder stays as it was', async () => {
+    write('a.md', '# a\n');
+    write('b.md', '# b\n');
+    const holder = (await service.open({ cwd: base, paths: ['a.md'], key: 'k' })).data.documents[0];
+    await expect(service.open({ cwd: base, paths: ['b.md'], key: 'k' })).rejects.toMatchObject({
+      code: 'E_KEY_CONFLICT',
+    });
+    await expect(
+      service.open({
+        cwd: base,
+        paths: [],
+        stdin: { content: '# 横取り\n' },
+        format: 'markdown',
+        key: 'k',
+      }),
+    ).rejects.toMatchObject({ code: 'E_KEY_CONFLICT' });
+    const listed = service.list({}).data.documents;
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      documentId: holder?.documentId,
+      key: 'k',
+      title: 'a',
+      revision: holder?.revision,
+    });
   });
 });

@@ -74,6 +74,7 @@ const tick = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(condition: () => boolean, timeoutMs = 3000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!condition() && Date.now() < deadline) await tick(10);
+  expect(condition()).toBe(true);
 }
 
 const shown = () =>

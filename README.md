@@ -190,9 +190,9 @@ The top of the document list shows every question awaiting an answer under "Wait
 
 | Scope | Status |
 |---|---|
-| Linux and macOS on CI (GitHub Actions `ubuntu-latest` and `macos-latest`, Node.js 24.22.3) | Verified (format, lint, typecheck, unit/integration, build, pack, e2e; `.github/workflows/ci.yml`) |
-| Windows on CI (`windows-latest`, Node.js 24.22.3) | Verified: build, pack smoke (install, both bins, IPC, starting and stopping the daemon, JSON output, the UI and workers), and the daemon and document integration tests. The other unit and integration tests and the e2e tests are not run on Windows |
-| Browsers | Chromium (Playwright's Chrome Headless Shell): the full suite is verified. Firefox and WebKit (Playwright 1.63.0): the view isolation, CSP, HTML bridge, and direct URL tests (`pnpm test:e2e:cross`) are verified. Other UI interactions in Firefox and WebKit (search, answer panel, narrow screens, a list of 1,000 documents) are not verified |
+| Linux and macOS on CI (GitHub Actions `ubuntu-latest` and `macos-latest`, Node.js 24.22.3) | Verified (format, lint, typecheck, unit, build, pack, e2e; `.github/workflows/ci.yml`) |
+| Windows on CI (`windows-latest`, Node.js 24.22.3) | Verified: build and pack smoke (install, both bins, IPC, starting and stopping the daemon, JSON output, the UI and workers). The unit and e2e tests are not run on Windows |
+| Browsers | Chromium (Playwright's Chrome Headless Shell): the full suite is verified. Firefox and WebKit (Playwright 1.63.0): the view isolation, CSP, HTML bridge, and direct URL tests (`pnpm test:e2e:cross`) are verified; bridge tests whose steps do not depend on the browser run only on Chromium. Other UI interactions in Firefox and WebKit (search, answer panel, narrow screens, a list of 1,000 documents) are not verified |
 | PDF export | macOS (development machine): verified with Google Chrome 154 and Microsoft Edge 154. Linux on CI: verified with the runner's Google Chrome (e2e). Windows: printing with a real browser is not verified (the pack smoke test checks rendering the print document) |
 
 More details: [docs/performance.md](docs/performance.md) (measurements), [docs/architecture.md](docs/architecture.md) and [docs/security-model.md](docs/security-model.md) (design). Development records (in Japanese): [docs/implementation-status.md](docs/implementation-status.md), [docs/dependency-validation.md](docs/dependency-validation.md), and [docs/adr/](docs/adr/).

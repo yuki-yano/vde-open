@@ -18,7 +18,6 @@ let service: DocumentService;
 let events: DocumentEvent[];
 // Whether the reference scan fails with a timeout. 'css' makes only the CSS scan fail while the document scan succeeds.
 let scanFails: boolean | 'css';
-let scans: string[];
 // Called during the scan. Used to control ordering.
 let beforeScan: (kind: string) => Promise<void>;
 
@@ -27,14 +26,12 @@ beforeEach(async () => {
   store = await StateStore.open({ root: join(base, 'home'), fs: nodeStoreFs });
   events = [];
   scanFails = false;
-  scans = [];
   beforeScan = () => Promise.resolve();
   service = new DocumentService({
     store,
     cursors: createCursorCodec(randomBytes(32)),
     emit: (event) => events.push(event),
     scan: async (kind, text) => {
-      scans.push(kind);
       // Whether it fails is decided when the scan starts.
       const fails = scanFails === true || (scanFails === 'css' && kind === 'css');
       await beforeScan(kind);
@@ -171,7 +168,7 @@ describe('when the reference scan does not finish', () => {
   });
 
   it('when only the CSS scan fails, tracked files and the comparison state stay consistent', async () => {
-    const html = write('site/index.html', '<link rel="stylesheet" href="s.css"><p>Body</p>');
+    write('site/index.html', '<link rel="stylesheet" href="s.css"><p>Body</p>');
     write('site/s.css', '@import "t.css"; .a{color:red}');
     write('site/t.css', '.b{color:blue}');
     scanFails = 'css';
@@ -182,29 +179,6 @@ describe('when the reference scan does not finish', () => {
     expect(current(documentId)).toMatchObject({ assets: [], assetScan: 'failed' });
     expect(service.trackedFiles(documentId)).toEqual([]);
     expect(service.readSignature(documentId)).not.toContain('|');
-
-    // The periodic watch check does not re-read unless the file changed.
-    const { createWatchService } = await import('../watch/watch-service.ts');
-    const watcher = createWatchService({
-      documents: service,
-      debounceMs: 10,
-      fileCheckIntervalMs: 30,
-    });
-    try {
-      watcher.sync();
-      const before = scans.length;
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      expect(scans.length).toBe(before);
-      // A file change triggers a re-read.
-      writeFileSync(html, '<link rel="stylesheet" href="s.css"><p>Body 2</p>');
-      const deadline = Date.now() + 5000;
-      while (scans.length === before && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 30));
-      }
-      expect(scans.length).toBeGreaterThan(before);
-    } finally {
-      await watcher.close();
-    }
   });
 
   it('concurrent stdin opens with the same key do not replace fully scanned assets by a failed scan result', async () => {
@@ -261,5 +235,25 @@ describe('when the reference scan does not finish', () => {
       details: { reason: 'asset-scan-failed' },
     });
     expect(current(documentId)).toEqual(before);
+  });
+});
+
+describe('assets of a stdin document', () => {
+  it('are read from local files only when an assets-root is given', async () => {
+    // Under the cwd, so falling back to the cwd as the root would read it.
+    write('img/a.png', 'png');
+    const params = {
+      cwd: base,
+      paths: [],
+      stdin: { content: '<img src="img/a.png">' },
+      format: 'html' as const,
+      key: 'k',
+    };
+    const documentId = (await service.open(params)).data.documents[0]?.documentId as string;
+    expect(current(documentId).assets).toEqual([]);
+
+    const withRoot = await service.open({ ...params, assetsRoot: '.' });
+    expect(withRoot.data.documents[0]?.documentId).toBe(documentId);
+    expect(current(documentId).assets).toEqual(['img/a.png']);
   });
 });

@@ -68,6 +68,7 @@ const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(condition: () => boolean, timeoutMs = 3000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!condition() && Date.now() < deadline) await settle(10);
+  expect(condition()).toBe(true);
 }
 function input(): HTMLInputElement {
   const found = document.querySelector<HTMLInputElement>('input[aria-label="Search query"]');

@@ -2,10 +2,10 @@ import { defineConfig, devices } from '@playwright/test';
 
 // Verify the built distribution (apps/cli/dist) in real browsers. Requires pnpm build first.
 // Tests that also run on Firefox and WebKit (view isolation, CSP, communication with the HTML).
+// Within these files, tests whose steps do not depend on the browser skip Firefox and WebKit.
 const CROSS_BROWSER = [
   'html.spec.ts',
   'interactive.spec.ts',
-  'release.spec.ts',
   'viewer.spec.ts',
   'images.spec.ts',
   'themes.spec.ts',

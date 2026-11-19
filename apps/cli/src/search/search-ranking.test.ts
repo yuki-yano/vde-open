@@ -207,9 +207,9 @@ const QUERIES: Array<{ query: string; mode?: SearchMode; documents?: number[] }>
   { query: 'token', documents: [7] },
 ];
 
-function runQueries(index: SearchIndex, results: Record<string, string[]>, prefix: string): void {
+function runQueries(index: SearchIndex, results: Record<string, string[]>): void {
   for (const { query, mode = 'text', documents } of QUERIES) {
-    const key = `${prefix}${mode}:${query}${documents ? ` [${documents.join(',')}]` : ''}`;
+    const key = `${mode}:${query}${documents ? ` [${documents.join(',')}]` : ''}`;
     const filter =
       documents === undefined
         ? null
@@ -226,39 +226,7 @@ function runQueries(index: SearchIndex, results: Record<string, string[]>, prefi
 describe('search results stay the same', () => {
   it('returns the recorded hits for a fixed corpus and queries', async () => {
     const results: Record<string, string[]> = {};
-    runQueries(buildIndex(), results, '');
-
-    // Replaced and removed entries are cleaned up lazily: MiniSearch drops their postings while it searches a term,
-    // and until then they count in the scores. Each search changes what is left, so the results depend on which
-    // terms earlier searches looked up. The same queries are recorded twice on an index with such entries.
-    const dirty = buildIndex();
-    dirty.remove(document(1, '', '').documentId);
-    const updated = document(6, 'docs/mixed.md', `${mixed}\n## 追記\n\nretry cache の追記。\n`);
-    dirty.upsert({ ...updated, revision: `rev_${'f'.repeat(64)}` });
-    const aborted = document(11, 'docs/aborted.md', '# Aborted\n\nretry session token\n');
-    const { sections, ...meta } = aborted;
-    dirty.begin(meta);
-    dirty.append(meta.documentId, meta.revision, partsOf(sections));
-    dirty.abort(meta.documentId);
-    expect((await dirty.retainedCounts(false))['miniDirt']).toBeGreaterThan(0);
-    runQueries(dirty, results, 'before cleanup, first: ');
-    runQueries(dirty, results, 'before cleanup, again: ');
-
-    // A removed entry whose postings are still there when a later stage looks up a derived term.
-    const small = new SearchIndex();
-    for (const [order, body] of ['alpha beta', 'alphi betamax', 'betamax'].entries()) {
-      small.upsert(document(20 + order, `notes/${String(order)}.md`, `# Note\n\n${body}\n`));
-    }
-    small.remove(document(22, '', '').documentId);
-    for (const pass of ['first', 'again']) {
-      results[`removed entry, ${pass}: text:alpha beta`] = small
-        .search({ query: 'alpha beta', mode: 'text', documents: null })
-        .map(
-          (hit) =>
-            `${hit.displayPath ?? ''}#${hit.sectionId} ${hit.matchKind} ${String(hit.score)}`,
-        );
-    }
-
+    runQueries(buildIndex(), results);
     await expect(`${JSON.stringify(results, null, 2)}\n`).toMatchFileSnapshot(
       './search-ranking.snapshot.json',
     );

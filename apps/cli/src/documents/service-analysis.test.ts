@@ -72,5 +72,13 @@ describe('DOC-010 late analysis result of an old revision', () => {
     expect(pinned.data.outline?.map((item) => item.title)).toEqual(['Old heading']);
     // The same revision was not analyzed again.
     expect(analyzed).toHaveLength(2);
+
+    // The old revision's source is its own, and a revision no longer retained is never replaced by the current one.
+    expect((await service.read({ documentId, revision: oldRevision })).data.content).toBe(
+      '# Old heading\n',
+    );
+    await expect(
+      service.read({ documentId, revision: `rev_${'0'.repeat(64)}` }),
+    ).rejects.toMatchObject({ code: 'E_REVISION_UNAVAILABLE' });
   });
 });

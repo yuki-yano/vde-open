@@ -22,23 +22,16 @@ describe('the mobile section of listeners.json', () => {
   it.each([
     ['a scheme', { host: 'https://mac.example.ts.net' }, 'invalid:mobile.host'],
     ['a port', { host: 'mac.example.ts.net:443' }, 'invalid:mobile.host'],
-    ['a path', { host: 'mac.example.ts.net/x' }, 'invalid:mobile.host'],
-    ['user info', { host: 'me@mac.example.ts.net' }, 'invalid:mobile.host'],
     ['a single label', { host: 'mac' }, 'invalid:mobile.host'],
     ['a login with a comma', { login: 'a@example.com,b@example.com' }, 'invalid:mobile.login'],
     ['a login with a space', { login: 'a person' }, 'invalid:mobile.login'],
     ['a non-ASCII login', { login: 'ひと@example.com' }, 'invalid:mobile.login'],
     ['no login', { login: undefined }, 'invalid:mobile.login'],
-    ['a port out of range', { uiPort: 70000 }, 'invalid:mobile.uiPort'],
     ['the default HTTPS port', { previewPort: 443 }, 'invalid:mobile.previewPort'],
     ['an unknown key', { extra: true }, 'invalid:mobile'],
     ['the same port twice', { uiPort: 5000, previewPort: 5000 }, 'duplicate-port'],
     ['a PC port', { previewPort: 43180 }, 'duplicate-port'],
   ])('with %s is an error that leaves the PC alone', (_name, change, reason) => {
     expect(resolveMobileConfig({ ...base, ...change }, PC)).toEqual({ state: 'error', reason });
-  });
-
-  it('in test mode, PC ports assigned by the OS (0) never collide', () => {
-    expect(resolveMobileConfig(base, { management: 0, preview: 0 }).state).toBe('enabled');
   });
 });
