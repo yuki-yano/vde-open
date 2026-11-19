@@ -149,6 +149,8 @@ async function showDemo(name = 'g1'): Promise<void> {
   valid.add(name);
   grants.at(-1)?.resolve(grantOf(name, grants.at(-1)?.viewEpoch));
   await until(() => frame() !== null);
+  // The connection's revalidation and the check of this view are done, so input reaches the demo.
+  await until(() => !paused());
 }
 
 describe('the list', () => {
@@ -270,7 +272,6 @@ function deferred<T>() {
 describe('review follow-ups', () => {
   it('a return (pageshow) stops input until the latest list and the grant check both succeed; a failed list keeps it stopped', async () => {
     await showDemo();
-    await until(() => !paused());
     const list = deferred<Awaited<ReturnType<MobileApi['documents']>>>();
     const check = deferred<boolean>();
     api.documents = () => list.promise;
@@ -437,6 +438,11 @@ describe('review follow-ups', () => {
     ];
     api.content = () => Promise.resolve('# A\n\n[Bへ](b.md)\n');
     api.resolveLink = () => Promise.resolve({ status: 'open', documentId: id(2) });
+    const checks: string[] = [];
+    api.check = (grant) => {
+      checks.push(grant);
+      return Promise.resolve(valid.has(grant));
+    };
     api.grant = (document) => {
       const name = `link-${document.documentId.slice(-1)}-${String(grants.length)}`;
       grants.push({
@@ -458,6 +464,8 @@ describe('review follow-ups', () => {
     await until(() => rows().length === 2);
     (container.querySelector('main nav li button') as HTMLButtonElement).click();
     await until(() => container.querySelector('button[data-local-link]') !== null);
+    // The view's effects have run (its check went out), so the answer to the link applies to it.
+    await until(() => checks.length > 0);
     (container.querySelector('button[data-local-link]') as HTMLButtonElement).click();
     await until(() => new URLSearchParams(window.location.search).get('document') === id(2));
     (
