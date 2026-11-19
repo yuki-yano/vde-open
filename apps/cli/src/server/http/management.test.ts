@@ -109,7 +109,12 @@ async function connect(heartbeatMs: number, stallMs?: number): Promise<Fixture> 
 // The status of a request with any Host, Origin, or Sec-Fetch-Site (fetch cannot set Host).
 function send(
   path: string,
-  options: { method?: string; headers?: Record<string, string>; body?: string } = {},
+  options: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    chunked?: boolean;
+  } = {},
 ): Promise<number> {
   return new Promise((resolve, reject) => {
     const sent = request(
@@ -126,8 +131,9 @@ function send(
       },
     );
     sent.on('error', reject);
-    // Sent whole, so it carries Content-Length, which the JSON-only check reads.
-    sent.end(options.body);
+    // Writing before end sends the body chunked, without Content-Length.
+    if (options.chunked === true) sent.write(options.body ?? '');
+    sent.end(options.chunked === true ? undefined : options.body);
   });
 }
 
@@ -151,11 +157,18 @@ describe('SEC-002 Origin and Host checks', () => {
     expect(await send('/', { headers: { Host: 'attacker.example' } })).toBe(401);
 
     // A form or a non-browser client sends no Origin; a form cannot send the JSON media type.
-    const release = (headers: Record<string, string>) =>
-      send('/_/api/v1/render-grants/release', { method: 'POST', headers, body: '{"grants":[]}' });
+    const release = (headers: Record<string, string>, chunked = false) =>
+      send('/_/api/v1/render-grants/release', {
+        method: 'POST',
+        headers,
+        body: '{"grants":[]}',
+        chunked,
+      });
     expect(await release({ 'Content-Type': 'application/json' })).toBe(401);
     expect(await release({ Origin: origin, 'Content-Type': 'text/plain' })).toBe(400);
+    expect(await release({ Origin: origin, 'Content-Type': 'text/plain' }, true)).toBe(400);
     expect(await release({ Origin: origin, 'Content-Type': 'application/json' })).toBe(200);
+    expect(await release({ Origin: origin, 'Content-Type': 'application/json' }, true)).toBe(200);
     await store.close();
   });
 });

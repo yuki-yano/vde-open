@@ -278,11 +278,11 @@ export async function startManagementServer(
           new VdeError('E_UNAUTHORIZED', 'A request without Origin cannot make changes.'),
         );
       }
-      const contentLength = Number(c.req.header('content-length') ?? '0');
-      if (
-        contentLength > 0 &&
-        !(c.req.header('content-type') ?? '').startsWith('application/json')
-      ) {
+      // A chunked body has no Content-Length.
+      const hasBody =
+        Number(c.req.header('content-length') ?? '0') > 0 ||
+        c.req.header('transfer-encoding') !== undefined;
+      if (hasBody && !(c.req.header('content-type') ?? '').startsWith('application/json')) {
         return fail(c, new VdeError('E_INVALID_ARGUMENT', 'The body must be sent as JSON.'));
       }
     }
